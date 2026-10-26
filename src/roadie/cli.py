@@ -6,6 +6,7 @@ from typing import Annotated
 from cyclopts import App, Parameter
 
 from wright.graph import Result, WrightError, load
+from wright.run import execute
 
 app = App(help=__doc__, version_flags=())
 
@@ -29,10 +30,14 @@ def run(
         steps = load(directory).plan(result)
     except WrightError as error:
         raise SystemExit(str(error)) from error
-    if not dry_run:
-        raise SystemExit("Wright cannot run steps yet; pass --dry to print them")
-    for step in steps:
-        print(f"{step.name} = {call(step)}" if step.name else call(step))
+    if dry_run:
+        for step in steps:
+            print(f"{step.name} = {call(step)}" if step.name else call(step))
+        return
+    try:
+        execute(steps)
+    except WrightError as error:
+        raise SystemExit(str(error)) from error
 
 
 def call(result: Result) -> str:

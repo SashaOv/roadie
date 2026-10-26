@@ -7,7 +7,7 @@ the module's variables, so reassigning a name does not move its result.
 
 import itertools
 import runpy
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -27,6 +27,7 @@ class WrightError(Exception):
 class Result:
     step: str
     inputs: Mapping[str, object]
+    implementation: Callable[..., object]
     serial: int = field(default_factory=lambda: next(_serials), init=False)
     name: str | None = field(default=None, init=False)
 
@@ -48,6 +49,10 @@ class Service(Result):
 
 class Verdict(Result):
     pass
+
+
+# Set for the step whose implementation is running, so it can name its output.
+current_result: ContextVar[Result | None] = ContextVar("wright_current_result", default=None)
 
 
 @dataclass(frozen=True)

@@ -87,11 +87,6 @@ def test_dry_run_prints_the_steps_in_dependency_order(
     ]
 
 
-def test_run_without_dry_fails_and_names_the_flag() -> None:
-    with pytest.raises(SystemExit, match="pass --dry"):
-        run_cli([str(JAMMER), "fuzzed"])
-
-
 def test_cli_reports_an_unknown_result_with_the_known_ones() -> None:
     with pytest.raises(
         SystemExit,
