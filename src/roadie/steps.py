@@ -1,9 +1,21 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+from wright.errors import WrightError
 from wright.run import Run
-from wright.step import Binary
+from wright.step import Binary, Step
+
+
+class Group(Step[tuple[object, ...]]):
+    def __init__(self, *steps: Step[Any]) -> None:
+        if any(not isinstance(step, Step) for step in steps):
+            raise WrightError("Group takes only steps")
+        self.steps = steps
+
+    def build(self, run: Run) -> tuple[object, ...]:
+        return tuple(run[step] for step in self.steps)
 
 
 @dataclass(frozen=True)

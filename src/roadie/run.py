@@ -25,7 +25,7 @@ class Run:
         return cast(T, self._values[id(step)])
 
     def artifact(self, step: Step[Any], suffix: str) -> Path:
-        stem = (step.name or type(step).__name__).replace(":", "_").replace("/", "_")
+        stem = (step.name or f"{type(step).__name__}_{step.serial}").replace(":", "_").replace("/", "_")
         destination = repository_root() / "target" / "wright" / f"{stem}{suffix}"
         destination.parent.mkdir(parents=True, exist_ok=True)
         return destination

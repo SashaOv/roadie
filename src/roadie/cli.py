@@ -8,6 +8,7 @@ from cyclopts import App, Parameter
 from wright.graph import WrightError, load
 from wright.run import execute
 from wright.step import Step
+from wright.steps import Group
 
 app = App(help=__doc__, version_flags=())
 
@@ -43,11 +44,18 @@ def run(
 
 
 def call(result: Step[Any]) -> str:
-    arguments = ", ".join(
-        reference(value) if isinstance(value, Step) else repr(value)
-        for value in result.attributes().values()
-    )
+    values = result.steps if isinstance(result, Group) else result.attributes().values()
+    arguments = ", ".join(argument(value) for value in values)
     return f"{type(result).__name__}({arguments})"
+
+
+def argument(value: object) -> str:
+    if isinstance(value, Step):
+        return reference(value)
+    if isinstance(value, tuple):
+        items = ", ".join(argument(item) for item in value)
+        return f"({items}{',' if len(value) == 1 else ''})"
+    return repr(value)
 
 
 def reference(result: Step[Any]) -> str:

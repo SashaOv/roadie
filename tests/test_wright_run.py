@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from forge.environment import repository_root
 from jammer_build.steps import OpenApi
-from wright import CargoPackage, Service, Step, WrightError, cli
+from wright import CargoPackage, Group, Service, Step, WrightError, cli
 from wright import TestFailure as Failure
 from wright import TestResults as Results
 from wright import Tests as Checks
@@ -372,3 +372,20 @@ def test_started_commands_run_in_the_steps_base_directory(tmp_path: Path, monkey
 
     execute([Server()])
     assert marker.read_text() == str(tmp_path.resolve())
+
+
+def test_unnamed_steps_of_one_class_get_distinct_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("wright.run.repository_root", lambda: tmp_path)
+    first, second = Value("first"), Value("second")
+    run = Run()
+    one, two = run.artifact(first, ".txt"), run.artifact(second, ".txt")
+    assert one != two
+    assert one.name == f"Value_{first.serial}.txt"
+    assert two.name == f"Value_{second.serial}.txt"
+
+
+def test_group_value_contains_its_steps_values() -> None:
+    first, second = Value("first"), Value("second")
+    group = Group(first, second)
+    assert execute([first, second, group]) == ("first", "second")
+    assert execute([Group()]) == ()

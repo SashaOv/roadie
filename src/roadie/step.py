@@ -42,9 +42,11 @@ class Step[T](ABC):
         return (self.base_dir / path).resolve()
 
     def dependencies(self) -> Iterator["Step[Any]"]:
-        return (
-            value for value in self.attributes().values() if isinstance(value, Step)
-        )
+        for value in self.attributes().values():
+            if isinstance(value, Step):
+                yield value
+            elif isinstance(value, tuple):
+                yield from (item for item in value if isinstance(item, Step))
 
     @abstractmethod
     def build(self, run: "Run") -> T:

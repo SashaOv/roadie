@@ -244,3 +244,35 @@ def test_config_rejects_a_non_path_base_directory(value: str, tmp_path: Path) ->
     write_build(tmp_path, f'config(base_dir={value})\nserver = RustBinary(CargoPackage("server"))\n')
     with pytest.raises(WrightError, match="base_dir must be a directory path"):
         load(tmp_path)
+
+
+def test_tuple_attributes_declare_dependencies_and_dry_run_prints_them(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    write_build(tmp_path, '''from dataclasses import dataclass
+from wright.run import Run
+
+@dataclass(eq=False)
+class Combined(Step[None]):
+    inputs: tuple[Step, ...]
+    def build(self, run: Run) -> None:
+        pass
+
+first = RustBinary(CargoPackage("first"))
+second = RustBinary(CargoPackage("second"))
+combined = Combined((first, second))
+''')
+    assert plan_names(tmp_path) == ["first", "second", "combined"]
+    run_cli(["--dry", str(tmp_path)])
+    assert capsys.readouterr().out.splitlines()[-1] == "combined = Combined((first, second))"
+
+
+def test_group_plans_and_prints_steps_as_variadic_arguments(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    write_build(tmp_path, 'first = RustBinary(CargoPackage("first"))\nsecond = RustBinary(CargoPackage("second"))\nall_steps = Group(first, second)\n')
+    assert plan_names(tmp_path) == ["first", "second", "all_steps"]
+    run_cli(["--dry", str(tmp_path)])
+    assert capsys.readouterr().out.splitlines()[-1] == "all_steps = Group(first, second)"
+
+
+def test_group_rejects_a_non_step(tmp_path: Path) -> None:
+    write_build(tmp_path, 'result = Group(42)\n')
+    with pytest.raises(WrightError, match="Group.*steps"):
+        load(tmp_path)
