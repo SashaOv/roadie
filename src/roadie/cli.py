@@ -1,12 +1,13 @@
 """Run a result of a Wright build file and the steps it depends on."""
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from cyclopts import App, Parameter
 
-from wright.graph import Result, WrightError, load
+from wright.graph import WrightError, load
 from wright.run import execute
+from wright.step import Step
 
 app = App(help=__doc__, version_flags=())
 
@@ -40,15 +41,15 @@ def run(
         raise SystemExit(str(error)) from error
 
 
-def call(result: Result) -> str:
+def call(result: Step[Any]) -> str:
     arguments = ", ".join(
-        reference(value) if isinstance(value, Result) else repr(value)
-        for value in result.inputs.values()
+        reference(value) if isinstance(value, Step) else repr(value)
+        for value in result.attributes().values()
     )
-    return f"{result.step}({arguments})"
+    return f"{type(result).__name__}({arguments})"
 
 
-def reference(result: Result) -> str:
+def reference(result: Step[Any]) -> str:
     return result.name or call(result)
 
 

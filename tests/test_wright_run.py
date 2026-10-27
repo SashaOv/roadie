@@ -2,57 +2,266 @@ import os
 import signal
 import subprocess
 import sys
-import threading
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from forge.build_script import dev_server_environment
 from forge.environment import repository_root
-from wright import cli, steps
-from wright.steps import CargoPackage, DevDeploymentEnvironment, RunningService
+from wright import CargoPackage, Service, Step, WrightError, cli
+from wright.errors import StepFailed
+from wright.graph import Graph
+from wright.process import RunningProcess, available_port
+from wright.run import Run, execute
+from wright.steps import OpenApi, RustBinary
 
 FIXTURES = Path(__file__).parent / "fixtures"
-JAMMER = repository_root() / "jammer"
 
 
-def write_build(directory: Path, source: str) -> Path:
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / "build.py").write_text(f"from wright import *\n\n{source}")
-    return directory
+@dataclass(eq=False)
+class Value(Step[str]):
+    value: str
+
+    def build(self, run: Run) -> str:
+        return self.value
 
 
-def run_cli(arguments: list[str]) -> None:
-    command, bound, _ = cli.app.parse_args(arguments)
-    command(*bound.args, **bound.kwargs)
+def test_steps_build_in_plan_order_with_dependency_values(tmp_path: Path) -> None:
+    events: list[object] = []
+
+    @dataclass
+    class Consumer(Step[str]):
+        source: Step[str]
+
+        def build(self, run: Run) -> str:
+            events.append(run[self.source])
+            return run[self.source] + "!"
+
+    first = Value("first")
+    second = Consumer(first)
+    third = Consumer(second)
+    graph = Graph(tmp_path / "build.py", {"last": third})
+    assert execute(graph.plan()) == "first!!"
+    assert events == ["first", "first!"]
 
 
-def listening_server(path: Path) -> None:
-    path.write_text(
-        f"#!{sys.executable}\n"
-        "import os\n"
-        "import socket\n"
-        "import time\n"
-        "port = int(os.environ['PORT'])\n"
-        "sock = socket.socket()\n"
-        "sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
-        "sock.bind(('127.0.0.1', port))\n"
-        "sock.listen(1)\n"
-        "open(os.environ['STORAGE_ROOT'] + '/listening', 'w').close()\n"
-        "time.sleep(120)\n"
+@pytest.mark.parametrize("ending", ["success", "failure", "ctrl-c", "sigterm"])
+def test_teardown_after_last_consumer_and_on_failure_or_interrupt(ending: str) -> None:
+    if ending == "sigterm" and os.name != "posix":
+        pytest.skip("SIGTERM unwinding is POSIX-only")
+    events: list[str] = []
+
+    @dataclass(eq=False)
+    class Resource(Step[str]):
+        label: str
+
+        def build(self, run: Run) -> str:
+            events.append("build " + self.label)
+            return self.label
+
+        def teardown(self, value: str) -> None:
+            events.append("stop " + value)
+
+    @dataclass(eq=False)
+    class Consumer(Step[str]):
+        resource: Step[str]
+
+        def build(self, run: Run) -> str:
+            events.append("consume " + run[self.resource])
+            if ending == "failure":
+                raise RuntimeError("rejected")
+            if ending == "ctrl-c":
+                raise KeyboardInterrupt
+            if ending == "sigterm":
+                os.kill(os.getpid(), signal.SIGTERM)
+            return "consumed"
+
+    class Later(Step[None]):
+        def build(self, run: Run) -> None:
+            events.append("later")
+
+    held = Resource("held")
+    transient = Resource("service")
+    consumer = Consumer(transient)
+    consumer.name = "consumer"
+
+    # The held resource also belongs to the final step's dependencies.
+    @dataclass(eq=False)
+    class Last(Step[None]):
+        resource: Step[str]
+
+        def build(self, run: Run) -> None:
+            events.append("last")
+
+    steps = [held, transient, consumer, Later(), Last(held)]
+    if ending == "failure":
+        with pytest.raises(StepFailed, match="consumer failed: rejected"):
+            execute(steps)
+    elif ending in ("ctrl-c", "sigterm"):
+        with pytest.raises(KeyboardInterrupt):
+            execute(steps)
+    else:
+        execute(steps)
+    assert events[:3] == ["build held", "build service", "consume service"]
+    assert events[3:] == (
+        ["stop service", "later", "last", "stop held"]
+        if ending == "success"
+        else ["stop service", "stop held"]
     )
-    path.chmod(0o755)
 
 
-def contract_printer(path: Path, text: str) -> None:
-    path.write_text(f"#!{sys.executable}\nimport sys\nsys.stdout.write({text!r})\n")
-    path.chmod(0o755)
+@pytest.mark.parametrize("ending", ["success", "failure", "interrupt"])
+def test_service_process_is_stopped_after_run(ending: str) -> None:
+    started: list[RunningProcess] = []
+
+    class Server(Service):
+        def build(self, run: Run) -> RunningProcess:
+            port = available_port()
+            server = self._start_cmd(
+                sys.executable,
+                "-c",
+                (
+                    "import socket; s = socket.socket(); "
+                    f"s.bind(('127.0.0.1', {port})); s.listen(); s.accept()"
+                ),
+                port=port,
+                timeout=5,
+            )
+            started.append(server)
+            return server
+
+    @dataclass(eq=False)
+    class Consumer(Step[None]):
+        server: Service
+
+        def build(self, run: Run) -> None:
+            assert run[self.server].process.poll() is None
+            if ending == "failure":
+                raise RuntimeError("failed")
+            if ending == "interrupt":
+                raise KeyboardInterrupt
+
+    server = Server()
+    try:
+        if ending == "success":
+            execute([server, Consumer(server)])
+        else:
+            with pytest.raises(
+                KeyboardInterrupt if ending == "interrupt" else StepFailed
+            ):
+                execute([server, Consumer(server)])
+        assert started[0].process.poll() is not None
+    finally:
+        for child in started:
+            child.stop()
 
 
-class Completed:
-    def __init__(self, returncode: int, stdout: str = "", stderr: str = "") -> None:
-        self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = stderr
+def test_teardown_failure_is_visible_and_does_not_skip_other_cleanup() -> None:
+    stopped: list[str] = []
+
+    @dataclass(eq=False)
+    class Resource(Value):
+        def teardown(self, value: str) -> None:
+            stopped.append(value)
+            if value == "broken":
+                raise RuntimeError("cannot stop")
+
+    @dataclass(eq=False)
+    class Consumer(Step[None]):
+        one: Step[str]
+        two: Step[str]
+
+        def build(self, run: Run) -> None:
+            pass
+
+    one, two = Resource("one"), Resource("broken")
+    two.name = "broken"
+    with pytest.raises(StepFailed, match="broken.*cannot stop"):
+        execute([one, two, Consumer(one, two)])
+    assert stopped == ["broken", "one"]
+
+
+def test_failure_keeps_its_name_when_teardown_also_fails() -> None:
+    class Broken(Value):
+        def teardown(self, value: str) -> None:
+            raise RuntimeError("stop broke")
+
+    @dataclass(eq=False)
+    class Fails(Step[None]):
+        resource: Step[str]
+
+        def build(self, run: Run) -> None:
+            raise RuntimeError("rejected")
+
+    resource = Broken("resource")
+    step = Fails(resource)
+    step.name = "consumer"
+    with pytest.raises(StepFailed, match="consumer failed: rejected"):
+        execute([resource, step])
+
+
+def test_cmd_failure_names_step_command_exit_status_and_stderr_tail() -> None:
+    class Command(Step[None]):
+        def build(self, run: Run) -> None:
+            self._cmd(
+                sys.executable,
+                "-c",
+                "import sys; sys.stderr.write('x' * 3000 + 'reason'); sys.exit(7)",
+            )
+
+    step = Command()
+    step.name = "compile"
+    with pytest.raises(StepFailed) as error:
+        execute([step])
+    message = str(error.value)
+    assert message.startswith("compile failed:")
+    assert sys.executable in message
+    assert "exited with status 7" in message
+    assert message.endswith("reason")
+    assert "x" * 2001 not in message
+
+
+def test_start_cmd_reports_early_exit() -> None:
+    class Server(Service):
+        def build(self, run: Run) -> RunningProcess:
+            return self._start_cmd(
+                sys.executable,
+                "-c",
+                "raise SystemExit(9)",
+                port=available_port(),
+                timeout=5,
+            )
+
+    server = Server()
+    server.name = "server"
+    with pytest.raises(
+        StepFailed, match="server.*exited with status 9 before becoming ready"
+    ):
+        execute([server])
+
+
+def test_run_artifact_uses_step_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("wright.run.repository_root", lambda: tmp_path)
+    step = Value("value")
+    step.name = "jammer:api"
+    path = Run().artifact(step, ".yaml")
+    assert path == tmp_path / "target" / "wright" / "jammer_api.yaml"
+    assert path.parent.is_dir()
+
+
+def test_run_releases_values_at_end() -> None:
+    runs: list[Run] = []
+
+    class Capture(Value):
+        def build(self, run: Run) -> str:
+            runs.append(run)
+            return super().build(run)
+
+    step = Capture("value")
+    execute([step])
+    with pytest.raises(WrightError, match="not available"):
+        runs[0][step]
 
 
 @pytest.mark.parametrize(
@@ -70,401 +279,45 @@ class Completed:
         ),
     ],
 )
-def test_rust_binary_picks_the_executable_from_cargo_json(
-    package: str,
-    fixture: str,
-    executable: str,
-    monkeypatch: pytest.MonkeyPatch,
+def test_rust_binary_picks_executable_from_captured_cargo_json(
+    package: str, fixture: str, executable: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Captured from cargo 1.96.1 `cargo build --locked -p <name> --message-format=json`.
+    captured: list[tuple[str, ...]] = []
 
-    The jammer_server sample is a workspace package whose bin is named
-    jammer-server, as in jammer/server/Cargo.toml. The sample package uses the
-    directory-named package id. Libraries and build scripts are in both logs.
-    """
-    sample = (FIXTURES / fixture).read_text()
-    seen: dict[str, object] = {}
+    def command(
+        self: Step[object], *args: str, **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        captured.append(args)
+        return subprocess.CompletedProcess(
+            args, 0, (FIXTURES / fixture).read_text(), ""
+        )
 
-    def fake_run(command: tuple[str, ...], **kwargs: object) -> Completed:
-        seen["command"] = command
-        seen["cwd"] = kwargs.get("cwd")
-        return Completed(0, stdout=sample)
-
-    monkeypatch.setattr("wright.steps.subprocess.run", fake_run)
-    from wright.steps import build_rust_binary
-
-    assert build_rust_binary(CargoPackage(package)) == Path(executable)
-    assert seen["command"] == (
-        "cargo",
-        "build",
-        "--locked",
-        "-p",
-        package,
-        "--message-format=json",
-    )
-    assert seen["cwd"] == repository_root()
-
-
-def test_rust_binary_does_not_invent_an_executable_from_other_artifacts(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    sample = (FIXTURES / "cargo-build-jammer-server.jsonl").read_text()
-    without_bin = "\n".join(
-        line for line in sample.splitlines() if '"kind":["bin"]' not in line
-    )
-
-    def fake_run(command: tuple[str, ...], **kwargs: object) -> Completed:
-        return Completed(0, stdout=without_bin)
-
-    monkeypatch.setattr("wright.steps.subprocess.run", fake_run)
-    from wright.steps import build_rust_binary
-
-    with pytest.raises(RuntimeError, match="jammer_server produced no executable"):
-        build_rust_binary(CargoPackage("jammer_server"))
-
-
-def test_steps_run_in_plan_order_with_earlier_results_as_inputs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    binary = Path("/usr/bin/true")
-    contract = Path("/tmp/contract.yaml")
-    calls: list[object] = []
-
-    class Handle:
-        def stop(self) -> None:
-            calls.append("stop")
-
-    handle = Handle()
-    monkeypatch.setattr(
-        "wright.steps.build_rust_binary",
-        lambda package: calls.append(("rust_binary", package)) or binary,
-    )
-    monkeypatch.setattr(
-        "wright.steps.generate_openapi",
-        lambda server: calls.append(("openapi", server)) or contract,
-    )
-    monkeypatch.setattr(
-        "wright.steps.start_service",
-        lambda binary, environment: calls.append(("deploy", binary, environment))
-        or handle,
-    )
-    monkeypatch.setattr(
-        "wright.steps.fuzz_contract",
-        lambda api, service: calls.append(("contract_fuzz", api, service)),
-    )
-    write_build(
-        tmp_path,
-        'server = rust_binary(CargoPackage("jammer_server"))\n'
-        "api = openapi(server)\n"
-        "deployed = deploy(server, DevDeploymentEnvironment())\n"
-        "fuzzed = contract_fuzz(api, deployed)\n",
-    )
-
-    run_cli([str(tmp_path), "fuzzed"])
-
-    assert calls == [
-        ("rust_binary", CargoPackage("jammer_server")),
-        ("openapi", binary),
-        ("deploy", binary, DevDeploymentEnvironment()),
-        ("contract_fuzz", contract, handle),
-        "stop",
+    monkeypatch.setattr(Step, "_cmd", command)
+    step = RustBinary(CargoPackage(package))
+    assert execute([step]) == Path(executable)
+    assert captured == [
+        ("cargo", "build", "--locked", "-p", package, "--message-format=json")
     ]
 
 
-def test_api_deploys_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[str] = []
-    monkeypatch.setattr(
-        "wright.steps.build_rust_binary",
-        lambda package: calls.append("rust_binary") or Path("/usr/bin/true"),
-    )
-    monkeypatch.setattr(
-        "wright.steps.generate_openapi",
-        lambda server: calls.append("openapi") or Path("/tmp/contract.yaml"),
-    )
-    monkeypatch.setattr(
-        "wright.steps.start_service",
-        lambda binary, environment: calls.append("deploy"),
-    )
-    monkeypatch.setattr(
-        "wright.steps.fuzz_contract",
-        lambda api, service: calls.append("contract_fuzz"),
-    )
-
-    run_cli([str(JAMMER), "api"])
-
-    assert calls == ["rust_binary", "openapi"]
-
-
-def test_a_failing_step_is_named_and_stops_the_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls: list[str] = []
-    monkeypatch.setattr(
-        "wright.steps.build_rust_binary",
-        lambda package: calls.append("rust_binary") or Path("/usr/bin/true"),
-    )
-
-    def fail_openapi(server: Path) -> Path:
-        calls.append("openapi")
-        raise RuntimeError("no contract")
-
-    monkeypatch.setattr("wright.steps.generate_openapi", fail_openapi)
-    monkeypatch.setattr(
-        "wright.steps.start_service",
-        lambda binary, environment: calls.append("deploy"),
-    )
-    write_build(
-        tmp_path,
-        'server = rust_binary(CargoPackage("jammer_server"))\n'
-        "api = openapi(server)\n"
-        "fuzzed = contract_fuzz(api, deploy(server, DevDeploymentEnvironment()))\n",
-    )
-
-    with pytest.raises(SystemExit, match="^api failed: no contract$") as raised:
-        run_cli([str(tmp_path)])
-
-    assert raised.value.code == "api failed: no contract"
-    assert calls == ["rust_binary", "openapi"]
-
-
-def test_a_failing_step_stays_named_when_stopping_the_service_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    class Handle:
-        def stop(self) -> None:
-            raise RuntimeError("stop broke")
-
-    monkeypatch.setattr(
-        "wright.steps.build_rust_binary", lambda package: Path("/usr/bin/true")
-    )
-    monkeypatch.setattr(
-        "wright.steps.generate_openapi", lambda server: Path("/tmp/contract.yaml")
-    )
-    monkeypatch.setattr(
-        "wright.steps.start_service", lambda binary, environment: Handle()
-    )
-
-    def fail(api: Path, service: object) -> None:
-        raise RuntimeError("rejected")
-
-    monkeypatch.setattr("wright.steps.fuzz_contract", fail)
-    write_build(
-        tmp_path,
-        'server = rust_binary(CargoPackage("jammer_server"))\n'
-        "api = openapi(server)\n"
-        "fuzzed = contract_fuzz(api, deploy(server, DevDeploymentEnvironment()))\n",
-    )
-
-    with pytest.raises(SystemExit, match="^fuzzed failed: rejected$"):
-        run_cli([str(tmp_path), "fuzzed"])
-
-
-def test_openapi_writes_the_binary_stdout_under_the_result_name(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    binary = tmp_path / "jammer-server"
-    contract_printer(binary, "openapi: 1\n")
-    monkeypatch.setattr("wright.steps.build_rust_binary", lambda package: binary)
-    monkeypatch.setattr("wright.steps.repository_root", lambda: tmp_path)
-    write_build(
-        tmp_path / "proj",
-        'server = rust_binary(CargoPackage("jammer_server"))\napi = openapi(server)\n',
-    )
-
-    run_cli([str(tmp_path / "proj"), "api"])
-
-    assert (tmp_path / "target" / "wright" / "api.yaml").read_text() == "openapi: 1\n"
-
-
-def test_deploy_serves_on_a_free_port_with_fresh_storage(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    storage = tmp_path / "storage"
-    monkeypatch.setattr(
-        "wright.steps.tempfile.mkdtemp", lambda prefix: storage.mkdir() or str(storage)
-    )
-    monkeypatch.setattr("wright.steps.available_port", lambda: 43210)
-    captured: dict[str, object] = {}
-
-    class Exited:
-        pid = 0
-
-        def poll(self) -> int:
-            return 0
-
-    def spawn(command: tuple[str, ...], **kwargs: object) -> Exited:
-        captured["command"] = command
-        captured["environment"] = kwargs["environment"]
-        return Exited()
-
-    def wait(process: Exited, *, port: int, timeout: float = 120) -> None:
-        captured["port"] = port
-
-    monkeypatch.setattr("wright.steps.spawn_server", spawn)
-    monkeypatch.setattr("wright.steps.wait_for_dev_server", wait)
-    from wright.steps import start_service
-
-    service = start_service(Path("/bin/jammer-server"), DevDeploymentEnvironment())
-    try:
-        assert captured["command"] == ("/bin/jammer-server", "serve")
-        assert captured["port"] == 43210
-        expected = dev_server_environment(
-            database_path=storage / "db" / "jammer.db",
-            storage_root=storage,
-            port=43210,
-        )
-        expected["VOLUME_CAPACITY_RATIO"] = "1"
-        assert captured["environment"] == expected
-        assert (storage / "db").is_dir()
-        assert service.url == "http://127.0.0.1:43210"
-    finally:
-        service.stop()
-
-    assert not storage.exists()
-
-
-def test_deploy_reports_a_server_that_exits_before_it_listens(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    storage = tmp_path / "storage"
-    monkeypatch.setattr(
-        "wright.steps.tempfile.mkdtemp", lambda prefix: storage.mkdir() or str(storage)
-    )
-    binary = tmp_path / "exits"
-    contract_printer(binary, "")
-    monkeypatch.setattr("wright.steps.build_rust_binary", lambda package: binary)
-    write_build(
-        tmp_path / "proj",
-        'server = rust_binary(CargoPackage("jammer_server"))\n'
-        "deployed = deploy(server, DevDeploymentEnvironment())\n",
-    )
-
-    with pytest.raises(
-        SystemExit,
-        match=(
-            r"^deployed failed: Jammer exited with status 0 before becoming ready$"
-        ),
-    ):
-        run_cli([str(tmp_path / "proj"), "deployed"])
-
-    assert not storage.exists()
-
-
-@pytest.mark.parametrize("ending", ["success", "failure", "interrupt"])
-def test_service_is_stopped_and_its_storage_removed(
-    ending: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    if ending == "interrupt" and os.name != "posix":
-        pytest.skip("signals are POSIX-only")
-    binary = tmp_path / "jammer-server"
-    listening_server(binary)
-    started: list[RunningService] = []
-    original_start = steps.start_service
-
-    def recording(binary: Path, environment: DevDeploymentEnvironment) -> RunningService:
-        service = original_start(binary, environment)
-        started.append(service)
-        return service
-
-    entered = threading.Event()
-    monkeypatch.setattr("wright.steps.build_rust_binary", lambda package: binary)
-    monkeypatch.setattr(
-        "wright.steps.generate_openapi", lambda server: Path("/tmp/contract.yaml")
-    )
-    monkeypatch.setattr("wright.steps.start_service", recording)
-
-    def succeed(api: Path, service: RunningService) -> None:
-        return None
-
-    def fail(api: Path, service: RunningService) -> None:
-        raise RuntimeError("rejected")
-
-    def block(api: Path, service: RunningService) -> None:
-        entered.set()
-        signal.pause()
-
-    endings = {"success": succeed, "failure": fail, "interrupt": block}
-    monkeypatch.setattr("wright.steps.fuzz_contract", endings[ending])
-    write_build(
-        tmp_path / "proj",
-        'server = rust_binary(CargoPackage("jammer_server"))\n'
-        "api = openapi(server)\n"
-        "deployed = deploy(server, DevDeploymentEnvironment())\n"
-        "fuzzed = contract_fuzz(api, deployed)\n",
-    )
-
-    def signal_when_ready() -> None:
-        entered.wait(timeout=10)
-        os.kill(os.getpid(), signal.SIGTERM)
-
-    if ending == "interrupt":
-        threading.Thread(target=signal_when_ready, daemon=True).start()
-
-    try:
-        if ending == "success":
-            run_cli([str(tmp_path / "proj"), "fuzzed"])
-        elif ending == "failure":
-            with pytest.raises(SystemExit, match="^fuzzed failed: rejected$"):
-                run_cli([str(tmp_path / "proj"), "fuzzed"])
-        else:
-            with pytest.raises(KeyboardInterrupt):
-                run_cli([str(tmp_path / "proj"), "fuzzed"])
-        assert len(started) == 1
-        assert started[0].process.poll() is not None
-        assert not started[0].storage.exists()
-    finally:
-        for service in started:
-            if service.process.poll() is None or service.storage.exists():
-                service.stop()
-
-
-def test_contract_fuzz_uses_the_generated_contract_and_the_service_url(
+def test_rust_binary_rejects_missing_executable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, object] = {}
-
-    def fake_run(command: tuple[str, ...], **kwargs: object) -> Completed:
-        captured["command"] = command
-        captured["cwd"] = kwargs.get("cwd")
-        return Completed(0)
-
-    monkeypatch.setattr("wright.steps.subprocess.run", fake_run)
-    from wright.steps import fuzz_contract
-
-    service = RunningService(
-        process=subprocess.Popen([sys.executable, "-c", "pass"]),
-        url="http://127.0.0.1:43210",
-        storage=Path("/tmp/wright-storage"),
+    monkeypatch.setattr(
+        Step, "_cmd", lambda *args, **kwargs: subprocess.CompletedProcess([], 0, "", "")
     )
-    try:
-        fuzz_contract(Path("/tmp/wright/api.yaml"), service)
-    finally:
-        service.process.wait(timeout=5)
-
-    command = captured["command"]
-    assert isinstance(command, tuple)
-    assert command[:4] == ("uv", "run", "schemathesis", "run")
-    assert "/tmp/wright/api.yaml" in command
-    assert "http://127.0.0.1:43210" in command
-    assert "jammer/server/api.yaml" not in command
-    assert "http://127.0.0.1:8811" not in command
-    assert ("--exclude-operation-id", "getSession") == (
-        command[command.index("--exclude-operation-id")],
-        command[command.index("--exclude-operation-id") + 1],
-    )
-    assert captured["cwd"] == repository_root()
+    with pytest.raises(StepFailed, match="produced no executable"):
+        execute([RustBinary(CargoPackage("missing"))])
 
 
-def test_dry_run_does_not_call_implementations(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    def boom(*args: object, **kwargs: object) -> None:
-        raise AssertionError("dry run called a step")
+def test_cli_names_failing_step_and_does_not_run_later_steps(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(self: RustBinary, run: Run) -> Path:
+        raise RuntimeError("cannot compile")
 
-    monkeypatch.setattr("wright.steps.build_rust_binary", boom)
-    monkeypatch.setattr("wright.steps.generate_openapi", boom)
-    write_build(tmp_path, 'server = rust_binary(CargoPackage("jammer_server"))\n')
+    def unexpected(self: OpenApi, run: Run) -> Path:
+        raise AssertionError("ran after failure")
 
-    run_cli(["--dry", str(tmp_path)])
-
-    assert "rust_binary" in capsys.readouterr().out
+    monkeypatch.setattr(RustBinary, "build", fail)
+    monkeypatch.setattr(OpenApi, "build", unexpected)
+    with pytest.raises(SystemExit, match="jammer_server failed: cannot compile"):
+        cli.run(repository_root() / "jammer", "api")

@@ -1,9 +1,11 @@
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from forge.environment import repository_root
-from wright import cli
-from wright.graph import WrightError, include, load
+from wright import Step, cli
+from wright.graph import Graph, WrightError, include, load
+from wright.run import Run
 from wright.steps import CargoPackage
 
 JAMMER = repository_root() / "jammer"
@@ -44,13 +46,13 @@ def test_default_result_is_the_last_step_called_not_the_last_variable(
 ) -> None:
     write_build(
         tmp_path,
-        'server = rust_binary(CargoPackage("first"))\n'
-        "api = openapi(server)\n"
-        'server = rust_binary(CargoPackage("second"))\n',
+        'server = RustBinary(CargoPackage("first"))\n'
+        "api = OpenApi(server)\n"
+        'server = RustBinary(CargoPackage("second"))\n',
     )
     graph = load(tmp_path)
 
-    assert graph.result().inputs == {"package": CargoPackage("second")}
+    assert graph.result().package == CargoPackage("second")
     assert plan_names(tmp_path, "api") == [None, "api"]
 
 
@@ -59,14 +61,14 @@ def test_include_names_results_by_directory_and_loads_each_file_once(
 ) -> None:
     write_build(
         tmp_path / "module",
-        'server = rust_binary(CargoPackage("server"))\napi = openapi(server)\n',
+        'server = RustBinary(CargoPackage("server"))\napi = OpenApi(server)\n',
     )
     write_build(
         tmp_path,
         'first = include("module")\n'
         'second = include("module")\n'
-        "fuzzed = contract_fuzz(\n"
-        "    first.api, deploy(second.server, DevDeploymentEnvironment())\n"
+        "fuzzed = ContractFuzz(\n"
+        "    first.api, JammerDevServer(second.server)\n"
         ")\n",
     )
 
@@ -80,10 +82,10 @@ def test_dry_run_prints_the_steps_in_dependency_order(
     run_cli([flag, str(JAMMER), "fuzzed"])
 
     assert capsys.readouterr().out.splitlines() == [
-        "jammer_server = rust_binary(CargoPackage(name='jammer_server'))",
-        "api = openapi(jammer_server)",
-        "deployed = deploy(jammer_server, DevDeploymentEnvironment())",
-        "fuzzed = contract_fuzz(api, deployed)",
+        "jammer_server = RustBinary(CargoPackage(name='jammer_server'))",
+        "api = OpenApi(jammer_server)",
+        "deployed = JammerDevServer(jammer_server, False)",
+        "fuzzed = ContractFuzz(api, deployed)",
     ]
 
 
@@ -132,3 +134,36 @@ def test_include_works_only_while_wright_loads_a_build_file(tmp_path: Path) -> N
         load(tmp_path)
     with pytest.raises(WrightError, match=message):
         include("jammer")
+
+
+def test_graph_finds_dependencies_from_step_attributes(tmp_path: Path) -> None:
+    @dataclass(eq=False)
+    class Custom(Step[str]):
+        argument: object
+        other: object = 42
+
+        def build(self, run: Run) -> str:
+            raise AssertionError("planning ran a step")
+
+    first = Custom("input")
+    second = Custom(first, other=Custom("another"))
+    assert Graph(tmp_path / "build.py", {"result": second}).plan() == [
+        first,
+        second.other,
+        second,
+    ]
+
+
+def test_step_dependency_cycle_names_the_steps(tmp_path: Path) -> None:
+    @dataclass(eq=False)
+    class Custom(Step[None]):
+        argument: object = None
+
+        def build(self, run: Run) -> None:
+            pass
+
+    first, second = Custom(), Custom()
+    first.name, second.name = "first", "second"
+    first.argument, second.argument = second, first
+    with pytest.raises(WrightError, match="steps depend on each other: first -> second -> first"):
+        Graph(tmp_path / "build.py", {"first": first}).plan()

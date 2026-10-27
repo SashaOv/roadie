@@ -1,77 +1,87 @@
-"""Run a result's steps in plan order and stop every service at the end."""
+"""Build a plan and tear down each step after its last consumer."""
 
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any, cast
 
-from wright.graph import Result, Service, WrightError, current_result
+from forge.environment import repository_root
+
+from wright.errors import StepFailed, WrightError
 from wright.process import interrupt_on_terminate
+from wright.step import Step
 
 
-class StepFailed(WrightError):
-    def __init__(self, name: str, reason: str) -> None:
-        super().__init__(f"{name} failed: {reason}")
+class Run:
+    def __init__(self) -> None:
+        self._values: dict[int, object] = {}
+
+    def __getitem__[T](self, step: Step[T]) -> T:
+        if id(step) not in self._values:
+            raise WrightError(
+                f"{step.name or type(step).__name__} is not available in this run"
+            )
+        return cast(T, self._values[id(step)])
+
+    def artifact(self, step: Step[Any], suffix: str) -> Path:
+        stem = (step.name or type(step).__name__).replace(":", "_").replace("/", "_")
+        destination = repository_root() / "target" / "wright" / f"{stem}{suffix}"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        return destination
 
 
-def execute(steps: Sequence[Result]) -> object:
-    """Run `steps` and stop every service, including when a step fails or is interrupted."""
-    values: dict[int, object] = {}
-    services: list[object] = []
+def execute(steps: Sequence[Step[Any]]) -> object:
+    run = Run()
+    live: list[Step[Any]] = []
+    last_use = {id(step): index for index, step in enumerate(steps)}
+    for index, step in enumerate(steps):
+        for dependency in step.dependencies():
+            last_use[id(dependency)] = max(last_use[id(dependency)], index)
+    result: object = None
     with interrupt_on_terminate():
         try:
-            for step in steps:
-                token = current_result.set(step)
+            for index, step in enumerate(steps):
                 try:
-                    value = _call(step, _resolve(step.inputs, values))
-                    values[id(step)] = value
-                    if isinstance(step, Service):
-                        services.append(value)
-                finally:
-                    current_result.reset(token)
-            if not steps:
-                return None
-            return values[id(steps[-1])]
+                    value = step.build(run)
+                except (KeyboardInterrupt, StepFailed):
+                    raise
+                except BaseException as error:
+                    raise StepFailed(
+                        step.name or type(step).__name__, _reason(error)
+                    ) from error
+                run._values[id(step)] = value
+                live.append(step)
+                result = value
+                expired = [item for item in live if last_use[id(item)] == index]
+                _teardown(run, live, expired)
+            return result
         finally:
-            _stop_services(services)
-
-
-def _resolve(
-    inputs: Mapping[str, object], values: Mapping[int, object]
-) -> dict[str, object]:
-    resolved: dict[str, object] = {}
-    for key, value in inputs.items():
-        if isinstance(value, Result):
-            resolved[key] = values[id(value)]
-        else:
-            resolved[key] = value
-    return resolved
-
-
-def _call(step: Result, inputs: Mapping[str, object]) -> object:
-    try:
-        return step.implementation(**inputs)
-    except KeyboardInterrupt:
-        raise
-    except BaseException as error:
-        raise StepFailed(step.name or step.step, _reason(error)) from error
+            _teardown(run, live, list(live))
 
 
 def _reason(error: BaseException) -> str:
     if isinstance(error, SystemExit) and isinstance(error.code, str):
         return error.code
-    text = str(error).strip()
-    return text or error.__class__.__name__
+    return str(error).strip() or type(error).__name__
 
 
-def _stop_services(services: list[object]) -> None:
-    errors: list[Exception] = []
-    while services:
-        value = services.pop()
-        stop = getattr(value, "stop", None)
+def _teardown(run: Run, live: list[Step[Any]], expired: list[Step[Any]]) -> None:
+    errors: list[StepFailed] = []
+    for step in reversed(expired):
+        live[:] = [item for item in live if item is not step]
+        value = run._values.pop(id(step))
         try:
-            if not callable(stop):
-                raise WrightError("a service produced nothing that can be stopped")
-            stop()
-        except Exception as error:  # noqa: BLE001 — keep stopping the other services
-            errors.append(error)
-    if errors and sys.exc_info()[1] is None:
-        raise errors[0]
+            step.teardown(value)
+        except Exception as error:  # noqa: BLE001 — finish releasing the other steps
+            errors.append(
+                StepFailed(
+                    step.name or type(step).__name__, f"teardown: {_reason(error)}"
+                )
+            )
+    if errors:
+        if sys.exc_info()[1] is None:
+            for failure in errors[1:]:
+                print(failure, file=sys.stderr)
+            raise errors[0]
+        for failure in errors:
+            print(failure, file=sys.stderr)
