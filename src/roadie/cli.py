@@ -51,8 +51,16 @@ def call(result: Step[Any]) -> str:
     else:
         attributes = result.attributes()
         keywords: set[str] = {item.name for item in fields(result) if item.kw_only} if is_dataclass(result) else set()
-        arguments = [argument(value) for key, value in attributes.items() if key not in keywords]
-        arguments.extend(f"{key}={argument(value)}" for key, value in attributes.items() if key in keywords)
+        arguments = [
+            argument(value)
+            for key, value in attributes.items()
+            if key not in keywords and value is not None
+        ]
+        arguments.extend(
+            f"{key}={argument(value)}"
+            for key, value in attributes.items()
+            if key in keywords and value is not None
+        )
     return f"{type(result).__name__}({', '.join(arguments)})"
 
 

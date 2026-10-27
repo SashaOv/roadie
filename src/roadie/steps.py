@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from wright.cargo import CargoPackage
 from wright.errors import WrightError
 from wright.run import Run
 from wright.step import Binary, Step
@@ -16,11 +17,6 @@ class Group(Step[tuple[object, ...]]):
 
     def build(self, run: Run) -> tuple[object, ...]:
         return tuple(run[step] for step in self.steps)
-
-
-@dataclass(frozen=True)
-class CargoPackage:
-    name: str
 
 
 @dataclass(eq=False)

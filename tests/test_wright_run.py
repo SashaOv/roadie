@@ -13,7 +13,9 @@ from wright import TestFailure as Failure
 from wright import TestResults as Results
 from wright import Tests as Checks
 from wright.errors import StepFailed
+from wright.fingerprint import fingerprint
 from wright.graph import Graph
+from wright.inputs import Files
 from wright.process import RunningProcess, available_port
 from wright.run import Run, execute
 from wright.steps import RustBinary
@@ -514,3 +516,61 @@ def test_locked_file_output_reports_git_failure_and_keeps_destination(tmp_path: 
     assert str(destination) in str(error.value)
     assert "Cannot check whether" in str(error.value)
     assert destination.read_text() == "old\n"
+
+
+def test_service_steps_are_not_reusable() -> None:
+    assert Step.reusable is True
+    assert Service.reusable is False
+
+
+def test_plain_attribute_of_unsupported_type_is_an_error() -> None:
+    @dataclass(eq=False)
+    class Custom(Step[None]):
+        value: object
+
+        def build(self, run: Run) -> None:
+            pass
+
+    step = Custom({"bad": 1})
+    step.name = "custom"
+    with pytest.raises(WrightError, match="custom attribute value must be"):
+        fingerprint(step)
+
+
+def test_step_fingerprint_covers_files_dependency_outputs_and_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path.resolve()
+    monkeypatch.setattr("wright.inputs.repository_root", lambda: root)
+    monkeypatch.setattr("wright.fingerprint.repository_root", lambda: root)
+    monkeypatch.chdir(root)
+    bundle = root / "dist"
+    bundle.mkdir()
+    (bundle / "app.js").write_text("one")
+    outside = root / "outside.txt"
+    outside.write_text("one")
+    (bundle / "link.js").symlink_to(outside)
+
+    @dataclass(eq=False)
+    class Bundle(Step[None]):
+        files: Files
+        source: Step[str]
+
+        def build(self, run: Run) -> None:
+            pass
+
+    source = Value("built")
+    step = Bundle(Files("dist"), source)
+    outputs = {source: "a" * 64}
+    original = fingerprint(step, outputs=outputs)
+    (bundle / "app.js").write_text("two")
+    edited = fingerprint(step, outputs=outputs)
+    assert edited != original
+    outside.write_text("two")
+    followed = fingerprint(step, outputs=outputs)
+    assert followed != edited
+    assert fingerprint(step, outputs={source: "b" * 64}) != followed
+    assert fingerprint(step, outputs=outputs, env={"PORT": "1"}) != fingerprint(step, outputs=outputs, env={})
+
+    missing = Files("absent")
+    before = missing.fingerprint(root)
+    (root / "absent").write_text("created")
+    assert missing.fingerprint(root) != before

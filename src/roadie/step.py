@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, Self
 
 from wright.config import base_directory, loading_directory
 from wright.errors import StepFailed
@@ -21,6 +21,7 @@ _serials = itertools.count()
 
 
 class Step[T](ABC):
+    reusable: ClassVar[bool] = True
     serial: int
     base_dir: Path
     build_dir: Path | None
@@ -111,13 +112,6 @@ class Binary(Step[Path]):
 class File(Step[Path]):
     output: str | Path | None = None
 
-    def attributes(self) -> dict[str, object]:
-        attributes = super().attributes()
-        if self.output is None:
-            attributes.pop("output", None)
-        return attributes
-
-
 class Deployment(Protocol):
     @property
     def process(self) -> subprocess.Popen[bytes]: ...
@@ -129,6 +123,8 @@ class Deployment(Protocol):
 
 
 class Service(Step[Deployment]):
+    reusable: ClassVar[bool] = False
+
     def teardown(self, value: Deployment) -> None:
         value.stop()
 

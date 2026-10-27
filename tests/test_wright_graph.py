@@ -305,3 +305,20 @@ def test_file_output_is_keyword_only(tmp_path: Path) -> None:
 
 def test_jammer_generated_plan_contains_five_outputs_in_dependency_order() -> None:
     assert plan_names(JAMMER, "generated") == ["jammer_server", "api", "python_models", "web_schema", "snap_viewer", "viewer_api", "viewer_web_schema", "generated"]
+
+
+def test_dry_run_omits_attributes_whose_value_is_none(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    write_build(
+        tmp_path,
+        "from dataclasses import dataclass\n"
+        "from wright.run import Run\n\n"
+        "@dataclass(eq=False)\n"
+        "class Setting(Step[None]):\n"
+        "    label: str | None\n"
+        "    note: str | None = None\n"
+        "    def build(self, run: Run) -> None:\n"
+        "        pass\n\n"
+        "item = Setting(None)\n",
+    )
+    run_cli(["--dry", str(tmp_path)])
+    assert capsys.readouterr().out.splitlines()[-1] == "item = Setting()"
