@@ -84,7 +84,7 @@ def test_dry_run_prints_the_steps_in_dependency_order(
 
     assert capsys.readouterr().out.splitlines() == [
         "jammer_server = RustBinary(CargoPackage(name='jammer_server'))",
-        "api = OpenApi(jammer_server)",
+        "api = OpenApi(jammer_server, output='server/api.yaml')",
         "deployed = JammerDevServer(jammer_server, False)",
         "fuzzed = ContractFuzz(api, deployed)",
     ]
@@ -93,7 +93,7 @@ def test_dry_run_prints_the_steps_in_dependency_order(
 def test_cli_reports_an_unknown_result_with_the_known_ones() -> None:
     with pytest.raises(
         SystemExit,
-        match="has no result named 'nope'; results: jammer_server, api, deployed, fuzzed",
+        match="has no result named 'nope'; results: jammer_server, snap_viewer, api, python_models, web_schema, viewer_api, viewer_web_schema, generated, deployed, fuzzed",
     ):
         run_cli(["--dry", str(JAMMER), "nope"])
 
@@ -292,3 +292,7 @@ def test_file_output_is_keyword_only(tmp_path: Path) -> None:
     write_build(tmp_path, 'server = RustBinary(CargoPackage("server"))\napi = OpenApi(server, "api.yaml")\n')
     with pytest.raises(TypeError):
         load(tmp_path)
+
+
+def test_jammer_generated_plan_contains_five_outputs_in_dependency_order() -> None:
+    assert plan_names(JAMMER, "generated") == ["jammer_server", "api", "python_models", "web_schema", "snap_viewer", "viewer_api", "viewer_web_schema", "generated"]
