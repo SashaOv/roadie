@@ -7,12 +7,13 @@ from pathlib import Path
 
 import pytest
 from forge.environment import repository_root
+from jammer_build.steps import OpenApi
 from wright import CargoPackage, Service, Step, WrightError, cli
 from wright.errors import StepFailed
 from wright.graph import Graph
 from wright.process import RunningProcess, available_port
 from wright.run import Run, execute
-from wright.steps import OpenApi, RustBinary
+from wright.steps import RustBinary
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

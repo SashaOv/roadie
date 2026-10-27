@@ -1,3 +1,4 @@
+import ast
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,7 +14,7 @@ JAMMER = repository_root() / "jammer"
 
 def write_build(directory: Path, source: str) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "build.py").write_text(f"from wright import *\n\n{source}")
+    (directory / "build.py").write_text(f"from wright import *\nfrom jammer_build.steps import *\n\n{source}")
     return directory
 
 
@@ -167,3 +168,19 @@ def test_step_dependency_cycle_names_the_steps(tmp_path: Path) -> None:
     first.argument, second.argument = second, first
     with pytest.raises(WrightError, match="steps depend on each other: first -> second -> first"):
         Graph(tmp_path / "build.py", {"first": first}).plan()
+
+
+def test_wright_does_not_import_harness_or_jammer() -> None:
+    forbidden = ("forge.build_script", "jammer_build")
+    violations: list[str] = []
+    for path in (repository_root() / "forge/wright").glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            names: list[str] = []
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+                names.extend(f"{node.module}.{alias.name}" for alias in node.names)
+            if any(name == prefix or name.startswith(prefix + ".") for name in names for prefix in forbidden):
+                violations.append(f"{path.name}:{node.lineno}")
+    assert violations == []
