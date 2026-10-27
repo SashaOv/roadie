@@ -1,5 +1,6 @@
 """Build a plan and tear down each step after its last consumer."""
 
+import hashlib
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -26,10 +27,24 @@ class Run:
         return cast(T, self._values[id(step)])
 
     def artifact(self, step: Step[Any], suffix: str) -> Path:
-        stem = (step.name or f"{type(step).__name__}_{step.serial}").replace(":", "_").replace("/", "_")
-        destination = repository_root() / "target" / "wright" / f"{stem}{suffix}"
+        root = repository_root()
+        stem = step.variable or f"{type(step).__name__}-{step.serial}"
+        destination = root / "target" / "wright" / _artifact_dir(step.build_dir, root) / f"{stem}{suffix}"
         destination.parent.mkdir(parents=True, exist_ok=True)
         return destination
+
+
+def _artifact_dir(build_dir: Path | None, root: Path) -> Path:
+    if build_dir is None:
+        return Path()
+    try:
+        relative = build_dir.resolve().relative_to(root.resolve())
+    except ValueError:
+        digest = hashlib.sha256(str(build_dir.resolve()).encode()).hexdigest()[:12]
+        return Path("_outside") / digest
+    if relative == Path("."):
+        return Path()
+    return relative
 
 
 def execute(steps: Sequence[Step[Any]], *, locked: bool = False) -> object:

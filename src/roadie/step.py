@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, Self
 
-from wright.config import base_directory
+from wright.config import base_directory, loading_directory
 from wright.errors import StepFailed
 from wright.process import RunningProcess
 from wright.testing import TestResults
@@ -23,20 +23,24 @@ _serials = itertools.count()
 class Step[T](ABC):
     serial: int
     base_dir: Path
+    build_dir: Path | None
+    variable: str | None
     name: str | None
 
     def __new__(cls, *args: object, **kwargs: object) -> Self:
         instance = super().__new__(cls)
         instance.serial = next(_serials)
         instance.name = None
+        instance.variable = None
         instance.base_dir = base_directory()
+        instance.build_dir = loading_directory()
         return instance
 
     def attributes(self) -> dict[str, object]:
         return {
             key: value
             for key, value in vars(self).items()
-            if key not in {"serial", "name", "base_dir"}
+            if key not in {"serial", "name", "base_dir", "build_dir", "variable"}
         }
 
     def resolve(self, path: str | Path) -> Path:

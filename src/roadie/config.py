@@ -20,6 +20,11 @@ def base_directory() -> Path:
     return _base_directory.get() or Path.cwd()
 
 
+def loading_directory() -> Path | None:
+    """Directory of the build file currently being loaded, if any."""
+    return _file_directory.get()
+
+
 def config(**settings: object) -> None:
     unknown = settings.keys() - {"base_dir"}
     if unknown:

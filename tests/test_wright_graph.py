@@ -42,6 +42,15 @@ def test_plan_holds_only_the_steps_a_result_depends_on(
     assert plan_names(JAMMER, result) == steps
 
 
+def test_load_records_each_result_variable_and_build_directory(tmp_path: Path) -> None:
+    write_build(tmp_path / "jammer", 'server = RustBinary(CargoPackage("server"))\n')
+    graph = load(tmp_path / "jammer")
+    server = graph.result("server")
+
+    assert server.variable == "server"
+    assert server.build_dir == (tmp_path / "jammer").resolve()
+
+
 def test_default_result_is_the_last_step_called_not_the_last_variable(
     tmp_path: Path,
 ) -> None:

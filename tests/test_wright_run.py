@@ -243,15 +243,30 @@ def test_start_cmd_reports_early_exit() -> None:
         execute([server])
 
 
-def test_run_artifact_uses_step_name(
+def test_run_artifact_uses_the_build_directory_and_variable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("wright.run.repository_root", lambda: tmp_path)
-    step = Value("value")
-    step.name = "jammer:api"
-    path = Run().artifact(step, ".yaml")
-    assert path == tmp_path / "target" / "wright" / "jammer_api.yaml"
-    assert path.parent.is_dir()
+    jammer = tmp_path / "jammer"
+    other = tmp_path / "other"
+    first, second = Value("one"), Value("two")
+    first.variable, first.build_dir = "api", jammer
+    second.variable, second.build_dir = "api", other
+    run = Run()
+
+    assert run.artifact(first, ".yaml") == tmp_path / "target" / "wright" / "jammer" / "api.yaml"
+    assert run.artifact(second, ".yaml") == tmp_path / "target" / "wright" / "other" / "api.yaml"
+    outside = tmp_path / "elsewhere"
+    # build_dir is outside the repository root the run was given.
+    external = Value("ext")
+    external.variable = "api"
+    external.build_dir = Path("/tmp/wright-outside-build")
+    copied = run.artifact(external, ".yaml")
+    assert copied.parent.parent == tmp_path / "target" / "wright" / "_outside"
+    assert len(copied.parent.name) == 12
+    assert copied.name == "api.yaml"
+    unnamed = Value("loose")
+    assert run.artifact(unnamed, ".txt") == tmp_path / "target" / "wright" / f"Value-{unnamed.serial}.txt"
 
 
 def test_run_releases_values_at_end() -> None:
@@ -380,8 +395,8 @@ def test_unnamed_steps_of_one_class_get_distinct_artifacts(tmp_path: Path, monke
     run = Run()
     one, two = run.artifact(first, ".txt"), run.artifact(second, ".txt")
     assert one != two
-    assert one.name == f"Value_{first.serial}.txt"
-    assert two.name == f"Value_{second.serial}.txt"
+    assert one.name == f"Value-{first.serial}.txt"
+    assert two.name == f"Value-{second.serial}.txt"
 
 
 def test_group_value_contains_its_steps_values() -> None:

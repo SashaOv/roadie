@@ -110,6 +110,7 @@ def _load(session: _Session, directory: Path) -> Graph:
 
     prefix = _prefix(session.root, directory)
     for name, result in results.items():
+        result.variable = name
         if result.name is None:
             result.name = f"{prefix}{name}"
     graph = Graph(path=path, results=results)
