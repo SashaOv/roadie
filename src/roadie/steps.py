@@ -5,6 +5,7 @@ from typing import Any
 
 from wright.cargo import CargoPackage
 from wright.errors import WrightError
+from wright.inputs import Files
 from wright.run import Run
 from wright.step import Binary, Step
 
@@ -22,6 +23,7 @@ class Group(Step[tuple[object, ...]]):
 @dataclass(eq=False)
 class RustBinary(Binary):
     package: CargoPackage
+    files: Files | None = None
 
     def build(self, run: Run) -> Path:
         completed = self._cmd(
