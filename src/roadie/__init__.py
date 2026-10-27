@@ -1,3 +1,4 @@
+from wright.config import config
 from wright.errors import WrightError
 from wright.graph import include
 from wright.step import Binary, Deployment, File, Service, Step, Tests
@@ -16,5 +17,6 @@ __all__ = [
     "TestResults",
     "Tests",
     "WrightError",
+    "config",
     "include",
 ]

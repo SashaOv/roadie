@@ -8,8 +8,7 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, Self
 
-from forge.environment import repository_root
-
+from wright.config import base_directory
 from wright.errors import StepFailed
 from wright.process import RunningProcess
 from wright.testing import TestResults
@@ -22,20 +21,25 @@ _serials = itertools.count()
 
 class Step[T](ABC):
     serial: int
+    base_dir: Path
     name: str | None
 
     def __new__(cls, *args: object, **kwargs: object) -> Self:
         instance = super().__new__(cls)
         instance.serial = next(_serials)
         instance.name = None
+        instance.base_dir = base_directory()
         return instance
 
     def attributes(self) -> dict[str, object]:
         return {
             key: value
             for key, value in vars(self).items()
-            if key not in {"serial", "name"}
+            if key not in {"serial", "name", "base_dir"}
         }
+
+    def resolve(self, path: str | Path) -> Path:
+        return (self.base_dir / path).resolve()
 
     def dependencies(self) -> Iterator["Step[Any]"]:
         return (
@@ -59,7 +63,7 @@ class Step[T](ABC):
         print("+", shlex.join(args), flush=True)
         completed = subprocess.run(
             args,
-            cwd=repository_root(),
+            cwd=self.base_dir,
             env=None if environment is None else dict(environment),
             stdout=subprocess.PIPE if capture_output else None,
             stderr=subprocess.PIPE,
@@ -88,7 +92,7 @@ class Step[T](ABC):
     ) -> RunningProcess:
         print("+", shlex.join(args), flush=True)
         return RunningProcess.start(
-            args, port=port, environment=environment, timeout=timeout
+            args, port=port, environment=environment, timeout=timeout, cwd=self.base_dir
         )
 
 

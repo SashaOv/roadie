@@ -17,6 +17,7 @@ def run(
     directory: Path = Path("."),
     result: str | None = None,
     *,
+    base_dir: Annotated[Path | None, Parameter(name="--base_dir", help="Resolve step paths and commands from this directory")] = None,
     dry_run: Annotated[
         bool,
         Parameter(
@@ -28,7 +29,7 @@ def run(
 ) -> None:
     """Run `result` of `<directory>/build.py`, by default the last one defined."""
     try:
-        steps = load(directory).plan(result)
+        steps = load(directory, base_dir=base_dir).plan(result)
     except WrightError as error:
         raise SystemExit(str(error)) from error
     if dry_run:

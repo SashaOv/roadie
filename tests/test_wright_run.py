@@ -344,3 +344,31 @@ def test_tests_step_reports_failures_and_messages(failed: bool, capsys: pytest.C
     else:
         assert execute([check]) == Results(messages=("checked API",))
     assert "checked API" in capsys.readouterr().out
+
+
+def test_commands_run_in_the_steps_base_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    class Command(Step[str]):
+        def build(self, run: Run) -> str:
+            return self._cmd(sys.executable, "-c", "from pathlib import Path; print(Path.cwd())", capture_output=True).stdout.strip()
+
+    assert execute([Command()]) == str(tmp_path.resolve())
+
+
+def test_started_commands_run_in_the_steps_base_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    marker = tmp_path / "cwd.txt"
+    port = available_port()
+
+    class Server(Service):
+        def build(self, run: Run) -> RunningProcess:
+            return self._start_cmd(sys.executable, "-c", (
+                "from pathlib import Path; import socket, threading; "
+                "Path('cwd.txt').write_text(str(Path.cwd())); "
+                f"s = socket.socket(); s.bind(('127.0.0.1', {port})); s.listen(); "
+                "threading.Event().wait()"
+            ), port=port, timeout=5)
+
+    execute([Server()])
+    assert marker.read_text() == str(tmp_path.resolve())

@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from wright.config import file_settings
 from wright.errors import WrightError
 from wright.step import Step
 
@@ -61,6 +62,7 @@ class Graph:
 @dataclass
 class _Session:
     root: Path
+    base_dir: Path | None = None
     graphs: dict[Path, Graph] = field(default_factory=dict)
     loading: list[Path] = field(default_factory=list)
 
@@ -68,8 +70,8 @@ class _Session:
 _session: ContextVar[_Session | None] = ContextVar("wright_session", default=None)
 
 
-def load(directory: Path) -> Graph:
-    session = _Session(root=directory.resolve())
+def load(directory: Path, *, base_dir: Path | None = None) -> Graph:
+    session = _Session(root=directory.resolve(), base_dir=base_dir.resolve() if base_dir is not None else None)
     token = _session.set(session)
     try:
         return _load(session, session.root)
@@ -98,7 +100,7 @@ def _load(session: _Session, directory: Path) -> Graph:
     if not path.is_file():
         raise WrightError(f"{directory} has no {BUILD_FILE}")
 
-    with _loading(session, directory):
+    with _loading(session, directory), file_settings(directory, session.base_dir):
         namespace = runpy.run_path(str(path), run_name=f"wright:{path}")
     results = {
         name: value for name, value in namespace.items() if isinstance(value, Step)

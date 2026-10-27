@@ -30,8 +30,9 @@ class RunningProcess:
         port: int,
         environment: Mapping[str, str] | None = None,
         timeout: float = 120,
+        cwd: Path | None = None,
     ) -> "RunningProcess":
-        process = spawn_server(command, environment=environment)
+        process = spawn_server(command, environment=environment, cwd=cwd)
         try:
             wait_for_dev_server(process, port=port, timeout=timeout)
             return cls(process, f"http://127.0.0.1:{port}")
@@ -101,6 +102,7 @@ def spawn_server(
     *,
     environment: Mapping[str, str] | None = None,
     stdout: BinaryIO | None = None,
+    cwd: Path | None = None,
 ) -> subprocess.Popen[bytes]:
     """Start a server in its own process group.
 
@@ -110,7 +112,7 @@ def spawn_server(
     """
     return subprocess.Popen(
         command,
-        cwd=repository_root(),
+        cwd=repository_root() if cwd is None else cwd,
         env=None if environment is None else dict(environment),
         stdout=stdout,
         start_new_session=os.name == "posix",
