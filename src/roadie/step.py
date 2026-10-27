@@ -12,6 +12,7 @@ from forge.environment import repository_root
 
 from wright.errors import StepFailed
 from wright.process import RunningProcess
+from wright.testing import TestResults
 
 if TYPE_CHECKING:
     from wright.run import Run
@@ -65,14 +66,18 @@ class Step[T](ABC):
             text=True,
             check=False,
         )
-        if check and completed.returncode != 0:
+        if check:
+            self._check_cmd(completed)
+        return completed
+
+    def _check_cmd(self, completed: subprocess.CompletedProcess[str]) -> None:
+        if completed.returncode != 0:
             detail = (completed.stderr or "").strip()[-2000:]
-            reason = f"{shlex.join(args)} exited with status {completed.returncode}"
+            reason = f"{shlex.join(completed.args)} exited with status {completed.returncode}"
             raise StepFailed(
                 self.name or type(self).__name__,
                 f"{reason}: {detail}" if detail else reason,
             )
-        return completed
 
     def _start_cmd(
         self,
@@ -110,5 +115,5 @@ class Service(Step[Deployment]):
         value.stop()
 
 
-class Verdict(Step[None]):
+class Tests(Step[TestResults]):
     pass

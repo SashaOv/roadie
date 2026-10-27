@@ -9,6 +9,9 @@ import pytest
 from forge.environment import repository_root
 from jammer_build.steps import OpenApi
 from wright import CargoPackage, Service, Step, WrightError, cli
+from wright import TestFailure as Failure
+from wright import TestResults as Results
+from wright import Tests as Checks
 from wright.errors import StepFailed
 from wright.graph import Graph
 from wright.process import RunningProcess, available_port
@@ -322,3 +325,22 @@ def test_cli_names_failing_step_and_does_not_run_later_steps(monkeypatch: pytest
     monkeypatch.setattr(OpenApi, "build", unexpected)
     with pytest.raises(SystemExit, match="jammer_server failed: cannot compile"):
         cli.run(repository_root() / "jammer", "api")
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_tests_step_reports_failures_and_messages(failed: bool, capsys: pytest.CaptureFixture[str]) -> None:
+    class Check(Checks):
+        def build(self, run: Run) -> Results:
+            return Results(
+                failures=(Failure("GET /health", "Received 200; documented 418"),) if failed else (),
+                messages=("checked API",),
+            )
+
+    check = Check()
+    check.name = "fuzzed"
+    if failed:
+        with pytest.raises(StepFailed, match="fuzzed failed:.*GET /health.*Received 200; documented 418"):
+            execute([check])
+    else:
+        assert execute([check]) == Results(messages=("checked API",))
+    assert "checked API" in capsys.readouterr().out

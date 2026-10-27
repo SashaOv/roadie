@@ -9,7 +9,8 @@ from forge.environment import repository_root
 
 from wright.errors import StepFailed, WrightError
 from wright.process import interrupt_on_terminate
-from wright.step import Step
+from wright.step import Step, Tests
+from wright.testing import TestResults
 
 
 class Run:
@@ -43,14 +44,20 @@ def execute(steps: Sequence[Step[Any]]) -> object:
             for index, step in enumerate(steps):
                 try:
                     value = step.build(run)
+                    run._values[id(step)] = value
+                    live.append(step)
+                    if isinstance(step, Tests):
+                        if not isinstance(value, TestResults):
+                            raise WrightError("A Tests step must return TestResults")
+                        for message in value.messages:
+                            print(message, flush=True)
+                        if value.failures:
+                            reason = "\n".join(f"{failure.name}: {failure.message}" for failure in value.failures)
+                            raise StepFailed(step.name or type(step).__name__, reason)
                 except (KeyboardInterrupt, StepFailed):
                     raise
                 except BaseException as error:
-                    raise StepFailed(
-                        step.name or type(step).__name__, _reason(error)
-                    ) from error
-                run._values[id(step)] = value
-                live.append(step)
+                    raise StepFailed(step.name or type(step).__name__, _reason(error)) from error
                 result = value
                 expired = [item for item in live if last_use[id(item)] == index]
                 _teardown(run, live, expired)
