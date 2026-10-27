@@ -5,6 +5,7 @@ import shlex
 import subprocess
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, Self
 
@@ -102,8 +103,15 @@ class Binary(Step[Path]):
     pass
 
 
+@dataclass(eq=False, kw_only=True)
 class File(Step[Path]):
-    pass
+    output: str | Path | None = None
+
+    def attributes(self) -> dict[str, object]:
+        attributes = super().attributes()
+        if self.output is None:
+            attributes.pop("output", None)
+        return attributes
 
 
 class Deployment(Protocol):

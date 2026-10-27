@@ -213,7 +213,7 @@ def test_cli_base_dir_applies_to_included_steps(tmp_path: Path, monkeypatch: pyt
     write_build(tmp_path / "project/module", 'server = RustBinary(CargoPackage("module"))\n')
     write_build(tmp_path / "project", 'module = include("module")\napi = OpenApi(module.server)\n')
     observed: list[Path] = []
-    monkeypatch.setattr(cli, "execute", lambda steps: observed.extend(step.base_dir for step in steps))
+    monkeypatch.setattr(cli, "execute", lambda steps, **kwargs: observed.extend(step.base_dir for step in steps))
     run_cli(["--base_dir", "work", "project", "api"])
     assert observed == [tmp_path / "work", tmp_path / "work"]
 
@@ -275,4 +275,20 @@ def test_group_plans_and_prints_steps_as_variadic_arguments(tmp_path: Path, caps
 def test_group_rejects_a_non_step(tmp_path: Path) -> None:
     write_build(tmp_path, 'result = Group(42)\n')
     with pytest.raises(WrightError, match="Group.*steps"):
+        load(tmp_path)
+
+
+def test_cli_passes_locked_and_prints_keyword_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    write_build(tmp_path, 'server = RustBinary(CargoPackage("server"))\napi = OpenApi(server, output="api.yaml")\n')
+    observed: list[bool] = []
+    monkeypatch.setattr(cli, "execute", lambda steps, *, locked: observed.append(locked))
+    run_cli(["--locked", str(tmp_path)])
+    assert observed == [True]
+    run_cli(["--dry", str(tmp_path)])
+    assert capsys.readouterr().out.splitlines()[-1] == "api = OpenApi(server, output='api.yaml')"
+
+
+def test_file_output_is_keyword_only(tmp_path: Path) -> None:
+    write_build(tmp_path, 'server = RustBinary(CargoPackage("server"))\napi = OpenApi(server, "api.yaml")\n')
+    with pytest.raises(TypeError):
         load(tmp_path)

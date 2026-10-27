@@ -1,5 +1,6 @@
 """Run a result of a Wright build file and the steps it depends on."""
 
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -19,6 +20,7 @@ def run(
     result: str | None = None,
     *,
     base_dir: Annotated[Path | None, Parameter(name="--base_dir", help="Resolve step paths and commands from this directory")] = None,
+    locked: Annotated[bool, Parameter(negative=False, help="Fail when generated tracked files would change")] = False,
     dry_run: Annotated[
         bool,
         Parameter(
@@ -38,15 +40,20 @@ def run(
             print(f"{step.name} = {call(step)}" if step.name else call(step))
         return
     try:
-        execute(steps)
+        execute(steps, locked=locked)
     except WrightError as error:
         raise SystemExit(str(error)) from error
 
 
 def call(result: Step[Any]) -> str:
-    values = result.steps if isinstance(result, Group) else result.attributes().values()
-    arguments = ", ".join(argument(value) for value in values)
-    return f"{type(result).__name__}({arguments})"
+    if isinstance(result, Group):
+        arguments = [argument(value) for value in result.steps]
+    else:
+        attributes = result.attributes()
+        keywords: set[str] = {item.name for item in fields(result) if item.kw_only} if is_dataclass(result) else set()
+        arguments = [argument(value) for key, value in attributes.items() if key not in keywords]
+        arguments.extend(f"{key}={argument(value)}" for key, value in attributes.items() if key in keywords)
+    return f"{type(result).__name__}({', '.join(arguments)})"
 
 
 def argument(value: object) -> str:

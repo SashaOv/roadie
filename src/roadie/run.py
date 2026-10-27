@@ -8,8 +8,9 @@ from typing import Any, cast
 from forge.environment import repository_root
 
 from wright.errors import StepFailed, WrightError
+from wright.output import publish
 from wright.process import interrupt_on_terminate
-from wright.step import Step, Tests
+from wright.step import File, Step, Tests
 from wright.testing import TestResults
 
 
@@ -31,7 +32,7 @@ class Run:
         return destination
 
 
-def execute(steps: Sequence[Step[Any]]) -> object:
+def execute(steps: Sequence[Step[Any]], *, locked: bool = False) -> object:
     run = Run()
     live: list[Step[Any]] = []
     last_use = {id(step): index for index, step in enumerate(steps)}
@@ -46,6 +47,9 @@ def execute(steps: Sequence[Step[Any]]) -> object:
                     value = step.build(run)
                     run._values[id(step)] = value
                     live.append(step)
+                    if isinstance(step, File):
+                        value = publish(step, value, locked=locked)
+                        run._values[id(step)] = value
                     if isinstance(step, Tests):
                         if not isinstance(value, TestResults):
                             raise WrightError("A Tests step must return TestResults")

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from forge.environment import repository_root
 from jammer_build.steps import OpenApi
-from wright import CargoPackage, Group, Service, Step, WrightError, cli
+from wright import CargoPackage, File, Group, Service, Step, WrightError, cli
 from wright import TestFailure as Failure
 from wright import TestResults as Results
 from wright import Tests as Checks
@@ -389,3 +389,113 @@ def test_group_value_contains_its_steps_values() -> None:
     group = Group(first, second)
     assert execute([first, second, group]) == ("first", "second")
     assert execute([Group()]) == ()
+
+
+@dataclass(eq=False)
+class TextFile(File):
+    text: str
+
+    def build(self, run: Run) -> Path:
+        artifact = run.artifact(self, ".txt")
+        artifact.write_text(self.text)
+        return artifact
+
+
+@pytest.mark.parametrize("previous", [None, "old\n", "new\n"])
+def test_file_output_is_published_and_equal_file_is_not_rewritten(previous: str | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("wright.run.repository_root", lambda: tmp_path)
+    destination = tmp_path / "nested/output.txt"
+    if previous is not None:
+        destination.parent.mkdir()
+        destination.write_text(previous)
+        os.utime(destination, ns=(1_000_000_000, 1_000_000_000))
+    step = TextFile("new\n", output="nested/output.txt")
+    assert execute([step]) == destination
+    assert destination.read_text() == "new\n"
+    output = capsys.readouterr().out
+    if previous == "new\n":
+        assert output == ""
+        assert destination.stat().st_mtime_ns == 1_000_000_000
+    else:
+        assert f"updated {destination}" in output
+
+
+@pytest.mark.parametrize("previous", [None, "old\n", "new\n"])
+@pytest.mark.parametrize("tracked", [False, True])
+def test_locked_file_output_protects_tracked_files_and_writes_untracked_files(previous: str | None, tracked: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("wright.run.repository_root", lambda: tmp_path)
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    destination = tmp_path / "output.txt"
+    destination.write_text(previous or "old\n")
+    if tracked:
+        subprocess.run(["git", "add", "output.txt"], cwd=tmp_path, check=True)
+    if previous is None:
+        destination.unlink()
+    step = TextFile("new\n", output=Path("output.txt"))
+    step.name = "generated"
+    if tracked and previous != "new\n":
+        with pytest.raises(StepFailed) as error:
+            execute([step], locked=True)
+        assert "generated failed" in str(error.value)
+        assert str(destination) in str(error.value)
+        diff = capsys.readouterr().out
+        assert "--- " in diff and "+++ " in diff and "+new\n" in diff
+        assert (destination.read_text() if destination.exists() else None) == previous
+    else:
+        assert execute([step], locked=True) == destination
+        assert destination.read_text() == "new\n"
+
+
+def test_file_output_value_is_available_to_dependents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("wright.run.repository_root", lambda: tmp_path)
+
+    @dataclass(eq=False)
+    class Consumer(Step[str]):
+        source: File
+
+        def build(self, run: Run) -> str:
+            assert run[self.source] == tmp_path / "output.txt"
+            return run[self.source].read_text()
+
+    source = TextFile("new\n", output="output.txt")
+    assert execute([source, Consumer(source)]) == "new\n"
+
+
+def test_file_output_failure_releases_the_built_artifact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("wright.run.repository_root", lambda: tmp_path)
+    destination = tmp_path / "output.txt"
+    destination.mkdir()
+    released: list[Path] = []
+
+    class ReleasingFile(TextFile):
+        def teardown(self, value: Path) -> None:
+            released.append(value)
+
+    step = ReleasingFile("new\n", output="output.txt")
+    with pytest.raises(StepFailed, match="output.txt"):
+        execute([step])
+    assert released == [Run().artifact(step, ".txt")]
+
+
+def test_file_output_is_written_under_locked_outside_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("wright.run.repository_root", lambda: tmp_path)
+    destination = tmp_path / "new/dir/output.txt"
+    assert execute([TextFile("new\n", output=destination)], locked=True) == destination
+
+
+def test_locked_file_output_reports_git_failure_and_keeps_destination(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("wright.run.repository_root", lambda: tmp_path)
+    (tmp_path / ".git").write_text("invalid git metadata\n")
+    destination = tmp_path / "output.txt"
+    destination.write_text("old\n")
+    with pytest.raises(StepFailed) as error:
+        execute([TextFile("new\n", output=destination)], locked=True)
+    assert str(destination) in str(error.value)
+    assert "Cannot check whether" in str(error.value)
+    assert destination.read_text() == "old\n"
