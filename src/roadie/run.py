@@ -3,9 +3,8 @@
 import sys
 from collections.abc import Mapping, Sequence
 
-from forge.build_script import interrupt_on_terminate
-
 from wright.graph import Result, Service, WrightError, current_result
+from wright.process import interrupt_on_terminate
 
 
 class StepFailed(WrightError):

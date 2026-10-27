@@ -6,15 +6,6 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from forge.build_script import (
-    SCHEMATHESIS_COMMAND,
-    available_port,
-    dev_server_environment,
-    prepare_dev_server_storage,
-    spawn_server,
-    stop_dev_server,
-    wait_for_dev_server,
-)
 from forge.environment import repository_root
 
 from wright.graph import (
@@ -25,6 +16,12 @@ from wright.graph import (
     Verdict,
     WrightError,
     current_result,
+)
+from wright.process import (
+    available_port,
+    spawn_server,
+    stop_dev_server,
+    wait_for_dev_server,
 )
 
 _CONTRACT_PATH = "jammer/server/api.yaml"
@@ -160,6 +157,9 @@ def generate_openapi(server: Path) -> Path:
 
 def start_service(binary: Path, environment: DevDeploymentEnvironment) -> RunningService:
     """Serve `binary` on a free loopback port with fresh storage."""
+    # Defer the harness import until its process helpers have finished importing.
+    from forge.build_script import dev_server_environment, prepare_dev_server_storage
+
     if not isinstance(environment, DevDeploymentEnvironment):
         raise TypeError("deploy runs on the local machine")
     port = available_port()
@@ -188,6 +188,8 @@ def start_service(binary: Path, environment: DevDeploymentEnvironment) -> Runnin
 
 
 def fuzz_contract(api: Path, service: RunningService) -> None:
+    from forge.build_script import SCHEMATHESIS_COMMAND
+
     command = tuple(
         str(api) if argument == _CONTRACT_PATH
         else service.url if argument == _PLACEHOLDER_URL

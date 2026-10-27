@@ -330,9 +330,9 @@ def test_deploy_reports_a_server_that_exits_before_it_listens(
     monkeypatch.setattr(
         "wright.steps.tempfile.mkdtemp", lambda prefix: storage.mkdir() or str(storage)
     )
-    monkeypatch.setattr(
-        "wright.steps.build_rust_binary", lambda package: Path("/bin/true")
-    )
+    binary = tmp_path / "exits"
+    contract_printer(binary, "")
+    monkeypatch.setattr("wright.steps.build_rust_binary", lambda package: binary)
     write_build(
         tmp_path / "proj",
         'server = rust_binary(CargoPackage("jammer_server"))\n'
@@ -432,7 +432,7 @@ def test_contract_fuzz_uses_the_generated_contract_and_the_service_url(
     from wright.steps import fuzz_contract
 
     service = RunningService(
-        process=subprocess.Popen(["/bin/true"]),
+        process=subprocess.Popen([sys.executable, "-c", "pass"]),
         url="http://127.0.0.1:43210",
         storage=Path("/tmp/wright-storage"),
     )
