@@ -1,17 +1,20 @@
 """Start processes, check readiness and stop their process trees."""
 
 import os
+import shlex
 import signal
 import socket
 import subprocess
 import time
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
 from forge.environment import repository_root
+
+_COMMAND_NAME_WORDS = 3
 
 
 @dataclass(frozen=True)
@@ -67,17 +70,30 @@ def wait_for_dev_server(
         return_code = process.poll()
         if return_code is not None:
             raise SystemExit(
-                f"Jammer exited with status {return_code} before becoming ready"
+                f"{_process_name(process)} exited with status {return_code} before becoming ready"
             )
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise SystemExit(
-                f"Jammer did not start listening on port {port} within {timeout:g}s"
+                f"{_process_name(process)} did not start listening on port {port} within {timeout:g}s"
             )
         try:
             process.wait(timeout=min(0.2, remaining))
         except subprocess.TimeoutExpired:
             pass
+
+
+def _process_name(process: subprocess.Popen[bytes]) -> str:
+    command = process.args
+    if isinstance(command, (str, bytes, os.PathLike)):
+        return Path(os.fsdecode(command)).name
+    words = [Path(os.fsdecode(command[0])).name]
+    for argument in command[1:_COMMAND_NAME_WORDS]:
+        word = os.fsdecode(argument)
+        if word.startswith("-"):
+            break
+        words.append(word)
+    return shlex.join(words)
 
 
 def spawn_server(
@@ -160,7 +176,7 @@ def signal_server(process: subprocess.Popen[bytes], sent: signal.Signals) -> Non
 
 
 @contextmanager
-def interrupt_on_terminate() -> Iterator[None]:
+def interrupt_on_terminate() -> Generator[None]:
     """Route SIGTERM into the same cleanup path as Ctrl-C.
 
     Python's default SIGTERM handler exits without unwinding, so a `kill` or a

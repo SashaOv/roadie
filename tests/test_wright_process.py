@@ -1,4 +1,5 @@
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -95,7 +96,59 @@ def test_running_process_cleans_up_failed_start(ending: str, monkeypatch: pytest
 
     monkeypatch.setattr(processes, "spawn_server", spawn)
     command = "raise SystemExit(7)" if ending == "exit" else "import threading; threading.Event().wait()"
-    with pytest.raises(SystemExit, match="exited with status 7|did not start listening"):
+    reason = (
+        f"{re.escape(Path(sys.executable).name)} exited with status 7 before becoming ready"
+        if ending == "exit"
+        else f"{re.escape(Path(sys.executable).name)} did not start listening"
+    )
+    with pytest.raises(SystemExit, match=reason):
         processes.RunningProcess.start((sys.executable, "-c", command), port=processes.available_port(), timeout=0.5)
     assert len(started) == 1
     assert started[0].poll() is not None
+
+
+@pytest.mark.parametrize("ending", ["exit", "timeout"])
+@pytest.mark.parametrize(
+    ("command", "name"),
+    [
+        (("tool",), "tool"),
+        (["tool", "serve"], "tool serve"),
+        (("tool", "dev", "server"), "tool dev server"),
+        (("tool", "dev", "server", "extra"), "tool dev server"),
+        (("tool", "--config", "settings"), "tool"),
+        (("tool", "serve", "--port", "43210"), "tool serve"),
+        (("tool", "serve local"), "tool 'serve local'"),
+        ((b"tool", b"serve"), "tool serve"),
+        ("tool", "tool"),
+        (b"tool", "tool"),
+        (Path("tool"), "tool"),
+    ],
+)
+def test_startup_errors_identify_the_command(
+    command: object, name: str, ending: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executable = tmp_path / "bin" / "tool"
+    if isinstance(command, (tuple, list)):
+        command = [executable, *command[1:]]
+    elif isinstance(command, bytes):
+        command = os.fsencode(executable)
+    elif isinstance(command, Path):
+        command = executable
+    else:
+        command = str(executable)
+
+    class Process:
+        args = command
+
+        def poll(self) -> int | None:
+            return 7 if ending == "exit" else None
+
+    monkeypatch.setattr(processes, "port_is_busy", lambda port: False)
+    with pytest.raises(SystemExit) as error:
+        processes.wait_for_dev_server(Process(), port=43210, timeout=0)
+    reason = (
+        "exited with status 7 before becoming ready"
+        if ending == "exit"
+        else "did not start listening on port 43210 within 0s"
+    )
+    assert str(error.value) == f"{name} {reason}"
