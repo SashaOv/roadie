@@ -356,6 +356,7 @@ def test_cli_names_failing_step_and_does_not_run_later_steps(monkeypatch: pytest
 
     monkeypatch.setattr(RustBinary, "build", fail)
     monkeypatch.setattr(OpenApi, "build", unexpected)
+    monkeypatch.setattr("wright.run.load_records", lambda build_dir, root: {})
     with pytest.raises(SystemExit, match="jammer_server failed: cannot compile"):
         cli.run(repository_root() / "jammer", "api")
 

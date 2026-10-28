@@ -87,8 +87,9 @@ def test_include_names_results_by_directory_and_loads_each_file_once(
 
 @pytest.mark.parametrize("flag", ["--dry", "--dry-run"])
 def test_dry_run_prints_the_steps_in_dependency_order(
-    flag: str, capsys: pytest.CaptureFixture[str]
+    flag: str, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr("wright.run.load_records", lambda build_dir, root: {})
     run_cli([flag, str(JAMMER), "fuzzed"])
 
     assert capsys.readouterr().out.splitlines() == [
