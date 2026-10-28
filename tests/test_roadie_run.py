@@ -11,27 +11,27 @@ from pathlib import Path
 import pytest
 from forge.environment import repository_root
 from jammer_build.steps import OpenApi
-from wright import (
+from roadie import (
     Binary,
     CargoPackage,
     File,
     Group,
     HttpService,
+    RoadieError,
     Service,
     Step,
-    WrightError,
     cli,
 )
-from wright import TestFailure as Failure
-from wright import TestResults as Results
-from wright import Tests as Checks
-from wright.errors import StepFailed
-from wright.fingerprint import fingerprint
-from wright.graph import Graph, load
-from wright.inputs import Files
-from wright.process import RunningProcess, available_port
-from wright.run import Run, execute
-from wright.steps import RustBinary
+from roadie import TestFailure as Failure
+from roadie import TestResults as Results
+from roadie import Tests as Checks
+from roadie.errors import StepFailed
+from roadie.fingerprint import fingerprint
+from roadie.graph import Graph, load
+from roadie.inputs import Files
+from roadie.process import RunningProcess, available_port
+from roadie.run import Run, execute
+from roadie.steps import RustBinary
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -263,7 +263,7 @@ def test_start_cmd_reports_early_exit() -> None:
 def test_run_artifact_uses_the_build_directory_and_variable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("wright.run.repository_root", lambda: tmp_path)
+    monkeypatch.setattr("roadie.run.repository_root", lambda: tmp_path)
     jammer = tmp_path / "jammer"
     other = tmp_path / "other"
     first, second = Value("one"), Value("two")
@@ -271,19 +271,19 @@ def test_run_artifact_uses_the_build_directory_and_variable(
     second.variable, second.build_dir = "api", other
     run = Run()
 
-    assert run.artifact(first, ".yaml") == tmp_path / "target" / "wright" / "jammer" / "api.yaml"
-    assert run.artifact(second, ".yaml") == tmp_path / "target" / "wright" / "other" / "api.yaml"
+    assert run.artifact(first, ".yaml") == tmp_path / "target" / "roadie" / "jammer" / "api.yaml"
+    assert run.artifact(second, ".yaml") == tmp_path / "target" / "roadie" / "other" / "api.yaml"
     outside = tmp_path / "elsewhere"
     # build_dir is outside the repository root the run was given.
     external = Value("ext")
     external.variable = "api"
-    external.build_dir = Path("/tmp/wright-outside-build")
+    external.build_dir = Path("/tmp/roadie-outside-build")
     copied = run.artifact(external, ".yaml")
-    assert copied.parent.parent == tmp_path / "target" / "wright" / "_outside"
+    assert copied.parent.parent == tmp_path / "target" / "roadie" / "_outside"
     assert len(copied.parent.name) == 12
     assert copied.name == "api.yaml"
     unnamed = Value("loose")
-    assert run.artifact(unnamed, ".txt") == tmp_path / "target" / "wright" / f"Value-{unnamed.serial}.txt"
+    assert run.artifact(unnamed, ".txt") == tmp_path / "target" / "roadie" / f"Value-{unnamed.serial}.txt"
 
 
 def test_run_releases_values_at_end() -> None:
@@ -296,7 +296,7 @@ def test_run_releases_values_at_end() -> None:
 
     step = Capture("value")
     execute([step])
-    with pytest.raises(WrightError, match="not available"):
+    with pytest.raises(RoadieError, match="not available"):
         runs[0][step]
 
 
@@ -330,7 +330,7 @@ def test_rust_binary_picks_executable_from_captured_cargo_json(
 
     monkeypatch.setattr(Step, "_cmd", command)
     monkeypatch.setattr(
-        "wright.cargo.CargoPackage.fingerprint",
+        "roadie.cargo.CargoPackage.fingerprint",
         lambda self, base_dir: f"package:{self.name}",
     )
     source = Path(executable)
@@ -351,7 +351,7 @@ def test_rust_binary_rejects_missing_executable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "wright.cargo.CargoPackage.fingerprint",
+        "roadie.cargo.CargoPackage.fingerprint",
         lambda self, base_dir: f"package:{self.name}",
     )
     monkeypatch.setattr(
@@ -370,7 +370,7 @@ def test_cli_names_failing_step_and_does_not_run_later_steps(monkeypatch: pytest
 
     monkeypatch.setattr(RustBinary, "build", fail)
     monkeypatch.setattr(OpenApi, "build", unexpected)
-    monkeypatch.setattr("wright.run.load_records", lambda build_dir, root: {})
+    monkeypatch.setattr("roadie.run.load_records", lambda build_dir, root: {})
     with pytest.raises(SystemExit, match="jammer_server failed: cannot compile"):
         cli.run(repository_root() / "jammer", "api")
 
@@ -431,7 +431,7 @@ def test_started_commands_run_in_the_steps_base_directory(tmp_path: Path, monkey
 
 
 def test_unnamed_steps_of_one_class_get_distinct_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("wright.run.repository_root", lambda: tmp_path)
+    monkeypatch.setattr("roadie.run.repository_root", lambda: tmp_path)
     first, second = Value("first"), Value("second")
     run = Run()
     one, two = run.artifact(first, ".txt"), run.artifact(second, ".txt")
@@ -460,7 +460,7 @@ class TextFile(File):
 @pytest.mark.parametrize("previous", [None, "old\n", "new\n"])
 def test_file_output_is_published_and_equal_file_is_not_rewritten(previous: str | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("wright.run.repository_root", lambda: tmp_path)
+    monkeypatch.setattr("roadie.run.repository_root", lambda: tmp_path)
     destination = tmp_path / "nested/output.txt"
     if previous is not None:
         destination.parent.mkdir()
@@ -481,7 +481,7 @@ def test_file_output_is_published_and_equal_file_is_not_rewritten(previous: str 
 @pytest.mark.parametrize("tracked", [False, True])
 def test_locked_file_output_protects_tracked_files_and_writes_untracked_files(previous: str | None, tracked: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("wright.run.repository_root", lambda: tmp_path)
+    monkeypatch.setattr("roadie.run.repository_root", lambda: tmp_path)
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     destination = tmp_path / "output.txt"
     destination.write_text(previous or "old\n")
@@ -506,7 +506,7 @@ def test_locked_file_output_protects_tracked_files_and_writes_untracked_files(pr
 
 def test_file_output_value_is_available_to_dependents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("wright.run.repository_root", lambda: tmp_path)
+    monkeypatch.setattr("roadie.run.repository_root", lambda: tmp_path)
 
     @dataclass(eq=False)
     class Consumer(Step[str]):
@@ -522,7 +522,7 @@ def test_file_output_value_is_available_to_dependents(tmp_path: Path, monkeypatc
 
 def test_file_output_failure_releases_the_built_artifact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("wright.run.repository_root", lambda: tmp_path)
+    monkeypatch.setattr("roadie.run.repository_root", lambda: tmp_path)
     destination = tmp_path / "output.txt"
     destination.mkdir()
     released: list[Path] = []
@@ -539,14 +539,14 @@ def test_file_output_failure_releases_the_built_artifact(tmp_path: Path, monkeyp
 
 def test_file_output_is_written_under_locked_outside_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("wright.run.repository_root", lambda: tmp_path)
+    monkeypatch.setattr("roadie.run.repository_root", lambda: tmp_path)
     destination = tmp_path / "new/dir/output.txt"
     assert execute([TextFile("new\n", output=destination)], locked=True) == destination
 
 
 def test_locked_file_output_reports_git_failure_and_keeps_destination(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("wright.run.repository_root", lambda: tmp_path)
+    monkeypatch.setattr("roadie.run.repository_root", lambda: tmp_path)
     (tmp_path / ".git").write_text("invalid git metadata\n")
     destination = tmp_path / "output.txt"
     destination.write_text("old\n")
@@ -575,19 +575,19 @@ class _Stopped:
 
 
 def _isolate_repo(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
-    for module in ("wright.run", "wright.fingerprint", "wright.inputs"):
+    for module in ("roadie.run", "roadie.fingerprint", "roadie.inputs"):
         monkeypatch.setattr(f"{module}.repository_root", lambda: root)
 
 
 def _write_build(directory: Path, source: str) -> None:
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "build.py").write_text(f"from wright import *\n{source}")
+    (directory / "build.py").write_text(f"from roadie import *\n{source}")
 
 
 _EMITTER = """
 from dataclasses import dataclass
 from pathlib import Path
-from wright.run import Run
+from roadie.run import Run
 
 @dataclass(eq=False)
 class Emitter(File):
@@ -716,7 +716,7 @@ def test_failed_step_writes_no_record_and_a_changed_output_is_rebuilt(tmp_path: 
     note.build_variables = frozenset({"note"})
     with pytest.raises(StepFailed, match="nope"):
         execute([note])
-    record = root / "target" / "wright" / "build.record.json"
+    record = root / "target" / "roadie" / "build.record.json"
     assert not record.exists()
 
     state["fail"] = False
@@ -810,7 +810,7 @@ def test_rust_binary_is_rebuilt_when_its_recorded_copy_changes(tmp_path: Path, m
         return subprocess.CompletedProcess(args, 0, message, "")
 
     monkeypatch.setattr(Step, "_cmd", command)
-    monkeypatch.setattr("wright.cargo.CargoPackage.fingerprint", lambda self, base_dir: "package:app")
+    monkeypatch.setattr("roadie.cargo.CargoPackage.fingerprint", lambda self, base_dir: "package:app")
     step = RustBinary(CargoPackage("app"))
     step.name = step.variable = "app"
     first = execute([step])
@@ -830,10 +830,10 @@ def test_build_files_keep_separate_records_and_include_reuses_them(tmp_path: Pat
     _write_build(root / "other", _EMITTER)
     execute(load(root / "jammer").plan())
     execute(load(root / "other").plan())
-    assert (root / "target" / "wright" / "jammer" / "api.txt").is_file()
-    assert (root / "target" / "wright" / "other" / "api.txt").is_file()
-    assert (root / "target" / "wright" / "jammer" / "build.record.json").is_file()
-    assert (root / "target" / "wright" / "other" / "build.record.json").is_file()
+    assert (root / "target" / "roadie" / "jammer" / "api.txt").is_file()
+    assert (root / "target" / "roadie" / "other" / "api.txt").is_file()
+    assert (root / "target" / "roadie" / "jammer" / "build.record.json").is_file()
+    assert (root / "target" / "roadie" / "other" / "build.record.json").is_file()
 
     _write_build(root / "module", _EMITTER)
     _write_build(root, 'module = include("module")\nresult = module.api\n')
@@ -843,7 +843,7 @@ def test_build_files_keep_separate_records_and_include_reuses_them(tmp_path: Pat
     ran.unlink()
     execute(load(root / "module").plan())
     assert not ran.exists()
-    assert (root / "target" / "wright" / "module" / "api.txt").read_text() == "v1"
+    assert (root / "target" / "roadie" / "module" / "api.txt").read_text() == "v1"
 
 
 def test_dry_run_marks_reuse_and_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -875,14 +875,14 @@ def test_plain_attribute_of_unsupported_type_is_an_error() -> None:
 
     step = Custom({"bad": 1})
     step.name = "custom"
-    with pytest.raises(WrightError, match="custom attribute value must be"):
+    with pytest.raises(RoadieError, match="custom attribute value must be"):
         fingerprint(step)
 
 
 def test_step_fingerprint_covers_files_dependency_outputs_and_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path.resolve()
-    monkeypatch.setattr("wright.inputs.repository_root", lambda: root)
-    monkeypatch.setattr("wright.fingerprint.repository_root", lambda: root)
+    monkeypatch.setattr("roadie.inputs.repository_root", lambda: root)
+    monkeypatch.setattr("roadie.fingerprint.repository_root", lambda: root)
     monkeypatch.chdir(root)
     bundle = root / "dist"
     bundle.mkdir()
@@ -1183,7 +1183,7 @@ def test_cli_ctrl_c_on_a_requested_service_exits_0(tmp_path: Path, capsys: pytes
 _STDIN_SERVER = """
 import sys
 
-from wright.process import available_port
+from roadie.process import available_port
 
 
 class Reader(Service):
@@ -1216,7 +1216,7 @@ def test_requested_service_reads_the_terminal_input(
     # A dev server's keyboard shortcuts (Vite's b and q) need its stdin.
     _write_build(tmp_path, _STDIN_SERVER)
     finished = subprocess.run(
-        (sys.executable, "-c", "from wright.cli import main; main()", str(tmp_path)),
+        (sys.executable, "-c", "from roadie.cli import main; main()", str(tmp_path)),
         cwd=repository_root(),
         input=typed,
         capture_output=True,
@@ -1254,8 +1254,8 @@ def test_env_files_override_step_settings_and_not_the_reverse(
         seen.append(environment)
         return _Stopped()
 
-    monkeypatch.setattr("wright.step.subprocess.run", fake_run)
-    monkeypatch.setattr("wright.step.RunningProcess.start", fake_start)
+    monkeypatch.setattr("roadie.step.subprocess.run", fake_run)
+    monkeypatch.setattr("roadie.step.RunningProcess.start", fake_start)
 
     class Server(Service):
         def build(self, run: Run) -> _Stopped:
@@ -1324,7 +1324,7 @@ def test_missing_env_file_stops_before_any_step(tmp_path: Path) -> None:
 
     note = Note()
     note.env_files = (missing,)
-    with pytest.raises(WrightError, match="environment file does not exist:.*nope.env"):
+    with pytest.raises(RoadieError, match="environment file does not exist:.*nope.env"):
         execute([note])
 
 

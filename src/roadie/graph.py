@@ -14,9 +14,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from wright.config import file_settings
-from wright.errors import WrightError
-from wright.step import Step
+from roadie.config import file_settings
+from roadie.errors import RoadieError
+from roadie.step import Step
 
 BUILD_FILE = "build.py"
 
@@ -31,7 +31,7 @@ class Graph:
             return max(self.results.values(), key=lambda result: result.serial)
         if name not in self.results:
             known = ", ".join(self.results)
-            raise WrightError(
+            raise RoadieError(
                 f"{self.path} has no result named {name!r}; results: {known}"
             )
         return self.results[name]
@@ -45,7 +45,7 @@ class Graph:
         def visit(result: Step[Any]) -> None:
             if any(item is result for item in visiting):
                 cycle = " -> ".join(item.name or type(item).__name__ for item in (*visiting, result))
-                raise WrightError(f"steps depend on each other: {cycle}")
+                raise RoadieError(f"steps depend on each other: {cycle}")
             if id(result) in seen:
                 return
             visiting.append(result)
@@ -67,7 +67,7 @@ class _Session:
     loading: list[Path] = field(default_factory=list)
 
 
-_session: ContextVar[_Session | None] = ContextVar("wright_session", default=None)
+_session: ContextVar[_Session | None] = ContextVar("roadie_session", default=None)
 
 
 def load(directory: Path, *, base_dir: Path | None = None) -> Graph:
@@ -83,7 +83,7 @@ def include(directory: str) -> SimpleNamespace:
     """Load `<directory>/build.py`, relative to the including file, and return its results."""
     session = _session.get()
     if session is None:
-        raise WrightError("include() works only in a build.py that Wright loads")
+        raise RoadieError("include() works only in a build.py that Roadie loads")
     graph = _load(session, (session.loading[-1] / directory).resolve())
     return SimpleNamespace(**graph.results)
 
@@ -96,17 +96,17 @@ def _load(session: _Session, directory: Path) -> Graph:
         cycle = " -> ".join(
             str(step / BUILD_FILE) for step in (*session.loading, directory)
         )
-        raise WrightError(f"build files include each other: {cycle}")
+        raise RoadieError(f"build files include each other: {cycle}")
     if not path.is_file():
-        raise WrightError(f"{directory} has no {BUILD_FILE}")
+        raise RoadieError(f"{directory} has no {BUILD_FILE}")
 
     with _loading(session, directory), file_settings(directory, session.base_dir):
-        namespace = runpy.run_path(str(path), run_name=f"wright:{path}")
+        namespace = runpy.run_path(str(path), run_name=f"roadie:{path}")
     results = {
         name: value for name, value in namespace.items() if isinstance(value, Step)
     }
     if not results:
-        raise WrightError(f"{path} defines no results")
+        raise RoadieError(f"{path} defines no results")
 
     prefix = _prefix(session.root, directory)
     names = frozenset(results)

@@ -1,10 +1,10 @@
 from pathlib import Path
 
 import pytest
-from wright import WrightError
-from wright.testing import TestFailure as Failure
-from wright.testing import TestResults as Results
-from wright.testing import read_junit
+from roadie import RoadieError
+from roadie.testing import TestFailure as Failure
+from roadie.testing import TestResults as Results
+from roadie.testing import read_junit
 
 
 def test_read_junit_reads_nested_failures_errors_and_log_messages(
@@ -54,7 +54,7 @@ def test_read_junit_reports_unreadable_or_invalid_report(
     report = tmp_path / "tests.xml"
     if xml is not None:
         report.write_text(xml)
-    with pytest.raises(WrightError) as error:
+    with pytest.raises(RoadieError) as error:
         read_junit(report)
     assert reason in str(error.value)
     assert str(report) in str(error.value)

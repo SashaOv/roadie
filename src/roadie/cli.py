@@ -1,4 +1,4 @@
-"""Run a result of a Wright build file and the steps it depends on."""
+"""Run a result of a Roadie build file and the steps it depends on."""
 
 from collections.abc import Sequence
 from dataclasses import fields, is_dataclass
@@ -7,10 +7,10 @@ from typing import Annotated, Any
 
 from cyclopts import App, Parameter
 
-from wright.graph import WrightError, load
-from wright.run import execute, reuse_markers
-from wright.step import Step
-from wright.steps import Group
+from roadie.graph import RoadieError, load
+from roadie.run import execute, reuse_markers
+from roadie.step import Step
+from roadie.steps import Group
 
 app = App(help=__doc__, version_flags=())
 
@@ -38,12 +38,12 @@ def run(
     """Run `result` of `<directory>/build.py`, by default the last one defined."""
     try:
         steps = load(directory, base_dir=base_dir).plan(result)
-    except WrightError as error:
+    except RoadieError as error:
         raise SystemExit(str(error)) from error
     if dry_run:
         try:
             marks = reuse_markers(steps, env=env or ())
-        except WrightError as error:
+        except RoadieError as error:
             raise SystemExit(str(error)) from error
         for step, reused in zip(steps, marks, strict=True):
             line = f"{step.name} = {call(step)}" if step.name else call(step)
@@ -51,7 +51,7 @@ def run(
         return
     try:
         execute(steps, locked=locked, env=env or ())
-    except WrightError as error:
+    except RoadieError as error:
         raise SystemExit(str(error)) from error
 
 

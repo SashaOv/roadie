@@ -8,7 +8,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-from wright import process as processes
+from roadie import process as processes
 
 
 @pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX-only")

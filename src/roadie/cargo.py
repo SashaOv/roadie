@@ -12,14 +12,14 @@ from pathlib import Path
 
 from forge.environment import repository_root
 
-from wright.errors import WrightError
-from wright.inputs import Input, digest
+from roadie.errors import RoadieError
+from roadie.inputs import Input, digest
 
 _CARGO_ENV_EXACT = frozenset({"RUSTFLAGS", "RUSTDOCFLAGS", "CARGO_ENCODED_RUSTFLAGS"})
 _CARGO_ENV_PREFIXES = ("CARGO_PROFILE_", "CARGO_BUILD_")
 _ROOT_FILES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/config.toml")
 _EMPTY = object()
-_cache: ContextVar[object] = ContextVar("wright_cargo_snapshot", default=None)
+_cache: ContextVar[object] = ContextVar("roadie_cargo_snapshot", default=None)
 
 
 @dataclass(frozen=True)
@@ -132,7 +132,7 @@ def _cargo_environment() -> dict[str, str]:
 def _closure(packages: Sequence[RustPackage], name: str) -> tuple[RustPackage, ...]:
     by_name = {package.name: package for package in packages}
     if name not in by_name:
-        raise WrightError(f"cargo package {name!r} is not in the workspace")
+        raise RoadieError(f"cargo package {name!r} is not in the workspace")
     selected: set[str] = set()
     pending = [name]
     while pending:

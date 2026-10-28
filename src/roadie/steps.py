@@ -5,11 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from wright.cargo import CargoPackage
-from wright.errors import WrightError
-from wright.inputs import Files
-from wright.run import Run
-from wright.step import Binary, Step
+from roadie.cargo import CargoPackage
+from roadie.errors import RoadieError
+from roadie.inputs import Files
+from roadie.run import Run
+from roadie.step import Binary, Step
 
 
 class Group(Step[tuple[object, ...]]):
@@ -17,7 +17,7 @@ class Group(Step[tuple[object, ...]]):
 
     def __init__(self, *steps: Step[Any]) -> None:
         if any(not isinstance(step, Step) for step in steps):
-            raise WrightError("Group takes only steps")
+            raise RoadieError("Group takes only steps")
         self.steps = steps
 
     def build(self, run: Run) -> tuple[object, ...]:

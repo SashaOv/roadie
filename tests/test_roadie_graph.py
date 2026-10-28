@@ -4,17 +4,17 @@ from pathlib import Path
 
 import pytest
 from forge.environment import repository_root
-from wright import RustBinary, Step, cli, config
-from wright.graph import Graph, WrightError, include, load
-from wright.run import Run
-from wright.steps import CargoPackage
+from roadie import RustBinary, Step, cli, config
+from roadie.graph import Graph, RoadieError, include, load
+from roadie.run import Run
+from roadie.steps import CargoPackage
 
 JAMMER = repository_root() / "jammer"
 
 
 def write_build(directory: Path, source: str) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "build.py").write_text(f"from wright import *\nfrom jammer_build.steps import *\n\n{source}")
+    (directory / "build.py").write_text(f"from roadie import *\nfrom jammer_build.steps import *\n\n{source}")
     return directory
 
 
@@ -89,7 +89,7 @@ def test_include_names_results_by_directory_and_loads_each_file_once(
 def test_dry_run_prints_the_steps_in_dependency_order(
     flag: str, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("wright.run.load_records", lambda build_dir, root: {})
+    monkeypatch.setattr("roadie.run.load_records", lambda build_dir, root: {})
     run_cli([flag, str(JAMMER), "fuzzed"])
 
     assert capsys.readouterr().out.splitlines() == [
@@ -124,14 +124,14 @@ def test_cli_reports_an_unknown_result_with_the_known_ones() -> None:
 
 
 def test_missing_build_file_names_the_directory(tmp_path: Path) -> None:
-    with pytest.raises(WrightError, match=f"{tmp_path} has no build.py"):
+    with pytest.raises(RoadieError, match=f"{tmp_path} has no build.py"):
         load(tmp_path)
 
 
 def test_build_file_without_results_fails(tmp_path: Path) -> None:
     write_build(tmp_path, "answer = 42\n")
 
-    with pytest.raises(WrightError, match="build.py defines no results"):
+    with pytest.raises(RoadieError, match="build.py defines no results"):
         load(tmp_path)
 
 
@@ -141,24 +141,24 @@ def test_include_cycle_names_the_files(tmp_path: Path) -> None:
     a, b = (tmp_path / name / "build.py" for name in "ab")
 
     with pytest.raises(
-        WrightError, match=f"build files include each other: {a} -> {b} -> {a}$"
+        RoadieError, match=f"build files include each other: {a} -> {b} -> {a}$"
     ):
         load(tmp_path / "a")
 
 
-def test_include_works_only_while_wright_loads_a_build_file(tmp_path: Path) -> None:
-    message = r"include\(\) works only in a build.py that Wright loads"
-    with pytest.raises(WrightError, match=message):
+def test_include_works_only_while_roadie_loads_a_build_file(tmp_path: Path) -> None:
+    message = r"include\(\) works only in a build.py that Roadie loads"
+    with pytest.raises(RoadieError, match=message):
         include("jammer")
 
     load(JAMMER)
-    with pytest.raises(WrightError, match=message):
+    with pytest.raises(RoadieError, match=message):
         include("jammer")
 
     write_build(tmp_path, 'missing = include("missing")\n')
-    with pytest.raises(WrightError, match="has no build.py"):
+    with pytest.raises(RoadieError, match="has no build.py"):
         load(tmp_path)
-    with pytest.raises(WrightError, match=message):
+    with pytest.raises(RoadieError, match=message):
         include("jammer")
 
 
@@ -191,14 +191,14 @@ def test_step_dependency_cycle_names_the_steps(tmp_path: Path) -> None:
     first, second = Custom(), Custom()
     first.name, second.name = "first", "second"
     first.argument, second.argument = second, first
-    with pytest.raises(WrightError, match="steps depend on each other: first -> second -> first"):
+    with pytest.raises(RoadieError, match="steps depend on each other: first -> second -> first"):
         Graph(tmp_path / "build.py", {"first": first}).plan()
 
 
-def test_wright_does_not_import_harness_or_jammer() -> None:
+def test_roadie_does_not_import_harness_or_jammer() -> None:
     forbidden = ("forge.build_script", "jammer_build")
     violations: list[str] = []
-    for path in (repository_root() / "forge/wright").glob("*.py"):
+    for path in (repository_root() / "forge/roadie").glob("*.py"):
         for node in ast.walk(ast.parse(path.read_text())):
             names: list[str] = []
             if isinstance(node, ast.Import):
@@ -250,7 +250,7 @@ def test_config_changes_only_subsequent_steps_and_is_released_after_load(tmp_pat
     assert graph.results["before"].base_dir == tmp_path / "project"
     assert graph.results["after"].base_dir == tmp_path / "project/work"
     assert RustBinary(CargoPackage("outside")).base_dir == tmp_path
-    with pytest.raises(WrightError, match="config.*only.*build.py"):
+    with pytest.raises(RoadieError, match="config.*only.*build.py"):
         config(base_dir="outside")
     write_build(tmp_path / "bad", 'config(base_dir="work")\nraise RuntimeError("broken build")\n')
     with pytest.raises(RuntimeError, match="broken build"):
@@ -293,21 +293,21 @@ def test_cli_passes_env_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 
 def test_unknown_config_name_lists_known_names(tmp_path: Path) -> None:
     write_build(tmp_path, 'config(unknown="value")\nserver = RustBinary(CargoPackage("server"))\n')
-    with pytest.raises(WrightError, match="unknown.*known settings: base_dir, env"):
+    with pytest.raises(RoadieError, match="unknown.*known settings: base_dir, env"):
         load(tmp_path)
 
 
 @pytest.mark.parametrize("value", ["None", "42"])
 def test_config_rejects_a_non_path_base_directory(value: str, tmp_path: Path) -> None:
     write_build(tmp_path, f'config(base_dir={value})\nserver = RustBinary(CargoPackage("server"))\n')
-    with pytest.raises(WrightError, match="base_dir must be a directory path"):
+    with pytest.raises(RoadieError, match="base_dir must be a directory path"):
         load(tmp_path)
 
 
 def test_tuple_attributes_declare_dependencies_and_dry_run_prints_them(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.setattr("wright.cargo.CargoPackage.fingerprint", lambda self, base_dir: f"package:{self.name}")
+    monkeypatch.setattr("roadie.cargo.CargoPackage.fingerprint", lambda self, base_dir: f"package:{self.name}")
     write_build(tmp_path, '''from dataclasses import dataclass
-from wright.run import Run
+from roadie.run import Run
 
 @dataclass(eq=False)
 class Combined(Step[None]):
@@ -325,7 +325,7 @@ combined = Combined((first, second))
 
 
 def test_group_plans_and_prints_steps_as_variadic_arguments(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.setattr("wright.cargo.CargoPackage.fingerprint", lambda self, base_dir: f"package:{self.name}")
+    monkeypatch.setattr("roadie.cargo.CargoPackage.fingerprint", lambda self, base_dir: f"package:{self.name}")
     write_build(tmp_path, 'first = RustBinary(CargoPackage("first"))\nsecond = RustBinary(CargoPackage("second"))\nall_steps = Group(first, second)\n')
     assert plan_names(tmp_path) == ["first", "second", "all_steps"]
     run_cli(["--dry", str(tmp_path)])
@@ -334,7 +334,7 @@ def test_group_plans_and_prints_steps_as_variadic_arguments(tmp_path: Path, monk
 
 def test_group_rejects_a_non_step(tmp_path: Path) -> None:
     write_build(tmp_path, 'result = Group(42)\n')
-    with pytest.raises(WrightError, match="Group.*steps"):
+    with pytest.raises(RoadieError, match="Group.*steps"):
         load(tmp_path)
 
 
@@ -348,7 +348,7 @@ def test_cli_passes_locked_and_prints_keyword_output(tmp_path: Path, monkeypatch
     )
     run_cli(["--locked", str(tmp_path)])
     assert observed == [(True, ())]
-    monkeypatch.setattr("wright.cargo.CargoPackage.fingerprint", lambda self, base_dir: f"package:{self.name}")
+    monkeypatch.setattr("roadie.cargo.CargoPackage.fingerprint", lambda self, base_dir: f"package:{self.name}")
     run_cli(["--dry", str(tmp_path)])
     assert capsys.readouterr().out.splitlines()[-1] == "api = OpenApi(server, output='api.yaml')  # run"
 
@@ -367,7 +367,7 @@ def test_dry_run_omits_attributes_whose_value_is_none(tmp_path: Path, capsys: py
     write_build(
         tmp_path,
         "from dataclasses import dataclass\n"
-        "from wright.run import Run\n\n"
+        "from roadie.run import Run\n\n"
         "@dataclass(eq=False)\n"
         "class Setting(Step[None]):\n"
         "    label: str | None\n"

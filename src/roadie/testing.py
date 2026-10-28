@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
 
-from wright.errors import WrightError
+from roadie.errors import RoadieError
 
 
 @dataclass(frozen=True)
@@ -23,13 +23,13 @@ def read_junit(path: Path) -> TestResults:
     try:
         root = ElementTree.parse(path).getroot()
     except OSError as error:
-        raise WrightError(
+        raise RoadieError(
             f"Cannot read JUnit report {path}: {error.strerror}"
         ) from error
     except ElementTree.ParseError as error:
-        raise WrightError(f"Cannot read JUnit report {path}: malformed XML") from error
+        raise RoadieError(f"Cannot read JUnit report {path}: malformed XML") from error
     if _tag(root) not in {"testsuites", "testsuite"}:
-        raise WrightError(
+        raise RoadieError(
             f"Cannot read JUnit report {path}: expected testsuite or testsuites"
         )
     failures: list[TestFailure] = []

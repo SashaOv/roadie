@@ -8,10 +8,10 @@ from typing import Any
 
 from forge.environment import repository_root
 
-import wright
-from wright.errors import WrightError
-from wright.inputs import Input, digest
-from wright.step import Step
+import roadie
+from roadie.errors import RoadieError
+from roadie.inputs import Input, digest
+from roadie.step import Step
 
 
 def fingerprint(
@@ -35,7 +35,7 @@ def fingerprint(
         try:
             dependency_hashes[name] = output_hashes[id(dependency)]
         except KeyError:
-            raise WrightError(f"{label} dependency {name} has no output fingerprint") from None
+            raise RoadieError(f"{label} dependency {name} has no output fingerprint") from None
     return digest(
         {
             "class": f"{type(step).__module__}.{type(step).__qualname__}",
@@ -71,7 +71,7 @@ def _classify(
         attributes[name] = repr(value)
         return
     label = step.name or type(step).__name__
-    raise WrightError(f"{label} attribute {name} must be a plain value, an input, or a step")
+    raise RoadieError(f"{label} attribute {name} must be a plain value, an input, or a step")
 
 
 def _plain(value: object) -> bool:
@@ -102,7 +102,7 @@ def _code_hash(step: Step[Any]) -> str:
         file = getattr(module, "__file__", None) if module is not None else None
         if isinstance(file, str) and file.endswith(".py"):
             paths.add(Path(file).resolve())
-    package = Path(wright.__file__).resolve().parent
+    package = Path(roadie.__file__).resolve().parent
     paths.update(path.resolve() for path in package.glob("*.py"))
     hashed = hashlib.sha256()
     for path in sorted(paths, key=lambda item: item.as_posix()):

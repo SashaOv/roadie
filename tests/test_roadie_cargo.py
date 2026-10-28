@@ -1,4 +1,4 @@
-"""Cargo workspace metadata lives in Wright."""
+"""Cargo workspace metadata lives in Roadie."""
 
 import json
 import subprocess
@@ -6,8 +6,7 @@ from pathlib import Path
 
 import pytest
 from forge.environment import repository_root
-
-import wright.cargo as cargo
+from roadie import cargo
 
 REPO_ROOT = repository_root()
 

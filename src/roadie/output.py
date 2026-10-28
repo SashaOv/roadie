@@ -4,8 +4,8 @@ import difflib
 import subprocess
 from pathlib import Path
 
-from wright.errors import WrightError
-from wright.step import File
+from roadie.errors import RoadieError
+from roadie.step import File
 
 
 def publish(step: File, artifact: Path, *, locked: bool) -> Path:
@@ -25,7 +25,7 @@ def publish(step: File, artifact: Path, *, locked: bool) -> Path:
             tofile=f"{destination} (generated)".encode(),
         )
         print(b"".join(difference).decode(errors="replace"), flush=True)
-        raise WrightError(f"generated file is stale: {destination}")
+        raise RoadieError(f"generated file is stale: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(content)
     print(f"updated {destination}", flush=True)
@@ -54,7 +54,7 @@ def _tracked(path: Path) -> bool:
         check=False,
     )
     if completed.returncode != 0:
-        raise WrightError(
+        raise RoadieError(
             f"Cannot check whether {path} is tracked: {completed.stderr.strip()}"
         )
     return bool(completed.stdout)

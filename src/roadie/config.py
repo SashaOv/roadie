@@ -6,15 +6,15 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
-from wright.errors import WrightError
+from roadie.errors import RoadieError
 
 _file_directory: ContextVar[Path | None] = ContextVar(
-    "wright_file_directory", default=None
+    "roadie_file_directory", default=None
 )
 _base_directory: ContextVar[Path | None] = ContextVar(
-    "wright_base_directory", default=None
+    "roadie_base_directory", default=None
 )
-_env_files: ContextVar[tuple[Path, ...]] = ContextVar("wright_env_files", default=())
+_env_files: ContextVar[tuple[Path, ...]] = ContextVar("roadie_env_files", default=())
 
 
 def base_directory() -> Path:
@@ -34,16 +34,16 @@ def configured_env() -> tuple[Path, ...]:
 def config(**settings: object) -> None:
     unknown = settings.keys() - {"base_dir", "env"}
     if unknown:
-        raise WrightError(
+        raise RoadieError(
             f"unknown config settings: {', '.join(sorted(unknown))}; known settings: base_dir, env"
         )
     directory = _file_directory.get()
     if directory is None:
-        raise WrightError("config() works only in a build.py that Wright loads")
+        raise RoadieError("config() works only in a build.py that Roadie loads")
     if "base_dir" in settings:
         value = settings["base_dir"]
         if not isinstance(value, (str, os.PathLike)):
-            raise WrightError("base_dir must be a directory path")
+            raise RoadieError("base_dir must be a directory path")
         _base_directory.set((directory / os.fspath(value)).resolve())
     if "env" in settings:
         _env_files.set(_env_paths(directory, settings["env"]))
@@ -51,11 +51,11 @@ def config(**settings: object) -> None:
 
 def _env_paths(directory: Path, value: object) -> tuple[Path, ...]:
     if isinstance(value, (str, bytes, Path)) or not isinstance(value, Sequence):
-        raise WrightError("env must be a list of environment files")
+        raise RoadieError("env must be a list of environment files")
     paths: list[Path] = []
     for item in value:
         if not isinstance(item, (str, os.PathLike)):
-            raise WrightError("env must be a list of environment files")
+            raise RoadieError("env must be a list of environment files")
         paths.append((directory / os.fspath(item)).resolve())
     return tuple(paths)
 

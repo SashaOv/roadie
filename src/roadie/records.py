@@ -20,7 +20,7 @@ def artifact_dir(build_dir: Path | None, root: Path) -> Path:
 
 
 def record_path(build_dir: Path | None, root: Path) -> Path:
-    return root / "target" / "wright" / artifact_dir(build_dir, root) / "build.record.json"
+    return root / "target" / "roadie" / artifact_dir(build_dir, root) / "build.record.json"
 
 
 def load_records(build_dir: Path | None, root: Path) -> dict[str, Any]:

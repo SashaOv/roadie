@@ -8,15 +8,15 @@ from typing import Any, cast
 
 from forge.environment import dotenv_values, repository_root
 
-from wright.cargo import cargo_snapshot
-from wright.errors import StepFailed, WrightError
-from wright.fingerprint import fingerprint
-from wright.inputs import digest
-from wright.output import publish
-from wright.process import interrupt_on_terminate
-from wright.records import artifact_dir, load_records, save_records
-from wright.step import Binary, File, Service, Step, Tests
-from wright.testing import TestResults
+from roadie.cargo import cargo_snapshot
+from roadie.errors import RoadieError, StepFailed
+from roadie.fingerprint import fingerprint
+from roadie.inputs import digest
+from roadie.output import publish
+from roadie.process import interrupt_on_terminate
+from roadie.records import artifact_dir, load_records, save_records
+from roadie.step import Binary, File, Service, Step, Tests
+from roadie.testing import TestResults
 
 
 class Run:
@@ -26,7 +26,7 @@ class Run:
 
     def __getitem__[T](self, step: Step[T]) -> T:
         if id(step) not in self._values:
-            raise WrightError(
+            raise RoadieError(
                 f"{step.name or type(step).__name__} is not available in this run"
             )
         return cast(T, self._values[id(step)])
@@ -34,7 +34,7 @@ class Run:
     def artifact(self, step: Step[Any], suffix: str) -> Path:
         root = repository_root()
         stem = step.variable or f"{type(step).__name__}-{step.serial}"
-        destination = root / "target" / "wright" / artifact_dir(step.build_dir, root) / f"{stem}{suffix}"
+        destination = root / "target" / "roadie" / artifact_dir(step.build_dir, root) / f"{stem}{suffix}"
         destination.parent.mkdir(parents=True, exist_ok=True)
         return destination
 
@@ -167,7 +167,7 @@ def _apply_env(steps: Sequence[Step[Any]], env: Sequence[Path]) -> None:
     def read(path: Path) -> dict[str, str]:
         if path not in cache:
             if not path.is_file():
-                raise WrightError(f"environment file does not exist: {path}")
+                raise RoadieError(f"environment file does not exist: {path}")
             loaded = dotenv_values(path)
             cache[path] = {key: value for key, value in loaded.items() if value is not None}
         return cache[path]
@@ -280,7 +280,7 @@ def _entry(step: Step[Any], step_fingerprint: str, value: object) -> dict[str, A
         }
     if isinstance(step, Tests):
         if not isinstance(value, TestResults):
-            raise WrightError("A Tests step must return TestResults")
+            raise RoadieError("A Tests step must return TestResults")
         return {
             "fingerprint": step_fingerprint,
             "output": step_fingerprint,
@@ -310,7 +310,7 @@ def _output_fingerprint(
 
 def _report_tests(step: Step[Any], value: object) -> None:
     if not isinstance(value, TestResults):
-        raise WrightError("A Tests step must return TestResults")
+        raise RoadieError("A Tests step must return TestResults")
     for message in value.messages:
         print(message, flush=True)
     if value.failures:
