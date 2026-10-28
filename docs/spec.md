@@ -12,7 +12,7 @@ Roadie wires up multi-language, incremental builds in a few lines of Python.
 Like a roadie on stage, it sets up and connects the native tools (cargo,
 pnpm, uv) and lets them play, instead of replacing them.
 
-Planned work is in [todo/future.md](todo/future.md).
+Planned work is in [todo/backlog.md](todo/backlog.md).
 
 ## Build files
 
@@ -110,7 +110,8 @@ an input, or a step`, when the step is fingerprinted or shown by `--dry`.
 `+ <command>` and runs the command in the step's base directory. Its
 environment is the process environment, then `environment`, then the
 [environment files](#environment-files). Standard output is shown, or
-returned when `capture_output` is set. Standard error is always captured.
+returned when `capture_output` is set. Standard error is always captured, and
+is not shown when the command succeeds.
 
 A command that exits non-zero fails the step, unless `check` is false, with
 `<name> failed: <command> exited with status <n>: <last 2000 characters of
@@ -278,12 +279,19 @@ A step's fingerprint is a SHA-256 digest of:
 
 - its class, by module and qualified name;
 - a hash of the source files of the modules that define the classes of the
-  step's class hierarchy, and of Roadie's own modules;
+  step's class hierarchy, and of Roadie's own modules. The hierarchy includes
+  standard-library modules (`abc`, `typing`), so a Python upgrade reruns
+  every step. A class defined in a build file itself is not hashed;
 - its base directory, relative to the project root;
 - the values of its [environment files](#environment-files);
 - its plain attributes;
 - the [fingerprints](#input-fingerprints) of its inputs;
 - the [output fingerprints](#output-fingerprints) of its dependencies.
+
+The process environment is not part of a fingerprint; only `CargoPackage`
+reads Cargo's variables. For a step to rerun when a variable changes, the
+build file reads it and passes it as a plain attribute, as in
+`Bundle(mode=os.environ.get("MODE", "dev"))`.
 
 ### Input fingerprints
 
@@ -294,7 +302,8 @@ from the step's base directory. Roadie provides `Files` and `CargoPackage`.
 ### Files input
 
 `Files(*paths)` names files and directories, relative to the step's base
-directory. A directory stands for every file under it, recursively. The
+directory. A directory stands for every file under it, recursively,
+git-ignored files included. The
 fingerprint covers each file's path, relative to the project root when inside
 it, and the SHA-256 of its content; a path that does not exist counts as
 missing, so creating it changes the fingerprint.
@@ -405,38 +414,3 @@ members. `# reuse` promises the step will not build: its dependencies are all
 `# run` means it may build.
 
 There is no version option. `roadie --help` prints usage.
-
-## Open questions
-
-Non-normative. Each item is behavior found in the code that no design states.
-Answer *intended* and the item moves into its section as a rule, or *change*
-and it becomes an item in [todo/future.md](todo/future.md).
-
-- **Classes defined in a build file are not hashed.** Editing a step class
-  written in `build.py` itself does not change the step's fingerprint, so the
-  step is reused (verified: a changed command in such a class was still
-  `reused`). Classes in imported modules are hashed.
-  Code: `fingerprint._code_hash` looks the class's module up in
-  `sys.modules`, where `runpy.run_path` leaves no entry.
-- **The hash covers standard-library sources.** `abc.py` and `typing.py`
-  are in every step's code hash, because `Step` derives from `ABC` and
-  `Generic`, so a Python upgrade reruns every step.
-  Code: `fingerprint._code_hash`.
-- **`Files` includes git-ignored files; `CargoPackage` does not.** A new
-  ignored file under a directory named by `Files` changes its fingerprint and
-  reruns the step (verified); `CargoPackage` hashes only files git lists.
-  Code: `inputs._files_under`, `cargo._git_files`.
-- **The process environment is not fingerprinted.** A step that reads an
-  environment variable is reused when the variable changes (verified); only
-  environment-file values and the Cargo variables of `CargoPackage` count.
-  Code: `fingerprint.fingerprint`.
-- **Standard error of a command that succeeds is discarded.** `_cmd` always
-  captures it and shows at most 2000 characters of it on failure.
-  Code: `Step._cmd`.
-- **A step bound to no variable is never reused or recorded.** An inner step
-  written inline, as in `Copy(Emitter())`, builds on every run, though
-  `Copy` is reused when the emitted file is unchanged.
-  Code: `run._reusable`.
-- **`--base_dir` is the only option spelled with an underscore**; the others
-  are `--dry-run`, `--locked` and `--env`.
-  Code: `cli.run`.
