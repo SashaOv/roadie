@@ -107,10 +107,18 @@ def test_jammer_dev_server_uses_the_fixed_port_and_cache() -> None:
     assert server.resolve(server.storage) == (repository_root() / "cache" / "jammer").resolve()
 
 
+def test_jammer_dev_uses_vite_and_the_backend_ports() -> None:
+    server = load(JAMMER).result("dev")
+    assert server.package == "web"
+    assert server.port == 5173
+    assert server.backend_port == 3000
+    assert server.resolve(server.storage) == (repository_root() / "cache" / "jammer").resolve()
+
+
 def test_cli_reports_an_unknown_result_with_the_known_ones() -> None:
     with pytest.raises(
         SystemExit,
-        match="has no result named 'nope'; results: jammer_server, snap_viewer, api, python_models, web_schema, viewer_api, viewer_web_schema, generated, dev_server, deployed, fuzzed",
+        match="has no result named 'nope'; results: jammer_server, snap_viewer, api, python_models, web_schema, viewer_api, viewer_web_schema, generated, dev_server, dev, deployed, fuzzed",
     ):
         run_cli(["--dry", str(JAMMER), "nope"])
 
