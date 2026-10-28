@@ -1,3 +1,4 @@
+import json
 import os
 import signal
 import subprocess
@@ -14,7 +15,7 @@ from wright import TestResults as Results
 from wright import Tests as Checks
 from wright.errors import StepFailed
 from wright.fingerprint import fingerprint
-from wright.graph import Graph
+from wright.graph import Graph, load
 from wright.inputs import Files
 from wright.process import RunningProcess, available_port
 from wright.run import Run, execute
@@ -314,8 +315,19 @@ def test_rust_binary_picks_executable_from_captured_cargo_json(
         )
 
     monkeypatch.setattr(Step, "_cmd", command)
+    monkeypatch.setattr(
+        "wright.cargo.CargoPackage.fingerprint",
+        lambda self, base_dir: f"package:{self.name}",
+    )
+    source = Path(executable)
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"binary")
+    source.chmod(0o755)
     step = RustBinary(CargoPackage(package))
-    assert execute([step]) == Path(executable)
+    copied = execute([step])
+    assert copied != source
+    assert copied.read_bytes() == b"binary"
+    assert copied.stat().st_mode == source.stat().st_mode
     assert captured == [
         ("cargo", "build", "--locked", "-p", package, "--message-format=json")
     ]
@@ -324,6 +336,10 @@ def test_rust_binary_picks_executable_from_captured_cargo_json(
 def test_rust_binary_rejects_missing_executable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        "wright.cargo.CargoPackage.fingerprint",
+        lambda self, base_dir: f"package:{self.name}",
+    )
     monkeypatch.setattr(
         Step, "_cmd", lambda *args, **kwargs: subprocess.CompletedProcess([], 0, "", "")
     )
@@ -516,6 +532,301 @@ def test_locked_file_output_reports_git_failure_and_keeps_destination(tmp_path: 
     assert str(destination) in str(error.value)
     assert "Cannot check whether" in str(error.value)
     assert destination.read_text() == "old\n"
+
+
+class _Stopped:
+    def __init__(self) -> None:
+        self.url = "http://127.0.0.1:9"
+        self.process = None
+
+    def stop(self) -> None:
+        return None
+
+
+def _isolate_repo(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
+    for module in ("wright.run", "wright.fingerprint", "wright.inputs"):
+        monkeypatch.setattr(f"{module}.repository_root", lambda: root)
+
+
+def _write_build(directory: Path, source: str) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "build.py").write_text(f"from wright import *\n{source}")
+
+
+_EMITTER = """
+from dataclasses import dataclass
+from pathlib import Path
+from wright.run import Run
+
+@dataclass(eq=False)
+class Emitter(File):
+    text: str = "v1"
+    def build(self, run: Run) -> Path:
+        path = run.artifact(self, ".txt")
+        path.write_text(self.text)
+        (self.build_dir / "ran.txt").write_text("ran")
+        return path
+
+api = Emitter()
+"""
+
+
+def test_second_run_reuses_a_step_and_replays_tests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    root = tmp_path.resolve()
+    _isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    built: list[str] = []
+
+    @dataclass(eq=False)
+    class Note(File):
+        def build(self, run: Run) -> Path:
+            built.append("note")
+            path = run.artifact(self, ".txt")
+            path.write_text("body")
+            return path
+
+    @dataclass(eq=False)
+    class Logged(Checks):
+        def build(self, run: Run) -> Results:
+            built.append("logged")
+            return Results((), (f"log-{len(built)}",))
+
+    class Always(Checks):
+        reusable = False
+
+        def build(self, run: Run) -> Results:
+            built.append("always")
+            return Results((), ("always",))
+
+    class Server(Service):
+        def build(self, run: Run) -> _Stopped:
+            built.append("server")
+            return _Stopped()
+
+    note, logged, always, server = Note(), Logged(), Always(), Server()
+    for step, name in ((note, "note"), (logged, "logged"), (always, "always"), (server, "server")):
+        step.name = name
+        step.variable = name
+    execute([note, logged, always, server])
+    assert built == ["note", "logged", "always", "server"]
+    built.clear()
+    execute([note, logged, always, server])
+    output = capsys.readouterr().out
+    assert built == ["always", "server"]
+    assert "reused note" in output
+    assert "reused logged" in output
+    assert "log-2" in output
+
+
+def test_changed_files_rerun_a_step_and_identical_output_reuses_consumers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path.resolve()
+    _isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    (root / "input.txt").write_text("one")
+    built: list[str] = []
+
+    @dataclass(eq=False)
+    class Note(File):
+        files: Files
+        note: str = "a"
+
+        def build(self, run: Run) -> Path:
+            built.append("note")
+            path = run.artifact(self, ".txt")
+            path.write_text((self.base_dir / "input.txt").read_text())
+            return path
+
+    @dataclass(eq=False)
+    class Downstream(File):
+        source: File
+
+        def build(self, run: Run) -> Path:
+            built.append("down")
+            path = run.artifact(self, ".out")
+            path.write_text(run[self.source].read_text() + "!")
+            return path
+
+    note = Note(Files("input.txt"))
+    down = Downstream(note)
+    note.name = note.variable = "note"
+    down.name = down.variable = "down"
+    execute([note, down])
+    built.clear()
+    execute([note, down])
+    assert built == []
+
+    (root / "input.txt").write_text("two")
+    execute([note, down])
+    assert built == ["note", "down"]
+
+    built.clear()
+    note.note = "b"
+    execute([note, down])
+    assert built == ["note"]
+
+
+def test_failed_step_writes_no_record_and_a_changed_output_is_rebuilt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path.resolve()
+    _isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    state = {"fail": True}
+
+    @dataclass(eq=False)
+    class Note(File):
+        def build(self, run: Run) -> Path:
+            if state["fail"]:
+                raise RuntimeError("nope")
+            path = run.artifact(self, ".txt")
+            path.write_text("body")
+            return path
+
+    note = Note()
+    note.name = note.variable = "note"
+    note.build_variables = frozenset({"note"})
+    with pytest.raises(StepFailed, match="nope"):
+        execute([note])
+    record = root / "target" / "wright" / "build.record.json"
+    assert not record.exists()
+
+    state["fail"] = False
+    execute([note])
+    assert record.is_file()
+    payload = json.loads(record.read_text())
+    payload["gone"] = {"fingerprint": "x", "output": "y", "content": None, "value": "z"}
+    record.write_text(json.dumps(payload))
+    produced = execute([note])
+    assert "gone" not in record.read_text()
+    produced.unlink()
+    again = execute([note])
+    assert again.read_text() == "body"
+    again.write_text("edited")
+    rebuilt = execute([note])
+    assert rebuilt.read_text() == "body"
+
+
+def test_locked_run_does_not_reuse_a_hand_edited_tracked_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path.resolve()
+    _isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+
+    @dataclass(eq=False)
+    class Note(File):
+        def build(self, run: Run) -> Path:
+            path = run.artifact(self, ".txt")
+            path.write_text("body")
+            return path
+
+    note = Note(output="output.txt")
+    note.name = note.variable = "note"
+    destination = execute([note])
+    subprocess.run(["git", "add", "output.txt"], cwd=root, check=True)
+    destination.write_text("hand edited\n")
+    with pytest.raises(StepFailed, match="output.txt"):
+        execute([note], locked=True)
+    assert destination.read_text() == "hand edited\n"
+
+
+def test_tests_consumer_is_reused_when_the_replayed_log_would_differ(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    root = tmp_path.resolve()
+    _isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    built: list[str] = []
+
+    @dataclass(eq=False)
+    class Logged(Checks):
+        def build(self, run: Run) -> Results:
+            built.append("logged")
+            return Results((), (f"log-{len(built)}",))
+
+    @dataclass(eq=False)
+    class Downstream(File):
+        source: Checks
+
+        def build(self, run: Run) -> Path:
+            built.append("down")
+            path = run.artifact(self, ".out")
+            path.write_text("ok")
+            return path
+
+    logged = Logged()
+    down = Downstream(logged)
+    logged.name = logged.variable = "logged"
+    down.name = down.variable = "down"
+    execute([logged, down])
+    built.clear()
+    execute([logged, down])
+    output = capsys.readouterr().out
+    assert built == []
+    assert "reused down" in output
+    assert "log-1" in output
+
+
+def test_rust_binary_is_rebuilt_when_its_recorded_copy_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path.resolve()
+    _isolate_repo(monkeypatch, root)
+    source = root / "compiler-output"
+    source.write_bytes(b"v1")
+    source.chmod(0o755)
+    message = (
+        '{"reason":"compiler-artifact","package_id":"path+file:///tmp/app#app@0.1.0",'
+        f'"target":{{"kind":["bin"]}},"executable":"{source}"}}\n'
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def command(self: Step[object], *args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, message, "")
+
+    monkeypatch.setattr(Step, "_cmd", command)
+    monkeypatch.setattr("wright.cargo.CargoPackage.fingerprint", lambda self, base_dir: "package:app")
+    step = RustBinary(CargoPackage("app"))
+    step.name = step.variable = "app"
+    first = execute([step])
+    assert first.read_bytes() == b"v1"
+    execute([step])
+    assert len(calls) == 1
+    first.write_bytes(b"tampered")
+    execute([step])
+    assert len(calls) == 2
+    assert first.read_bytes() == b"v1"
+
+
+def test_build_files_keep_separate_records_and_include_reuses_them(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path.resolve()
+    _isolate_repo(monkeypatch, root)
+    _write_build(root / "jammer", _EMITTER)
+    _write_build(root / "other", _EMITTER)
+    execute(load(root / "jammer").plan())
+    execute(load(root / "other").plan())
+    assert (root / "target" / "wright" / "jammer" / "api.txt").is_file()
+    assert (root / "target" / "wright" / "other" / "api.txt").is_file()
+    assert (root / "target" / "wright" / "jammer" / "build.record.json").is_file()
+    assert (root / "target" / "wright" / "other" / "build.record.json").is_file()
+
+    _write_build(root / "module", _EMITTER)
+    _write_build(root, 'module = include("module")\nresult = module.api\n')
+    execute(load(root).plan("result"))
+    ran = root / "module" / "ran.txt"
+    assert ran.is_file()
+    ran.unlink()
+    execute(load(root / "module").plan())
+    assert not ran.exists()
+    assert (root / "target" / "wright" / "module" / "api.txt").read_text() == "v1"
+
+
+def test_dry_run_marks_reuse_and_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    root = tmp_path.resolve()
+    _isolate_repo(monkeypatch, root)
+    project = root / "project"
+    _write_build(project, _EMITTER.replace("api = Emitter()", 'api = Emitter("v1")\n'))
+    cli.run(project)
+    capsys.readouterr()
+    cli.run(project, dry_run=True)
+    assert capsys.readouterr().out.splitlines() == ["api = Emitter('v1')  # reuse"]
+    _write_build(project, _EMITTER.replace("api = Emitter()", 'api = Emitter("v2")\n'))
+    cli.run(project, dry_run=True)
+    assert capsys.readouterr().out.splitlines() == ["api = Emitter('v2')  # run"]
 
 
 def test_service_steps_are_not_reusable() -> None:

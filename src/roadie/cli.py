@@ -7,7 +7,7 @@ from typing import Annotated, Any
 from cyclopts import App, Parameter
 
 from wright.graph import WrightError, load
-from wright.run import execute
+from wright.run import execute, reuse_markers
 from wright.step import Step
 from wright.steps import Group
 
@@ -36,8 +36,13 @@ def run(
     except WrightError as error:
         raise SystemExit(str(error)) from error
     if dry_run:
-        for step in steps:
-            print(f"{step.name} = {call(step)}" if step.name else call(step))
+        try:
+            marks = reuse_markers(steps)
+        except WrightError as error:
+            raise SystemExit(str(error)) from error
+        for step, reused in zip(steps, marks, strict=True):
+            line = f"{step.name} = {call(step)}" if step.name else call(step)
+            print(f"{line}  # {'reuse' if reused else 'run'}")
         return
     try:
         execute(steps, locked=locked)

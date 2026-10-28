@@ -22,10 +22,12 @@ _serials = itertools.count()
 
 class Step[T](ABC):
     reusable: ClassVar[bool] = True
+    recorded: ClassVar[bool] = True
     serial: int
     base_dir: Path
     build_dir: Path | None
     variable: str | None
+    build_variables: frozenset[str] | None
     name: str | None
 
     def __new__(cls, *args: object, **kwargs: object) -> Self:
@@ -33,6 +35,7 @@ class Step[T](ABC):
         instance.serial = next(_serials)
         instance.name = None
         instance.variable = None
+        instance.build_variables = None
         instance.base_dir = base_directory()
         instance.build_dir = loading_directory()
         return instance
@@ -41,7 +44,15 @@ class Step[T](ABC):
         return {
             key: value
             for key, value in vars(self).items()
-            if key not in {"serial", "name", "base_dir", "build_dir", "variable"}
+            if key
+            not in {
+                "serial",
+                "name",
+                "base_dir",
+                "build_dir",
+                "variable",
+                "build_variables",
+            }
         }
 
     def resolve(self, path: str | Path) -> Path:

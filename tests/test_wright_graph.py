@@ -92,10 +92,10 @@ def test_dry_run_prints_the_steps_in_dependency_order(
     run_cli([flag, str(JAMMER), "fuzzed"])
 
     assert capsys.readouterr().out.splitlines() == [
-        "jammer_server = RustBinary(CargoPackage(name='jammer_server'))",
-        "api = OpenApi(jammer_server, output='server/api.yaml')",
-        "deployed = JammerDevServer(jammer_server, False)",
-        "fuzzed = ContractFuzz(api, deployed)",
+        "jammer_server = RustBinary(CargoPackage(name='jammer_server'))  # run",
+        "api = OpenApi(jammer_server, output='server/api.yaml')  # run",
+        "deployed = JammerDevServer(jammer_server, False)  # run",
+        "fuzzed = ContractFuzz(api, deployed)  # run",
     ]
 
 
@@ -255,7 +255,8 @@ def test_config_rejects_a_non_path_base_directory(value: str, tmp_path: Path) ->
         load(tmp_path)
 
 
-def test_tuple_attributes_declare_dependencies_and_dry_run_prints_them(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_tuple_attributes_declare_dependencies_and_dry_run_prints_them(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr("wright.cargo.CargoPackage.fingerprint", lambda self, base_dir: f"package:{self.name}")
     write_build(tmp_path, '''from dataclasses import dataclass
 from wright.run import Run
 
@@ -271,14 +272,15 @@ combined = Combined((first, second))
 ''')
     assert plan_names(tmp_path) == ["first", "second", "combined"]
     run_cli(["--dry", str(tmp_path)])
-    assert capsys.readouterr().out.splitlines()[-1] == "combined = Combined((first, second))"
+    assert capsys.readouterr().out.splitlines()[-1] == "combined = Combined((first, second))  # run"
 
 
-def test_group_plans_and_prints_steps_as_variadic_arguments(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_group_plans_and_prints_steps_as_variadic_arguments(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr("wright.cargo.CargoPackage.fingerprint", lambda self, base_dir: f"package:{self.name}")
     write_build(tmp_path, 'first = RustBinary(CargoPackage("first"))\nsecond = RustBinary(CargoPackage("second"))\nall_steps = Group(first, second)\n')
     assert plan_names(tmp_path) == ["first", "second", "all_steps"]
     run_cli(["--dry", str(tmp_path)])
-    assert capsys.readouterr().out.splitlines()[-1] == "all_steps = Group(first, second)"
+    assert capsys.readouterr().out.splitlines()[-1] == "all_steps = Group(first, second)  # run"
 
 
 def test_group_rejects_a_non_step(tmp_path: Path) -> None:
@@ -293,8 +295,9 @@ def test_cli_passes_locked_and_prints_keyword_output(tmp_path: Path, monkeypatch
     monkeypatch.setattr(cli, "execute", lambda steps, *, locked: observed.append(locked))
     run_cli(["--locked", str(tmp_path)])
     assert observed == [True]
+    monkeypatch.setattr("wright.cargo.CargoPackage.fingerprint", lambda self, base_dir: f"package:{self.name}")
     run_cli(["--dry", str(tmp_path)])
-    assert capsys.readouterr().out.splitlines()[-1] == "api = OpenApi(server, output='api.yaml')"
+    assert capsys.readouterr().out.splitlines()[-1] == "api = OpenApi(server, output='api.yaml')  # run"
 
 
 def test_file_output_is_keyword_only(tmp_path: Path) -> None:
@@ -321,4 +324,4 @@ def test_dry_run_omits_attributes_whose_value_is_none(tmp_path: Path, capsys: py
         "item = Setting(None)\n",
     )
     run_cli(["--dry", str(tmp_path)])
-    assert capsys.readouterr().out.splitlines()[-1] == "item = Setting()"
+    assert capsys.readouterr().out.splitlines()[-1] == "item = Setting()  # run"

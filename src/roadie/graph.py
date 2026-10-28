@@ -109,8 +109,12 @@ def _load(session: _Session, directory: Path) -> Graph:
         raise WrightError(f"{path} defines no results")
 
     prefix = _prefix(session.root, directory)
+    names = frozenset(results)
     for name, result in results.items():
-        result.variable = name
+        # An included step keeps the variable from the file that defined it.
+        if result.variable is None:
+            result.variable = name
+            result.build_variables = names
         if result.name is None:
             result.name = f"{prefix}{name}"
     graph = Graph(path=path, results=results)

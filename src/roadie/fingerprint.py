@@ -17,7 +17,7 @@ from wright.step import Step
 def fingerprint(
     step: Step[Any],
     *,
-    outputs: Mapping[Step[Any], str] | None = None,
+    outputs: Mapping[Any, str] | None = None,
     env: Mapping[str, str] | None = None,
 ) -> str:
     attributes: dict[str, str] = {}
@@ -25,7 +25,10 @@ def fingerprint(
     dependencies: dict[str, Step[Any]] = {}
     for name, value in step.attributes().items():
         _classify(step, name, value, attributes, inputs, dependencies)
-    output_hashes = {id(item): output for item, output in (outputs or {}).items()}
+    output_hashes = {
+        key if isinstance(key, int) else id(key): output
+        for key, output in (outputs or {}).items()
+    }
     label = step.name or type(step).__name__
     dependency_hashes: dict[str, str] = {}
     for name, dependency in dependencies.items():
@@ -81,7 +84,10 @@ def _plain(value: object) -> bool:
 
 def _relative(path: Path) -> str:
     resolved = path.resolve()
-    root = repository_root().resolve()
+    try:
+        root = repository_root().resolve()
+    except RuntimeError:
+        return str(resolved)
     try:
         relative = resolved.relative_to(root)
     except ValueError:

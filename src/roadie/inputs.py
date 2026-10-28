@@ -20,8 +20,10 @@ class Input(ABC):
         """Hash of this input as seen from a step's base directory."""
 
 
-def _entry_key(path: Path, root: Path) -> str:
+def _entry_key(path: Path, root: Path | None) -> str:
     absolute = path if path.is_absolute() else path.absolute()
+    if root is None:
+        return str(absolute)
     try:
         relative = absolute.relative_to(root)
     except ValueError:
@@ -78,7 +80,10 @@ class Files(Input):
         return f"Files({shown})"
 
     def fingerprint(self, base_dir: Path) -> str:
-        root = repository_root().resolve()
+        try:
+            root = repository_root().resolve()
+        except RuntimeError:
+            root = None
         entries: dict[str, str] = {}
         for raw in self.paths:
             path = _resolve(base_dir, raw)

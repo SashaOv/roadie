@@ -1,4 +1,6 @@
 import json
+import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,13 +13,18 @@ from wright.step import Binary, Step
 
 
 class Group(Step[tuple[object, ...]]):
+    recorded = False
+
     def __init__(self, *steps: Step[Any]) -> None:
         if any(not isinstance(step, Step) for step in steps):
             raise WrightError("Group takes only steps")
         self.steps = steps
 
     def build(self, run: Run) -> tuple[object, ...]:
-        return tuple(run[step] for step in self.steps)
+        values = tuple(run[step] for step in self.steps)
+        if self.steps and all(id(step) in run.reused for step in self.steps):
+            print(f"reused {self.name or type(self).__name__}", flush=True)
+        return values
 
 
 @dataclass(eq=False)
@@ -35,7 +42,11 @@ class RustBinary(Binary):
             "--message-format=json",
             capture_output=True,
         )
-        return executable_from_cargo_messages(completed.stdout, self.package.name)
+        source = executable_from_cargo_messages(completed.stdout, self.package.name)
+        destination = run.artifact(self, ".exe" if os.name == "nt" else "")
+        shutil.copyfile(source, destination)
+        os.chmod(destination, source.stat().st_mode)
+        return destination
 
 
 def executable_from_cargo_messages(output: str, package: str) -> Path:
