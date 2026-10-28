@@ -83,6 +83,8 @@ def execute(steps: Sequence[Step[Any]], *, locked: bool = False) -> object:
                             step, value, step_fingerprint, outputs
                         )
                         result = value
+                        if isinstance(step, Service) and id(step) == requested:
+                            _await_requested_service(step, value)
                 except (KeyboardInterrupt, StepFailed):
                     raise
                 except BaseException as error:
@@ -96,6 +98,24 @@ def execute(steps: Sequence[Step[Any]], *, locked: bool = False) -> object:
             return result
         finally:
             _teardown(run, live, list(live))
+
+
+def _await_requested_service(step: Step[Any], value: object) -> None:
+    """Keep a requested service up until Ctrl-C, SIGTERM, or the process exits."""
+    name = step.name or type(step).__name__
+    url = getattr(value, "url", "")
+    print(f"{name} is up: {url} (Ctrl-C to stop)", flush=True)
+    process = getattr(value, "process", None)
+    if process is None:
+        return
+    try:
+        status = process.wait()
+    except KeyboardInterrupt:
+        return
+    if status == 0:
+        print(f"{name} exited", flush=True)
+        return
+    raise StepFailed(name, f"exited with status {status}")
 
 
 def _hold_service_dependencies(

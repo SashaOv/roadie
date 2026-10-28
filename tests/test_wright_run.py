@@ -3,6 +3,8 @@ import os
 import signal
 import subprocess
 import sys
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -414,7 +416,15 @@ def test_started_commands_run_in_the_steps_base_directory(tmp_path: Path, monkey
                 "threading.Event().wait()"
             ), port=port, timeout=5)
 
-    execute([Server()])
+    @dataclass(eq=False)
+    class After(Step[None]):
+        server: Service
+
+        def build(self, run: Run) -> None:
+            return None
+
+    server = Server()
+    execute([server, After(server)])
     assert marker.read_text() == str(tmp_path.resolve())
 
 
@@ -545,10 +555,18 @@ def test_locked_file_output_reports_git_failure_and_keeps_destination(tmp_path: 
     assert destination.read_text() == "old\n"
 
 
+class _Exited:
+    def wait(self) -> int:
+        return 0
+
+    def poll(self) -> int:
+        return 0
+
+
 class _Stopped:
     def __init__(self) -> None:
         self.url = "http://127.0.0.1:9"
-        self.process = None
+        self.process = _Exited()
 
     def stop(self) -> None:
         return None
@@ -924,9 +942,16 @@ def test_http_service_waits_for_its_health_path_and_fails_when_the_process_exits
         def build(self, run: Run) -> RunningProcess:
             return self._start_cmd(sys.executable, "-c", script, port=port, timeout=5)
 
+    @dataclass(eq=False)
+    class After(Step[None]):
+        server: Service
+
+        def build(self, run: Run) -> None:
+            return None
+
     api = Api()
     api.name = "api"
-    execute([api])
+    execute([api, After(api)])
     assert ready.read_text() == "ok"
 
     class Exits(HttpService):
@@ -1033,3 +1058,117 @@ def test_service_starts_only_when_a_consumer_must_run(
     assert events == ["note", "server", "consumer", "stop"]
     assert "reused between" in output
     assert "not started" not in output
+
+
+class _Deployment:
+    def __init__(self, status: int | None = 0, interrupt: bool = False) -> None:
+        self.url = "http://127.0.0.1:9"
+        self.process = self
+        self.status = status
+        self.interrupt = interrupt
+        self.waiting = threading.Event()
+        self.release = threading.Event()
+        self.stopped = False
+
+    def wait(self) -> int:
+        if self.interrupt:
+            self.waiting.set()
+            if not self.release.wait(5):
+                raise AssertionError("the service was not interrupted")
+            raise KeyboardInterrupt
+        self.waiting.set()
+        assert self.status is not None
+        return self.status
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+def _server(deployment: object) -> Service:
+    class Server(Service):
+        def build(self, run: Run) -> object:
+            return deployment
+
+    server = Server()
+    server.name = "server"
+    return server
+
+
+def test_requested_service_stays_up_until_ctrl_c(capsys: pytest.CaptureFixture[str]) -> None:
+    deployment = _Deployment(interrupt=True)
+
+    def release() -> None:
+        assert deployment.waiting.wait(2)
+        assert deployment.stopped is False
+        deployment.release.set()
+
+    threading.Thread(target=release).start()
+    execute([_server(deployment)])
+    assert deployment.stopped is True
+    output = capsys.readouterr().out
+    assert "server is up: http://127.0.0.1:9 (Ctrl-C to stop)" in output
+    assert "server exited" not in output
+
+
+@pytest.mark.skipif(os.name != "posix", reason="SIGTERM is POSIX-only")
+def test_sigterm_while_a_requested_service_is_up_exits_0(capsys: pytest.CaptureFixture[str]) -> None:
+    started = threading.Event()
+
+    class Sleeper:
+        url = "http://127.0.0.1:9"
+        process = None
+        stopped = False
+
+        def wait(self) -> int:
+            started.set()
+            time.sleep(5)
+            return 0
+
+        def stop(self) -> None:
+            self.stopped = True
+
+    sleeper = Sleeper()
+    sleeper.process = sleeper
+
+    def poke() -> None:
+        assert started.wait(2)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    threading.Thread(target=poke).start()
+    execute([_server(sleeper)])
+    assert sleeper.stopped is True
+    output = capsys.readouterr().out
+    assert "server is up: http://127.0.0.1:9 (Ctrl-C to stop)" in output
+    assert "server exited" not in output
+
+
+@pytest.mark.parametrize("status", [0, 3])
+def test_requested_service_exit_status(status: int, capsys: pytest.CaptureFixture[str]) -> None:
+    deployment = _Deployment(status=status)
+    if status == 0:
+        execute([_server(deployment)])
+        output = capsys.readouterr().out
+        assert "server is up: http://127.0.0.1:9 (Ctrl-C to stop)" in output
+        assert "server exited" in output
+    else:
+        with pytest.raises(StepFailed, match="server failed: exited with status 3"):
+            execute([_server(deployment)])
+    assert deployment.stopped is True
+
+
+def test_cli_ctrl_c_on_a_requested_service_exits_0(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _write_build(
+        tmp_path,
+        "class Up(Service):\n"
+        "    def build(self, run):\n"
+        "        class Proc:\n"
+        "            url = 'http://127.0.0.1:9'\n"
+        "            def wait(self):\n"
+        "                raise KeyboardInterrupt\n"
+        "            def stop(self):\n"
+        "                pass\n"
+        "        return Proc()\n"
+        "dev = Up()\n",
+    )
+    cli.run(tmp_path)
+    assert "dev is up: http://127.0.0.1:9 (Ctrl-C to stop)" in capsys.readouterr().out
