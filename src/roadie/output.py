@@ -8,6 +8,7 @@ from roadie.errors import RoadieError
 from roadie.step import File
 
 
+# (spec) Generated files
 def publish(step: File, artifact: Path, *, locked: bool) -> Path:
     if step.output is None:
         return artifact

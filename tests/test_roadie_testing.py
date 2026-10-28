@@ -8,6 +8,7 @@ from roadie.testing import TestResults as Results
 from roadie.testing import read_junit
 
 
+# (spec) Tests
 def test_read_junit_reads_nested_failures_errors_and_log_messages(
     tmp_path: Path,
 ) -> None:
@@ -31,6 +32,7 @@ def test_read_junit_reads_nested_failures_errors_and_log_messages(
     )
 
 
+# (spec) Tests
 @pytest.mark.parametrize(
     "xml",
     ["<testsuite/>", '<testsuite xmlns="urn:junit"><testcase name="ok" /></testsuite>'],
@@ -41,6 +43,7 @@ def test_read_junit_accepts_a_passing_suite(xml: str, tmp_path: Path) -> None:
     assert read_junit(report) == Results()
 
 
+# (spec) Tests
 @pytest.mark.parametrize(
     ("xml", "reason"),
     [

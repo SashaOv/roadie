@@ -15,6 +15,7 @@ from roadie.steps import Group
 app = App(help=__doc__, version_flags=())
 
 
+# (spec) Command line
 @app.default
 def run(
     directory: Path = Path("."),

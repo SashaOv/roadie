@@ -9,6 +9,7 @@ import pytest
 from roadie import cargo
 
 
+# (spec) Cargo workspace queries
 def test_cargo_package_discovery_is_module_neutral(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -51,6 +52,7 @@ def test_cargo_package_discovery_is_module_neutral(
     )
 
 
+# (spec) Cargo workspace queries
 def test_local_dependency_closure_includes_transitive_dependents() -> None:
     packages = (
         cargo.RustPackage("core", Path("services/core"), ()),
@@ -63,6 +65,7 @@ def test_local_dependency_closure_includes_transitive_dependents() -> None:
     ) == ("core", "app")
 
 
+# (spec) Cargo workspace queries
 def test_local_dependency_closure_ignores_unrelated_changes() -> None:
     packages = (
         cargo.RustPackage("core", Path("services/core"), ()),
@@ -111,6 +114,7 @@ def _cargo_workspace(root: Path) -> None:
     subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
 
 
+# (spec) Cargo packages
 def test_cargo_package_fingerprint_follows_its_dependency_closure(tmp_path: Path) -> None:
     root = tmp_path.resolve()
     _cargo_workspace(root)
@@ -145,6 +149,7 @@ def test_cargo_package_fingerprint_follows_its_dependency_closure(tmp_path: Path
     assert core.fingerprint(root) != ignored_base
 
 
+# (spec) Cargo packages
 def test_cargo_package_fingerprint_reads_declared_cargo_settings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -170,6 +175,7 @@ def test_cargo_package_fingerprint_reads_declared_cargo_settings(
     assert package.fingerprint(root) == baseline
 
 
+# (spec) Cargo packages
 def test_cargo_metadata_and_rustc_run_once_per_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -194,6 +200,7 @@ def test_cargo_metadata_and_rustc_run_once_per_snapshot(
     assert calls.count("rustc") == 1
 
 
+# (spec) Cargo packages
 def test_cargo_package_in_a_subdirectory_finds_the_workspace_root(tmp_path: Path) -> None:
     root = tmp_path.resolve()
     _cargo_workspace(root)

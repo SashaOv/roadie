@@ -15,6 +15,7 @@ def digest(payload: object) -> str:
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 
+# (spec) Input fingerprints
 class Input(ABC):
     @abstractmethod
     def fingerprint(self, base_dir: Path) -> str:
@@ -70,6 +71,7 @@ def _files_under(directory: Path) -> list[Path]:
     return files
 
 
+# (spec) Files input
 class Files(Input):
     def __init__(self, *paths: str | Path) -> None:
         self.paths = paths

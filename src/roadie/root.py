@@ -11,6 +11,7 @@ from roadie.errors import RoadieError
 _project_root: ContextVar[Path | None] = ContextVar("roadie_project_root", default=None)
 
 
+# (spec) Project root
 def find_project_root(directory: Path) -> Path:
     """Git top level of `directory`, or `directory` when it is not a work tree."""
     completed = subprocess.run(

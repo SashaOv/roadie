@@ -12,6 +12,18 @@ bullet, except the input-enforcement design, which is moved whole.
 - A project-root override (`config(root=...)`) for a project whose root is not
   its git top level.
 
+### Tests to add
+
+- Input fingerprints: a step whose `Input` subclass changes its digest gets a
+  new fingerprint.
+- Results: an unknown result name fails with the file and its result names.
+- Including build files: `include` outside a loading build file fails.
+- Binaries: cargo reporting several different executables fails the step.
+- Cargo packages: a package the workspace does not contain fails.
+- Cargo workspace queries: a changed root `Cargo.toml` or `Cargo.lock` selects
+  every package.
+- Services: `HttpService` waits on `/` unless it sets `health_path`.
+
 ### Input and output kinds not built
 
 - `Dir(path)` input: a directory's tracked content, fingerprinted by git tree

@@ -54,6 +54,8 @@ class Value(Step[str]):
         return self.value
 
 
+# (spec) Plan order
+# (spec) Step values
 def test_steps_build_in_plan_order_with_dependency_values(tmp_path: Path) -> None:
     events: list[object] = []
 
@@ -73,6 +75,7 @@ def test_steps_build_in_plan_order_with_dependency_values(tmp_path: Path) -> Non
     assert events == ["first", "first!"]
 
 
+# (spec) Teardown
 @pytest.mark.parametrize("ending", ["success", "failure", "ctrl-c", "sigterm"])
 def test_teardown_after_last_consumer_and_on_failure_or_interrupt(ending: str) -> None:
     if ending == "sigterm" and os.name != "posix":
@@ -138,6 +141,8 @@ def test_teardown_after_last_consumer_and_on_failure_or_interrupt(ending: str) -
     )
 
 
+# (spec) Services
+# (spec) Teardown
 @pytest.mark.parametrize("ending", ["success", "failure", "interrupt"])
 def test_service_process_is_stopped_after_run(ending: str) -> None:
     started: list[RunningProcess] = []
@@ -186,6 +191,7 @@ def test_service_process_is_stopped_after_run(ending: str) -> None:
             child.stop()
 
 
+# (spec) Teardown
 def test_teardown_failure_is_visible_and_does_not_skip_other_cleanup() -> None:
     stopped: list[str] = []
 
@@ -211,6 +217,8 @@ def test_teardown_failure_is_visible_and_does_not_skip_other_cleanup() -> None:
     assert stopped == ["broken", "one"]
 
 
+# (spec) Teardown
+# (spec) Failures
 def test_failure_keeps_its_name_when_teardown_also_fails() -> None:
     class Broken(Value):
         def teardown(self, value: str) -> None:
@@ -230,6 +238,8 @@ def test_failure_keeps_its_name_when_teardown_also_fails() -> None:
         execute([resource, step])
 
 
+# (spec) Commands
+# (spec) Failures
 def test_cmd_failure_names_step_command_exit_status_and_stderr_tail() -> None:
     class Command(Step[None]):
         def build(self, run: Run) -> None:
@@ -251,6 +261,7 @@ def test_cmd_failure_names_step_command_exit_status_and_stderr_tail() -> None:
     assert "x" * 2001 not in message
 
 
+# (spec) Started processes
 def test_start_cmd_reports_early_exit() -> None:
     class Server(Service):
         def build(self, run: Run) -> RunningProcess:
@@ -270,6 +281,7 @@ def test_start_cmd_reports_early_exit() -> None:
         execute([server])
 
 
+# (spec) Artifacts
 def test_run_artifact_uses_the_build_directory_and_variable(tmp_path: Path) -> None:
     with use_project_root(tmp_path):
         services = tmp_path / "services"
@@ -293,6 +305,7 @@ def test_run_artifact_uses_the_build_directory_and_variable(tmp_path: Path) -> N
         assert run.artifact(unnamed, ".txt") == tmp_path / "target" / "roadie" / f"Value-{unnamed.serial}.txt"
 
 
+# (spec) Step values
 def test_run_releases_values_at_end() -> None:
     runs: list[Run] = []
 
@@ -307,6 +320,7 @@ def test_run_releases_values_at_end() -> None:
         runs[0][step]
 
 
+# (spec) Binaries
 @pytest.mark.parametrize(
     ("package", "fixture", "executable"),
     [
@@ -354,6 +368,7 @@ def test_rust_binary_picks_executable_from_captured_cargo_json(
     ]
 
 
+# (spec) Binaries
 def test_rust_binary_rejects_missing_executable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -368,6 +383,7 @@ def test_rust_binary_rejects_missing_executable(
         execute([RustBinary(CargoPackage("missing"))])
 
 
+# (spec) Tests
 @pytest.mark.parametrize("failed", [False, True])
 def test_tests_step_reports_failures_and_messages(failed: bool, capsys: pytest.CaptureFixture[str]) -> None:
     class Check(Checks):
@@ -387,6 +403,7 @@ def test_tests_step_reports_failures_and_messages(failed: bool, capsys: pytest.C
     assert "checked API" in capsys.readouterr().out
 
 
+# (spec) Commands
 def test_commands_run_in_the_steps_base_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     _isolate_repo(monkeypatch, tmp_path)
@@ -398,6 +415,7 @@ def test_commands_run_in_the_steps_base_directory(tmp_path: Path, monkeypatch: p
     assert execute([Command()]) == str(tmp_path.resolve())
 
 
+# (spec) Started processes
 def test_started_commands_run_in_the_steps_base_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     _isolate_repo(monkeypatch, tmp_path)
@@ -425,6 +443,7 @@ def test_started_commands_run_in_the_steps_base_directory(tmp_path: Path, monkey
     assert marker.read_text() == str(tmp_path.resolve())
 
 
+# (spec) Artifacts
 def test_unnamed_steps_of_one_class_get_distinct_artifacts(tmp_path: Path) -> None:
     with use_project_root(tmp_path):
         first, second = Value("first"), Value("second")
@@ -435,6 +454,7 @@ def test_unnamed_steps_of_one_class_get_distinct_artifacts(tmp_path: Path) -> No
         assert two.name == f"Value-{second.serial}.txt"
 
 
+# (spec) Groups
 def test_group_value_contains_its_steps_values() -> None:
     first, second = Value("first"), Value("second")
     group = Group(first, second)
@@ -452,6 +472,7 @@ class TextFile(File):
         return artifact
 
 
+# (spec) Generated files
 @pytest.mark.parametrize("previous", [None, "old\n", "new\n"])
 def test_file_output_is_published_and_equal_file_is_not_rewritten(previous: str | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.chdir(tmp_path)
@@ -472,6 +493,7 @@ def test_file_output_is_published_and_equal_file_is_not_rewritten(previous: str 
         assert f"updated {destination}" in output
 
 
+# (spec) Generated files
 @pytest.mark.parametrize("previous", [None, "old\n", "new\n"])
 @pytest.mark.parametrize("tracked", [False, True])
 def test_locked_file_output_protects_tracked_files_and_writes_untracked_files(previous: str | None, tracked: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -499,6 +521,7 @@ def test_locked_file_output_protects_tracked_files_and_writes_untracked_files(pr
         assert destination.read_text() == "new\n"
 
 
+# (spec) Generated files
 def test_file_output_value_is_available_to_dependents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     _isolate_repo(monkeypatch, tmp_path)
@@ -515,6 +538,7 @@ def test_file_output_value_is_available_to_dependents(tmp_path: Path, monkeypatc
     assert execute([source, Consumer(source)]) == "new\n"
 
 
+# (spec) Generated files
 def test_file_output_failure_releases_the_built_artifact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     _isolate_repo(monkeypatch, tmp_path)
@@ -533,6 +557,7 @@ def test_file_output_failure_releases_the_built_artifact(tmp_path: Path, monkeyp
         assert released == [Run().artifact(step, ".txt")]
 
 
+# (spec) Generated files
 def test_file_output_is_written_under_locked_outside_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     _isolate_repo(monkeypatch, tmp_path)
@@ -540,6 +565,7 @@ def test_file_output_is_written_under_locked_outside_git(tmp_path: Path, monkeyp
     assert execute([TextFile("new\n", output=destination)], locked=True) == destination
 
 
+# (spec) Generated files
 def test_locked_file_output_reports_git_failure_and_keeps_destination(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     _isolate_repo(monkeypatch, tmp_path)
@@ -597,6 +623,8 @@ api = Emitter()
 """
 
 
+# (spec) Reusing a step
+# (spec) Tests
 def test_second_run_reuses_a_step_and_replays_tests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     root = tmp_path.resolve()
     _isolate_repo(monkeypatch, root)
@@ -644,6 +672,9 @@ def test_second_run_reuses_a_step_and_replays_tests(tmp_path: Path, monkeypatch:
     assert "log-2" in output
 
 
+# (spec) Reusing a step
+# (spec) Output fingerprints
+# (spec) Files input
 def test_changed_files_rerun_a_step_and_identical_output_reuses_consumers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path.resolve()
     _isolate_repo(monkeypatch, root)
@@ -691,6 +722,8 @@ def test_changed_files_rerun_a_step_and_identical_output_reuses_consumers(tmp_pa
     assert built == ["note"]
 
 
+# (spec) Records
+# (spec) Reusing a step
 def test_failed_step_writes_no_record_and_a_changed_output_is_rebuilt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path.resolve()
     _isolate_repo(monkeypatch, root)
@@ -730,6 +763,8 @@ def test_failed_step_writes_no_record_and_a_changed_output_is_rebuilt(tmp_path: 
     assert rebuilt.read_text() == "body"
 
 
+# (spec) Reusing a step
+# (spec) Generated files
 def test_locked_run_does_not_reuse_a_hand_edited_tracked_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path.resolve()
     _isolate_repo(monkeypatch, root)
@@ -753,6 +788,7 @@ def test_locked_run_does_not_reuse_a_hand_edited_tracked_output(tmp_path: Path, 
     assert destination.read_text() == "hand edited\n"
 
 
+# (spec) Output fingerprints
 def test_tests_consumer_is_reused_when_the_replayed_log_would_differ(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     root = tmp_path.resolve()
     _isolate_repo(monkeypatch, root)
@@ -788,6 +824,8 @@ def test_tests_consumer_is_reused_when_the_replayed_log_would_differ(tmp_path: P
     assert "log-1" in output
 
 
+# (spec) Binaries
+# (spec) Reusing a step
 def test_rust_binary_is_rebuilt_when_its_recorded_copy_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path.resolve()
     _isolate_repo(monkeypatch, root)
@@ -818,6 +856,7 @@ def test_rust_binary_is_rebuilt_when_its_recorded_copy_changes(tmp_path: Path, m
     assert first.read_bytes() == b"v1"
 
 
+# (spec) Records
 def test_build_files_keep_separate_records_and_include_reuses_them(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path.resolve()
     _isolate_repo(monkeypatch, root)
@@ -841,6 +880,7 @@ def test_build_files_keep_separate_records_and_include_reuses_them(tmp_path: Pat
     assert (root / "target" / "roadie" / "module" / "api.txt").read_text() == "v1"
 
 
+# (spec) Command line
 def test_dry_run_marks_reuse_and_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     root = tmp_path.resolve()
     _isolate_repo(monkeypatch, root)
@@ -855,11 +895,14 @@ def test_dry_run_marks_reuse_and_run(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert capsys.readouterr().out.splitlines() == ["api = Emitter('v2')  # run"]
 
 
+# (spec) Services
+# (spec) Reusing a step
 def test_service_steps_are_not_reusable() -> None:
     assert Step.reusable is True
     assert Service.reusable is False
 
 
+# (spec) Dependencies and attributes
 def test_plain_attribute_of_unsupported_type_is_an_error() -> None:
     @dataclass(eq=False)
     class Custom(Step[None]):
@@ -874,6 +917,8 @@ def test_plain_attribute_of_unsupported_type_is_an_error() -> None:
         fingerprint(step)
 
 
+# (spec) Step fingerprints
+# (spec) Files input
 def test_step_fingerprint_covers_files_dependency_outputs_and_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path.resolve()
     monkeypatch.chdir(root)
@@ -916,6 +961,7 @@ def test_step_fingerprint_covers_files_dependency_outputs_and_env(tmp_path: Path
         assert missing.fingerprint(root) != before
 
 
+# (spec) Services
 def test_http_service_waits_for_its_health_path_and_fails_when_the_process_exits(tmp_path: Path) -> None:
     port = available_port()
     ready = tmp_path / "ready"
@@ -957,6 +1003,7 @@ def test_http_service_waits_for_its_health_path_and_fails_when_the_process_exits
         execute([dead])
 
 
+# (spec) Services
 def test_service_starts_only_when_a_consumer_must_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1081,6 +1128,7 @@ def _server(deployment: object) -> Service:
     return server
 
 
+# (spec) Requested services
 def test_requested_service_stays_up_until_ctrl_c(capsys: pytest.CaptureFixture[str]) -> None:
     deployment = _Deployment(interrupt=True)
 
@@ -1097,6 +1145,7 @@ def test_requested_service_stays_up_until_ctrl_c(capsys: pytest.CaptureFixture[s
     assert "server exited" not in output
 
 
+# (spec) Requested services
 @pytest.mark.skipif(os.name != "posix", reason="SIGTERM is POSIX-only")
 def test_sigterm_while_a_requested_service_is_up_exits_0(capsys: pytest.CaptureFixture[str]) -> None:
     started = threading.Event()
@@ -1129,6 +1178,7 @@ def test_sigterm_while_a_requested_service_is_up_exits_0(capsys: pytest.CaptureF
     assert "server exited" not in output
 
 
+# (spec) Requested services
 @pytest.mark.parametrize("status", [0, 3])
 def test_requested_service_exit_status(status: int, capsys: pytest.CaptureFixture[str]) -> None:
     deployment = _Deployment(status=status)
@@ -1143,6 +1193,7 @@ def test_requested_service_exit_status(status: int, capsys: pytest.CaptureFixtur
     assert deployment.stopped is True
 
 
+# (spec) Requested services
 def test_cli_ctrl_c_on_a_requested_service_exits_0(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _write_build(
         tmp_path,
@@ -1190,6 +1241,7 @@ dev = Reader()
 """
 
 
+# (spec) Requested services
 @pytest.mark.parametrize(("typed", "status"), [(b"b\n", 0), (b"x\n", 1)])
 def test_requested_service_reads_the_terminal_input(
     typed: bytes, status: int, tmp_path: Path
@@ -1212,6 +1264,7 @@ def test_requested_service_reads_the_terminal_input(
         assert "exited with status 5" in output
 
 
+# (spec) Environment files
 def test_env_files_override_step_settings_and_not_the_reverse(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1269,6 +1322,8 @@ def test_env_files_override_step_settings_and_not_the_reverse(
     assert seen[0]["EXTRA"] == "process"
 
 
+# (spec) Environment files
+# (spec) Step fingerprints
 def test_changed_env_file_reruns_a_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1298,6 +1353,7 @@ def test_changed_env_file_reruns_a_step(
     assert built == ["one", "two"]
 
 
+# (spec) Environment files
 def test_missing_env_file_stops_before_any_step(tmp_path: Path) -> None:
     missing = tmp_path / "nope.env"
 
@@ -1311,6 +1367,7 @@ def test_missing_env_file_stops_before_any_step(tmp_path: Path) -> None:
         execute([note])
 
 
+# (spec) Environment files
 def test_config_env_applies_before_cli_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _isolate_repo(monkeypatch, tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -1335,6 +1392,7 @@ def _git(directory: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=directory, check=True)
 
 
+# (spec) Project root
 def test_project_root_outside_load_and_execute_is_an_error() -> None:
     with pytest.raises(
         RoadieError,
@@ -1343,6 +1401,8 @@ def test_project_root_outside_load_and_execute_is_an_error() -> None:
         project_root()
 
 
+# (spec) Project root
+# (spec) Records
 def test_subdirectory_of_a_work_tree_records_under_the_top_level(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _git(repo)
@@ -1354,6 +1414,8 @@ def test_subdirectory_of_a_work_tree_records_under_the_top_level(tmp_path: Path)
     assert not (repo / "services" / "target").exists()
 
 
+# (spec) Project root
+# (spec) Records
 def test_build_outside_a_work_tree_records_under_its_own_directory(tmp_path: Path) -> None:
     _write_build(tmp_path, _EMITTER)
     graph = load(tmp_path)
@@ -1363,6 +1425,7 @@ def test_build_outside_a_work_tree_records_under_its_own_directory(tmp_path: Pat
     assert not (tmp_path / "services").exists()
 
 
+# (spec) Project root
 def test_included_file_shares_the_including_files_root(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     other = tmp_path / "other"

@@ -36,6 +36,7 @@ class CargoWorkspace:
     packages: tuple[RustPackage, ...]
 
 
+# (spec) Cargo workspace queries
 def cargo_rust_packages(directory: Path) -> CargoWorkspace:
     result = subprocess.run(
         ("cargo", "metadata", "--no-deps", "--format-version", "1"),
@@ -63,6 +64,7 @@ def cargo_rust_packages(directory: Path) -> CargoWorkspace:
     return CargoWorkspace(root, tuple(packages))
 
 
+# (spec) Cargo workspace queries
 def select_rust_packages(
     packages: Sequence[RustPackage],
     changed_paths: Sequence[Path],
@@ -183,6 +185,7 @@ def _content(root: Path, relative: str) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+# (spec) Cargo packages
 @dataclass(frozen=True)
 class CargoPackage(Input):
     name: str

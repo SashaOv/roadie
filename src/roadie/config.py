@@ -31,6 +31,7 @@ def configured_env() -> tuple[Path, ...]:
     return _env_files.get()
 
 
+# (spec) Settings
 def config(**settings: object) -> None:
     unknown = settings.keys() - {"base_dir", "env"}
     if unknown:

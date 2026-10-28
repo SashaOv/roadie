@@ -19,6 +19,7 @@ def artifact_dir(build_dir: Path | None, root: Path) -> Path:
     return relative
 
 
+# (spec) Records
 def record_path(build_dir: Path | None, root: Path) -> Path:
     return root / "target" / "roadie" / artifact_dir(build_dir, root) / "build.record.json"
 

@@ -28,6 +28,7 @@ class Graph:
     results: Mapping[str, Step[Any]]
     root: Path
 
+    # (spec) Results
     def result(self, name: str | None = None) -> Step[Any]:
         if name is None:
             return max(self.results.values(), key=lambda result: result.serial)
@@ -38,6 +39,7 @@ class Graph:
             )
         return self.results[name]
 
+    # (spec) Plan order
     def plan(self, name: str | None = None) -> list[Step[Any]]:
         """Return the steps `name` needs, each after the steps it takes results from."""
         ordered: list[Step[Any]] = []
@@ -89,6 +91,7 @@ def load(directory: Path, *, base_dir: Path | None = None) -> Graph:
         _session.reset(token)
 
 
+# (spec) Including build files
 def include(directory: str) -> SimpleNamespace:
     """Load `<directory>/build.py`, relative to the including file, and return its results."""
     session = _session.get()
@@ -98,6 +101,7 @@ def include(directory: str) -> SimpleNamespace:
     return SimpleNamespace(**graph.results)
 
 
+# (spec) Loading a build file
 def _load(session: _Session, directory: Path) -> Graph:
     if directory in session.graphs:
         return session.graphs[directory]

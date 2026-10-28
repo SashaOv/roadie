@@ -13,6 +13,7 @@ from roadie.root import project_root
 from roadie.step import Step
 
 
+# (spec) Step fingerprints
 def fingerprint(
     step: Step[Any],
     *,

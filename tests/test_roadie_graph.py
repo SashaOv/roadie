@@ -24,6 +24,8 @@ def run_cli(arguments: list[str]) -> None:
     command(*bound.args, **bound.kwargs)
 
 
+# (spec) Loading a build file
+# (spec) Results
 def test_load_records_each_result_variable_and_build_directory(tmp_path: Path) -> None:
     write_build(tmp_path / "services", 'server = RustBinary(CargoPackage("server"))\n')
     graph = load(tmp_path / "services")
@@ -33,6 +35,7 @@ def test_load_records_each_result_variable_and_build_directory(tmp_path: Path) -
     assert server.build_dir == (tmp_path / "services").resolve()
 
 
+# (spec) Results
 def test_default_result_is_the_last_step_called_not_the_last_variable(
     tmp_path: Path,
 ) -> None:
@@ -48,6 +51,7 @@ def test_default_result_is_the_last_step_called_not_the_last_variable(
     assert plan_names(tmp_path, "api") == [None, "api"]
 
 
+# (spec) Including build files
 def test_include_names_results_by_directory_and_loads_each_file_once(
     tmp_path: Path,
 ) -> None:
@@ -67,11 +71,13 @@ def test_include_names_results_by_directory_and_loads_each_file_once(
     assert plan_names(tmp_path) == ["module:server", "module:api", None, "fuzzed"]
 
 
+# (spec) Loading a build file
 def test_missing_build_file_names_the_directory(tmp_path: Path) -> None:
     with pytest.raises(RoadieError, match=f"{tmp_path} has no build.py"):
         load(tmp_path)
 
 
+# (spec) Results
 def test_build_file_without_results_fails(tmp_path: Path) -> None:
     write_build(tmp_path, "answer = 42\n")
 
@@ -79,6 +85,7 @@ def test_build_file_without_results_fails(tmp_path: Path) -> None:
         load(tmp_path)
 
 
+# (spec) Including build files
 def test_include_cycle_names_the_files(tmp_path: Path) -> None:
     write_build(tmp_path / "a", 'b = include("../b")\n')
     write_build(tmp_path / "b", 'a = include("../a")\n')
@@ -90,6 +97,8 @@ def test_include_cycle_names_the_files(tmp_path: Path) -> None:
         load(tmp_path / "a")
 
 
+# (spec) Dependencies and attributes
+# (spec) Plan order
 def test_graph_finds_dependencies_from_step_attributes(tmp_path: Path) -> None:
     @dataclass(eq=False)
     class Custom(Step[str]):
@@ -108,6 +117,7 @@ def test_graph_finds_dependencies_from_step_attributes(tmp_path: Path) -> None:
     ]
 
 
+# (spec) Plan order
 def test_step_dependency_cycle_names_the_steps(tmp_path: Path) -> None:
     @dataclass(eq=False)
     class Custom(Step[None]):
@@ -123,6 +133,7 @@ def test_step_dependency_cycle_names_the_steps(tmp_path: Path) -> None:
         Graph(tmp_path / "build.py", {"first": first}, tmp_path).plan()
 
 
+# (spec) Settings
 @pytest.mark.parametrize("override", [None, "override"])
 @pytest.mark.parametrize("root_configured", [False, True])
 @pytest.mark.parametrize("module_configured", [False, True])
@@ -145,6 +156,8 @@ def test_steps_record_base_directory_per_file_and_config(
     assert after.resolve("input.yaml") == after.base_dir / "input.yaml"
 
 
+# (spec) Settings
+# (spec) Command line
 def test_cli_base_dir_applies_to_included_steps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     write_build(tmp_path / "project/module", 'server = RustBinary(CargoPackage("module"))\n')
@@ -155,6 +168,7 @@ def test_cli_base_dir_applies_to_included_steps(tmp_path: Path, monkeypatch: pyt
     assert observed == [tmp_path / "work", tmp_path / "work"]
 
 
+# (spec) Settings
 def test_config_changes_only_subsequent_steps_and_is_released_after_load(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     write_build(tmp_path / "project", 'before = RustBinary(CargoPackage("before"))\nconfig(base_dir="work")\nafter = RustBinary(CargoPackage("after"))\n')
@@ -170,6 +184,8 @@ def test_config_changes_only_subsequent_steps_and_is_released_after_load(tmp_pat
     assert RustBinary(CargoPackage("outside")).base_dir == tmp_path
 
 
+# (spec) Settings
+# (spec) Environment files
 def test_config_env_is_recorded_per_file_and_released(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     write_build(
@@ -191,6 +207,8 @@ def test_config_env_is_recorded_per_file_and_released(tmp_path: Path, monkeypatc
     assert RustBinary(CargoPackage("outside")).env_files == ()
 
 
+# (spec) Environment files
+# (spec) Command line
 def test_cli_passes_env_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     write_build(tmp_path, 'item = RustBinary(CargoPackage("server"))\n')
@@ -203,12 +221,14 @@ def test_cli_passes_env_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     )
 
 
+# (spec) Settings
 def test_unknown_config_name_lists_known_names(tmp_path: Path) -> None:
     write_build(tmp_path, 'config(unknown="value")\nserver = RustBinary(CargoPackage("server"))\n')
     with pytest.raises(RoadieError, match="unknown.*known settings: base_dir, env"):
         load(tmp_path)
 
 
+# (spec) Settings
 @pytest.mark.parametrize("value", ["None", "42"])
 def test_config_rejects_a_non_path_base_directory(value: str, tmp_path: Path) -> None:
     write_build(tmp_path, f'config(base_dir={value})\nserver = RustBinary(CargoPackage("server"))\n')
@@ -216,6 +236,8 @@ def test_config_rejects_a_non_path_base_directory(value: str, tmp_path: Path) ->
         load(tmp_path)
 
 
+# (spec) Dependencies and attributes
+# (spec) Command line
 def test_tuple_attributes_declare_dependencies_and_dry_run_prints_them(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr("roadie.cargo.CargoPackage.fingerprint", lambda self, base_dir: f"package:{self.name}")
     write_build(tmp_path, '''from dataclasses import dataclass
@@ -236,6 +258,8 @@ combined = Combined((first, second))
     assert capsys.readouterr().out.splitlines()[-1] == "combined = Combined((first, second))  # run"
 
 
+# (spec) Groups
+# (spec) Command line
 def test_group_plans_and_prints_steps_as_variadic_arguments(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr("roadie.cargo.CargoPackage.fingerprint", lambda self, base_dir: f"package:{self.name}")
     write_build(tmp_path, 'first = RustBinary(CargoPackage("first"))\nsecond = RustBinary(CargoPackage("second"))\nall_steps = Group(first, second)\n')
@@ -244,12 +268,15 @@ def test_group_plans_and_prints_steps_as_variadic_arguments(tmp_path: Path, monk
     assert capsys.readouterr().out.splitlines()[-1] == "all_steps = Group(first, second)  # run"
 
 
+# (spec) Groups
 def test_group_rejects_a_non_step(tmp_path: Path) -> None:
     write_build(tmp_path, 'result = Group(42)\n')
     with pytest.raises(RoadieError, match="Group.*steps"):
         load(tmp_path)
 
 
+# (spec) Command line
+# (spec) Generated files
 def test_cli_passes_locked_and_prints_keyword_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     write_build(
         tmp_path,
@@ -272,6 +299,7 @@ def test_cli_passes_locked_and_prints_keyword_output(tmp_path: Path, monkeypatch
     assert capsys.readouterr().out.splitlines()[-1] == "api = Note(output='api.yaml')  # run"
 
 
+# (spec) File steps
 def test_file_output_is_keyword_only(tmp_path: Path) -> None:
     write_build(
         tmp_path,
@@ -286,6 +314,7 @@ def test_file_output_is_keyword_only(tmp_path: Path) -> None:
         load(tmp_path)
 
 
+# (spec) Command line
 def test_dry_run_omits_attributes_whose_value_is_none(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     write_build(
         tmp_path,

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 _serials = itertools.count()
 
 
+# (spec) Dependencies and attributes
 class Step[T](ABC):
     reusable: ClassVar[bool] = True
     recorded: ClassVar[bool] = True
@@ -79,6 +80,7 @@ class Step[T](ABC):
     def teardown(self, value: T) -> None:
         pass
 
+    # (spec) Commands
     def _cmd(
         self,
         *args: str,
@@ -109,6 +111,7 @@ class Step[T](ABC):
                 f"{reason}: {detail}" if detail else reason,
             )
 
+    # (spec) Started processes
     def _start_cmd(
         self,
         *args: str,
@@ -136,6 +139,7 @@ class Binary(Step[Path]):
     pass
 
 
+# (spec) File steps
 @dataclass(eq=False, kw_only=True)
 class File(Step[Path]):
     output: str | Path | None = None
@@ -150,6 +154,7 @@ class Deployment(Protocol):
     def stop(self) -> None: ...
 
 
+# (spec) Services
 class Service(Step[Deployment]):
     reusable: ClassVar[bool] = False
 
@@ -177,5 +182,6 @@ class HttpService(Service):
         )
 
 
+# (spec) Tests
 class Tests(Step[TestResults]):
     pass

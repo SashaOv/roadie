@@ -25,6 +25,7 @@ class Run:
         self._values: dict[int, object] = {}
         self.reused: set[int] = set()
 
+    # (spec) Step values
     def __getitem__[T](self, step: Step[T]) -> T:
         if id(step) not in self._values:
             raise RoadieError(
@@ -32,6 +33,7 @@ class Run:
             )
         return cast(T, self._values[id(step)])
 
+    # (spec) Artifacts
     def artifact(self, step: Step[Any], suffix: str) -> Path:
         root = project_root()
         stem = step.variable or f"{type(step).__name__}-{step.serial}"
@@ -115,6 +117,7 @@ def _run_steps(
             _teardown(run, live, list(live))
 
 
+# (spec) Requested services
 def _await_requested_service(step: Step[Any], value: object) -> None:
     """Keep a requested service up until Ctrl-C, SIGTERM, or the process exits."""
     name = step.name or type(step).__name__
@@ -171,6 +174,7 @@ def _start_services(
         started.add(id(dependency))
 
 
+# (spec) Environment files
 def _apply_env(steps: Sequence[Step[Any]], env: Sequence[Path]) -> None:
     """Read env files once. ``config(env=...)`` applies first, then ``--env``."""
     cli_paths = tuple(_resolve_env_path(path) for path in env)
@@ -234,6 +238,7 @@ def _reusable(step: Step[Any]) -> bool:
     return bool(step.variable) and type(step).reusable and type(step).recorded
 
 
+# (spec) Reusing a step
 def _matching(step: Step[Any], step_fingerprint: str) -> dict[str, Any] | None:
     if not _reusable(step):
         return None
@@ -275,6 +280,7 @@ def _value(step: Step[Any], record: dict[str, Any]) -> object:
     return record.get("value")
 
 
+# (spec) Records
 def _remember(step: Step[Any], step_fingerprint: str, value: object) -> None:
     if not _reusable(step):
         return
@@ -314,6 +320,7 @@ def _entry(step: Step[Any], step_fingerprint: str, value: object) -> dict[str, A
     }
 
 
+# (spec) Output fingerprints
 def _output_fingerprint(
     step: Step[Any], value: object, step_fingerprint: str, outputs: Mapping[int, str]
 ) -> str:
@@ -362,6 +369,7 @@ def _reason(error: BaseException) -> str:
     return str(error).strip() or type(error).__name__
 
 
+# (spec) Teardown
 def _teardown(run: Run, live: list[Step[Any]], expired: list[Step[Any]]) -> None:
     errors: list[StepFailed] = []
     for step in reversed(expired):

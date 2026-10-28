@@ -19,6 +19,7 @@ class TestResults:
     messages: tuple[str, ...] = ()
 
 
+# (spec) Tests
 def read_junit(path: Path) -> TestResults:
     try:
         root = ElementTree.parse(path).getroot()

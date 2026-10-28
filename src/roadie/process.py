@@ -17,6 +17,7 @@ from typing import BinaryIO
 _COMMAND_NAME_WORDS = 3
 
 
+# (spec) Started processes
 @dataclass(frozen=True)
 class RunningProcess:
     process: subprocess.Popen[bytes]

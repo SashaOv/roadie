@@ -12,6 +12,7 @@ from roadie.run import Run
 from roadie.step import Binary, Step
 
 
+# (spec) Groups
 class Group(Step[tuple[object, ...]]):
     recorded = False
 
@@ -27,6 +28,7 @@ class Group(Step[tuple[object, ...]]):
         return values
 
 
+# (spec) Binaries
 @dataclass(eq=False)
 class RustBinary(Binary):
     package: CargoPackage
