@@ -37,17 +37,20 @@ def test_cargo_package_discovery_is_module_neutral(
         lambda *_args, **_kwargs: subprocess.CompletedProcess(
             args=(),
             returncode=0,
-            stdout=json.dumps({"packages": packages}),
+            stdout=json.dumps({"workspace_root": str(REPO_ROOT), "packages": packages}),
         ),
     )
 
-    assert cargo.cargo_rust_packages() == (
-        cargo.RustPackage("jammer_core", Path("jammer/core"), ()),
-        cargo.RustPackage("niva_lang", Path("notation/lang"), ()),
-        cargo.RustPackage(
-            "niva_desktop",
-            Path("desktop/src-tauri"),
-            ("niva_lang",),
+    assert cargo.cargo_rust_packages(REPO_ROOT) == cargo.CargoWorkspace(
+        REPO_ROOT.resolve(),
+        (
+            cargo.RustPackage("jammer_core", Path("jammer/core"), ()),
+            cargo.RustPackage("niva_lang", Path("notation/lang"), ()),
+            cargo.RustPackage(
+                "niva_desktop",
+                Path("desktop/src-tauri"),
+                ("niva_lang",),
+            ),
         ),
     )
 
@@ -74,7 +77,7 @@ def test_local_dependency_closure_ignores_unrelated_changes() -> None:
 
 
 def test_local_dependency_closure_covers_notation_and_desktop() -> None:
-    packages = cargo.cargo_rust_packages()
+    packages = cargo.cargo_rust_packages(REPO_ROOT).packages
 
     notation_selected = set(
         cargo.select_rust_packages(
@@ -112,12 +115,9 @@ def _cargo_workspace(root: Path) -> None:
     subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
 
 
-def test_cargo_package_fingerprint_follows_its_dependency_closure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cargo_package_fingerprint_follows_its_dependency_closure(tmp_path: Path) -> None:
     root = tmp_path.resolve()
     _cargo_workspace(root)
-    monkeypatch.setattr(cargo, "repository_root", lambda: root)
     package = cargo.CargoPackage("app")
     core = cargo.CargoPackage("core")
     original = package.fingerprint(root)
@@ -154,7 +154,6 @@ def test_cargo_package_fingerprint_reads_declared_cargo_settings(
 ) -> None:
     root = tmp_path.resolve()
     _cargo_workspace(root)
-    monkeypatch.setattr(cargo, "repository_root", lambda: root)
     package = cargo.CargoPackage("core")
     monkeypatch.delenv("RUSTFLAGS", raising=False)
     monkeypatch.delenv("CARGO_PROFILE_DEV_DEBUG", raising=False)
@@ -180,7 +179,6 @@ def test_cargo_metadata_and_rustc_run_once_per_snapshot(
 ) -> None:
     root = tmp_path.resolve()
     _cargo_workspace(root)
-    monkeypatch.setattr(cargo, "repository_root", lambda: root)
     calls: list[str] = []
     real_run = subprocess.run
 
@@ -193,8 +191,19 @@ def test_cargo_metadata_and_rustc_run_once_per_snapshot(
     monkeypatch.setattr(cargo.subprocess, "run", spy)
     package = cargo.CargoPackage("core")
     with cargo.cargo_snapshot():
-        package.fingerprint(root)
-        package.fingerprint(root)
+        package.fingerprint(root / "app")
+        package.fingerprint(root / "core")
 
     assert calls.count("cargo") == 1
     assert calls.count("rustc") == 1
+
+
+def test_cargo_package_in_a_subdirectory_finds_the_workspace_root(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+    _cargo_workspace(root)
+    workspace = cargo.cargo_rust_packages(root / "app")
+    assert workspace.root == root
+    package = cargo.CargoPackage("app")
+    fingerprint = package.fingerprint(root / "app")
+    assert package.fingerprint(root / "core") == fingerprint
+    assert package.fingerprint(root) == fingerprint

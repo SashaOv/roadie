@@ -1,5 +1,7 @@
 """Cargo workspace packages and the local dependency closure."""
 
+from __future__ import annotations
+
 import hashlib
 import json
 import os
@@ -10,16 +12,15 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 
-from forge.environment import repository_root
-
 from roadie.errors import RoadieError
 from roadie.inputs import Input, digest
 
 _CARGO_ENV_EXACT = frozenset({"RUSTFLAGS", "RUSTDOCFLAGS", "CARGO_ENCODED_RUSTFLAGS"})
 _CARGO_ENV_PREFIXES = ("CARGO_PROFILE_", "CARGO_BUILD_")
 _ROOT_FILES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/config.toml")
-_EMPTY = object()
-_cache: ContextVar[object] = ContextVar("roadie_cargo_snapshot", default=None)
+_cache: ContextVar[dict[Path, CargoSnapshot] | None] = ContextVar(
+    "roadie_cargo_snapshot", default=None
+)
 
 
 @dataclass(frozen=True)
@@ -29,22 +30,28 @@ class RustPackage:
     local_dependencies: tuple[str, ...]
 
 
-def cargo_rust_packages() -> tuple[RustPackage, ...]:
-    root = repository_root()
+@dataclass(frozen=True)
+class CargoWorkspace:
+    root: Path
+    packages: tuple[RustPackage, ...]
+
+
+def cargo_rust_packages(directory: Path) -> CargoWorkspace:
     result = subprocess.run(
         ("cargo", "metadata", "--no-deps", "--format-version", "1"),
-        cwd=root,
+        cwd=directory,
         check=True,
         capture_output=True,
         text=True,
     )
     metadata = json.loads(result.stdout)
+    root = Path(metadata["workspace_root"]).resolve()
     workspace_names = {package["name"] for package in metadata["packages"]}
     packages = []
     for package in metadata["packages"]:
         manifest = Path(package["manifest_path"])
         try:
-            package_root = manifest.parent.relative_to(root)
+            package_root = manifest.parent.resolve().relative_to(root)
         except ValueError:
             continue
         local_dependencies = tuple(
@@ -53,7 +60,7 @@ def cargo_rust_packages() -> tuple[RustPackage, ...]:
             if dependency["name"] in workspace_names
         )
         packages.append(RustPackage(package["name"], package_root, local_dependencies))
-    return tuple(packages)
+    return CargoWorkspace(root, tuple(packages))
 
 
 def select_rust_packages(
@@ -86,39 +93,52 @@ def select_rust_packages(
 
 @dataclass(frozen=True)
 class CargoSnapshot:
-    packages: tuple[RustPackage, ...]
+    workspace: CargoWorkspace
     rustc: str
 
 
 @contextmanager
 def cargo_snapshot() -> Iterator[None]:
     """Reuse cargo metadata and rustc --version for every fingerprint in the block."""
-    token = _cache.set(_EMPTY)
+    token = _cache.set({})
     try:
         yield
     finally:
         _cache.reset(token)
 
 
-def _load_snapshot() -> CargoSnapshot:
+def _load_snapshot(directory: Path) -> CargoSnapshot:
     version = subprocess.run(
         ("rustc", "--version"),
-        cwd=repository_root(),
+        cwd=directory,
         check=True,
         capture_output=True,
         text=True,
     )
-    return CargoSnapshot(cargo_rust_packages(), version.stdout.strip())
+    return CargoSnapshot(cargo_rust_packages(directory), version.stdout.strip())
 
 
-def _snapshot() -> CargoSnapshot:
+def _snapshot(directory: Path) -> CargoSnapshot:
+    directory = directory.resolve()
     current = _cache.get()
-    if isinstance(current, CargoSnapshot):
-        return current
-    loaded = _load_snapshot()
-    if current is _EMPTY:
-        _cache.set(loaded)
+    if isinstance(current, dict):
+        cached = _cached_snapshot(current, directory)
+        if cached is not None:
+            return cached
+    loaded = _load_snapshot(directory)
+    if isinstance(current, dict):
+        current.setdefault(loaded.workspace.root, loaded)
+        return current[loaded.workspace.root]
     return loaded
+
+
+def _cached_snapshot(
+    cache: dict[Path, CargoSnapshot], directory: Path
+) -> CargoSnapshot | None:
+    for root, snapshot in cache.items():
+        if directory.is_relative_to(root):
+            return snapshot
+    return None
 
 
 def _cargo_environment() -> dict[str, str]:
@@ -168,10 +188,9 @@ class CargoPackage(Input):
     name: str
 
     def fingerprint(self, base_dir: Path) -> str:
-        del base_dir
-        root = repository_root()
-        snapshot = _snapshot()
-        packages = _closure(snapshot.packages, self.name)
+        snapshot = _snapshot(base_dir)
+        root = snapshot.workspace.root
+        packages = _closure(snapshot.workspace.packages, self.name)
         listed = set(_git_files(root, [package.root.as_posix() for package in packages]))
         for name in _ROOT_FILES:
             if (root / name).exists():
