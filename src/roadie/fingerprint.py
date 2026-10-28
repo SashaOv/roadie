@@ -6,11 +6,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from forge.environment import repository_root
-
 import roadie
 from roadie.errors import RoadieError
 from roadie.inputs import Input, digest
+from roadie.root import project_root
 from roadie.step import Step
 
 
@@ -85,8 +84,8 @@ def _plain(value: object) -> bool:
 def _relative(path: Path) -> str:
     resolved = path.resolve()
     try:
-        root = repository_root().resolve()
-    except RuntimeError:
+        root = project_root().resolve()
+    except RoadieError:
         return str(resolved)
     try:
         relative = resolved.relative_to(root)

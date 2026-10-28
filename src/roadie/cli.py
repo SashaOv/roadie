@@ -37,12 +37,13 @@ def run(
 ) -> None:
     """Run `result` of `<directory>/build.py`, by default the last one defined."""
     try:
-        steps = load(directory, base_dir=base_dir).plan(result)
+        graph = load(directory, base_dir=base_dir)
+        steps = graph.plan(result)
     except RoadieError as error:
         raise SystemExit(str(error)) from error
     if dry_run:
         try:
-            marks = reuse_markers(steps, env=env or ())
+            marks = reuse_markers(steps, root=graph.root, env=env or ())
         except RoadieError as error:
             raise SystemExit(str(error)) from error
         for step, reused in zip(steps, marks, strict=True):
@@ -50,7 +51,7 @@ def run(
             print(f"{line}  # {'reuse' if reused else 'run'}")
         return
     try:
-        execute(steps, locked=locked, env=env or ())
+        execute(steps, root=graph.root, locked=locked, env=env or ())
     except RoadieError as error:
         raise SystemExit(str(error)) from error
 

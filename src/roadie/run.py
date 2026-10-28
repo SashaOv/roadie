@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
-from forge.environment import dotenv_values, repository_root
+from forge.environment import dotenv_values
 
 from roadie.cargo import cargo_snapshot
 from roadie.errors import RoadieError, StepFailed
@@ -15,6 +15,7 @@ from roadie.inputs import digest
 from roadie.output import publish
 from roadie.process import interrupt_on_terminate
 from roadie.records import artifact_dir, load_records, save_records
+from roadie.root import project_root, use_project_root
 from roadie.step import Binary, File, Service, Step, Tests
 from roadie.testing import TestResults
 
@@ -32,7 +33,7 @@ class Run:
         return cast(T, self._values[id(step)])
 
     def artifact(self, step: Step[Any], suffix: str) -> Path:
-        root = repository_root()
+        root = project_root()
         stem = step.variable or f"{type(step).__name__}-{step.serial}"
         destination = root / "target" / "roadie" / artifact_dir(step.build_dir, root) / f"{stem}{suffix}"
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -40,6 +41,17 @@ class Run:
 
 
 def execute(
+    steps: Sequence[Step[Any]],
+    *,
+    root: Path,
+    locked: bool = False,
+    env: Sequence[Path] = (),
+) -> object:
+    with use_project_root(root):
+        return _run_steps(steps, locked=locked, env=env)
+
+
+def _run_steps(
     steps: Sequence[Step[Any]], *, locked: bool = False, env: Sequence[Path] = ()
 ) -> object:
     _apply_env(steps, env)
@@ -187,8 +199,15 @@ def _resolve_env_path(path: Path) -> Path:
     return (Path.cwd() / path).resolve()
 
 
-def reuse_markers(steps: Sequence[Step[Any]], *, env: Sequence[Path] = ()) -> list[bool]:
+def reuse_markers(
+    steps: Sequence[Step[Any]], *, root: Path, env: Sequence[Path] = ()
+) -> list[bool]:
     """True when `--dry` can promise the step will not run."""
+    with use_project_root(root):
+        return _reuse_markers(steps, env=env)
+
+
+def _reuse_markers(steps: Sequence[Step[Any]], *, env: Sequence[Path] = ()) -> list[bool]:
     _apply_env(steps, env)
     marks: dict[int, bool] = {}
     outputs: dict[int, str] = {}
@@ -218,7 +237,7 @@ def _reusable(step: Step[Any]) -> bool:
 def _matching(step: Step[Any], step_fingerprint: str) -> dict[str, Any] | None:
     if not _reusable(step):
         return None
-    record = load_records(step.build_dir, repository_root()).get(step.variable or "")
+    record = load_records(step.build_dir, project_root()).get(step.variable or "")
     if not isinstance(record, dict) or record.get("fingerprint") != step_fingerprint:
         return None
     if not _valid(step, record):
@@ -259,7 +278,7 @@ def _value(step: Step[Any], record: dict[str, Any]) -> object:
 def _remember(step: Step[Any], step_fingerprint: str, value: object) -> None:
     if not _reusable(step):
         return
-    root = repository_root()
+    root = project_root()
     records = load_records(step.build_dir, root)
     if step.build_variables is not None:
         records = {key: item for key, item in records.items() if key in step.build_variables}
@@ -324,12 +343,12 @@ def _stored_path(stored: str) -> Path:
     path = Path(stored)
     if path.is_absolute():
         return path
-    return repository_root() / path
+    return project_root() / path
 
 
 def _relative(path: Path) -> str:
     resolved = path.resolve()
-    root = repository_root().resolve()
+    root = project_root().resolve()
     try:
         relative = resolved.relative_to(root)
     except ValueError:

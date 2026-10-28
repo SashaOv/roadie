@@ -6,7 +6,8 @@ import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from forge.environment import repository_root
+from roadie.errors import RoadieError
+from roadie.root import project_root
 
 
 def digest(payload: object) -> str:
@@ -81,8 +82,8 @@ class Files(Input):
 
     def fingerprint(self, base_dir: Path) -> str:
         try:
-            root = repository_root().resolve()
-        except RuntimeError:
+            root = project_root().resolve()
+        except RoadieError:
             root = None
         entries: dict[str, str] = {}
         for raw in self.paths:

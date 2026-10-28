@@ -173,7 +173,7 @@ def test_graph_finds_dependencies_from_step_attributes(tmp_path: Path) -> None:
 
     first = Custom("input")
     second = Custom(first, other=Custom("another"))
-    assert Graph(tmp_path / "build.py", {"result": second}).plan() == [
+    assert Graph(tmp_path / "build.py", {"result": second}, tmp_path).plan() == [
         first,
         second.other,
         second,
@@ -192,7 +192,7 @@ def test_step_dependency_cycle_names_the_steps(tmp_path: Path) -> None:
     first.name, second.name = "first", "second"
     first.argument, second.argument = second, first
     with pytest.raises(RoadieError, match="steps depend on each other: first -> second -> first"):
-        Graph(tmp_path / "build.py", {"first": first}).plan()
+        Graph(tmp_path / "build.py", {"first": first}, tmp_path).plan()
 
 
 def test_roadie_does_not_import_harness_or_jammer() -> None:
@@ -344,7 +344,7 @@ def test_cli_passes_locked_and_prints_keyword_output(tmp_path: Path, monkeypatch
     monkeypatch.setattr(
         cli,
         "execute",
-        lambda steps, *, locked, env=(): observed.append((locked, env)),
+        lambda steps, *, root, locked, env=(): observed.append((locked, env)),
     )
     run_cli(["--locked", str(tmp_path)])
     assert observed == [(True, ())]

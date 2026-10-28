@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
-from forge.environment import repository_root
+from roadie.root import project_root
 
 _COMMAND_NAME_WORDS = 3
 
@@ -153,7 +153,7 @@ def spawn_server(
     """
     return subprocess.Popen(
         command,
-        cwd=repository_root() if cwd is None else cwd,
+        cwd=project_root() if cwd is None else cwd,
         env=None if environment is None else dict(environment),
         stdout=stdout,
         start_new_session=os.name == "posix",

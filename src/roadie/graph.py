@@ -16,6 +16,7 @@ from typing import Any
 
 from roadie.config import file_settings
 from roadie.errors import RoadieError
+from roadie.root import find_project_root, use_project_root
 from roadie.step import Step
 
 BUILD_FILE = "build.py"
@@ -25,6 +26,7 @@ BUILD_FILE = "build.py"
 class Graph:
     path: Path
     results: Mapping[str, Step[Any]]
+    root: Path
 
     def result(self, name: str | None = None) -> Step[Any]:
         if name is None:
@@ -62,6 +64,7 @@ class Graph:
 @dataclass
 class _Session:
     root: Path
+    project: Path
     base_dir: Path | None = None
     graphs: dict[Path, Graph] = field(default_factory=dict)
     loading: list[Path] = field(default_factory=list)
@@ -71,10 +74,17 @@ _session: ContextVar[_Session | None] = ContextVar("roadie_session", default=Non
 
 
 def load(directory: Path, *, base_dir: Path | None = None) -> Graph:
-    session = _Session(root=directory.resolve(), base_dir=base_dir.resolve() if base_dir is not None else None)
+    resolved = directory.resolve()
+    project = find_project_root(resolved)
+    session = _Session(
+        root=resolved,
+        project=project,
+        base_dir=base_dir.resolve() if base_dir is not None else None,
+    )
     token = _session.set(session)
     try:
-        return _load(session, session.root)
+        with use_project_root(project):
+            return _load(session, session.root)
     finally:
         _session.reset(token)
 
@@ -117,7 +127,7 @@ def _load(session: _Session, directory: Path) -> Graph:
             result.build_variables = names
         if result.name is None:
             result.name = f"{prefix}{name}"
-    graph = Graph(path=path, results=results)
+    graph = Graph(path=path, results=results, root=session.project)
     session.graphs[directory] = graph
     return graph
 

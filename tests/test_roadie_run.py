@@ -30,10 +30,20 @@ from roadie.fingerprint import fingerprint
 from roadie.graph import Graph, load
 from roadie.inputs import Files
 from roadie.process import RunningProcess, available_port
-from roadie.run import Run, execute
+from roadie.root import project_root, use_project_root
+from roadie.run import Run
+from roadie.run import execute as _execute
 from roadie.steps import RustBinary
 
 FIXTURES = Path(__file__).parent / "fixtures"
+_forced_root: Path | None = None
+
+
+def execute(steps, **kwargs):
+    root = kwargs.pop("root", None)
+    if root is None:
+        root = _forced_root if _forced_root is not None else repository_root()
+    return _execute(steps, root=root, **kwargs)
 
 
 @dataclass(eq=False)
@@ -58,7 +68,7 @@ def test_steps_build_in_plan_order_with_dependency_values(tmp_path: Path) -> Non
     first = Value("first")
     second = Consumer(first)
     third = Consumer(second)
-    graph = Graph(tmp_path / "build.py", {"last": third})
+    graph = Graph(tmp_path / "build.py", {"last": third}, tmp_path)
     assert execute(graph.plan()) == "first!!"
     assert events == ["first", "first!"]
 
@@ -260,30 +270,27 @@ def test_start_cmd_reports_early_exit() -> None:
         execute([server])
 
 
-def test_run_artifact_uses_the_build_directory_and_variable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("roadie.run.repository_root", lambda: tmp_path)
-    jammer = tmp_path / "jammer"
-    other = tmp_path / "other"
-    first, second = Value("one"), Value("two")
-    first.variable, first.build_dir = "api", jammer
-    second.variable, second.build_dir = "api", other
-    run = Run()
+def test_run_artifact_uses_the_build_directory_and_variable(tmp_path: Path) -> None:
+    with use_project_root(tmp_path):
+        jammer = tmp_path / "jammer"
+        other = tmp_path / "other"
+        first, second = Value("one"), Value("two")
+        first.variable, first.build_dir = "api", jammer
+        second.variable, second.build_dir = "api", other
+        run = Run()
 
-    assert run.artifact(first, ".yaml") == tmp_path / "target" / "roadie" / "jammer" / "api.yaml"
-    assert run.artifact(second, ".yaml") == tmp_path / "target" / "roadie" / "other" / "api.yaml"
-    outside = tmp_path / "elsewhere"
-    # build_dir is outside the repository root the run was given.
-    external = Value("ext")
-    external.variable = "api"
-    external.build_dir = Path("/tmp/roadie-outside-build")
-    copied = run.artifact(external, ".yaml")
-    assert copied.parent.parent == tmp_path / "target" / "roadie" / "_outside"
-    assert len(copied.parent.name) == 12
-    assert copied.name == "api.yaml"
-    unnamed = Value("loose")
-    assert run.artifact(unnamed, ".txt") == tmp_path / "target" / "roadie" / f"Value-{unnamed.serial}.txt"
+        assert run.artifact(first, ".yaml") == tmp_path / "target" / "roadie" / "jammer" / "api.yaml"
+        assert run.artifact(second, ".yaml") == tmp_path / "target" / "roadie" / "other" / "api.yaml"
+        # build_dir is outside the repository root the run was given.
+        external = Value("ext")
+        external.variable = "api"
+        external.build_dir = Path("/tmp/roadie-outside-build")
+        copied = run.artifact(external, ".yaml")
+        assert copied.parent.parent == tmp_path / "target" / "roadie" / "_outside"
+        assert len(copied.parent.name) == 12
+        assert copied.name == "api.yaml"
+        unnamed = Value("loose")
+        assert run.artifact(unnamed, ".txt") == tmp_path / "target" / "roadie" / f"Value-{unnamed.serial}.txt"
 
 
 def test_run_releases_values_at_end() -> None:
@@ -396,6 +403,7 @@ def test_tests_step_reports_failures_and_messages(failed: bool, capsys: pytest.C
 
 def test_commands_run_in_the_steps_base_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
+    _isolate_repo(monkeypatch, tmp_path)
 
     class Command(Step[str]):
         def build(self, run: Run) -> str:
@@ -406,6 +414,7 @@ def test_commands_run_in_the_steps_base_directory(tmp_path: Path, monkeypatch: p
 
 def test_started_commands_run_in_the_steps_base_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
+    _isolate_repo(monkeypatch, tmp_path)
     marker = tmp_path / "cwd.txt"
     port = available_port()
 
@@ -430,14 +439,14 @@ def test_started_commands_run_in_the_steps_base_directory(tmp_path: Path, monkey
     assert marker.read_text() == str(tmp_path.resolve())
 
 
-def test_unnamed_steps_of_one_class_get_distinct_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("roadie.run.repository_root", lambda: tmp_path)
-    first, second = Value("first"), Value("second")
-    run = Run()
-    one, two = run.artifact(first, ".txt"), run.artifact(second, ".txt")
-    assert one != two
-    assert one.name == f"Value-{first.serial}.txt"
-    assert two.name == f"Value-{second.serial}.txt"
+def test_unnamed_steps_of_one_class_get_distinct_artifacts(tmp_path: Path) -> None:
+    with use_project_root(tmp_path):
+        first, second = Value("first"), Value("second")
+        run = Run()
+        one, two = run.artifact(first, ".txt"), run.artifact(second, ".txt")
+        assert one != two
+        assert one.name == f"Value-{first.serial}.txt"
+        assert two.name == f"Value-{second.serial}.txt"
 
 
 def test_group_value_contains_its_steps_values() -> None:
@@ -460,7 +469,7 @@ class TextFile(File):
 @pytest.mark.parametrize("previous", [None, "old\n", "new\n"])
 def test_file_output_is_published_and_equal_file_is_not_rewritten(previous: str | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("roadie.run.repository_root", lambda: tmp_path)
+    _isolate_repo(monkeypatch, tmp_path)
     destination = tmp_path / "nested/output.txt"
     if previous is not None:
         destination.parent.mkdir()
@@ -481,7 +490,7 @@ def test_file_output_is_published_and_equal_file_is_not_rewritten(previous: str 
 @pytest.mark.parametrize("tracked", [False, True])
 def test_locked_file_output_protects_tracked_files_and_writes_untracked_files(previous: str | None, tracked: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("roadie.run.repository_root", lambda: tmp_path)
+    _isolate_repo(monkeypatch, tmp_path)
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     destination = tmp_path / "output.txt"
     destination.write_text(previous or "old\n")
@@ -506,7 +515,7 @@ def test_locked_file_output_protects_tracked_files_and_writes_untracked_files(pr
 
 def test_file_output_value_is_available_to_dependents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("roadie.run.repository_root", lambda: tmp_path)
+    _isolate_repo(monkeypatch, tmp_path)
 
     @dataclass(eq=False)
     class Consumer(Step[str]):
@@ -522,7 +531,7 @@ def test_file_output_value_is_available_to_dependents(tmp_path: Path, monkeypatc
 
 def test_file_output_failure_releases_the_built_artifact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("roadie.run.repository_root", lambda: tmp_path)
+    _isolate_repo(monkeypatch, tmp_path)
     destination = tmp_path / "output.txt"
     destination.mkdir()
     released: list[Path] = []
@@ -534,19 +543,20 @@ def test_file_output_failure_releases_the_built_artifact(tmp_path: Path, monkeyp
     step = ReleasingFile("new\n", output="output.txt")
     with pytest.raises(StepFailed, match="output.txt"):
         execute([step])
-    assert released == [Run().artifact(step, ".txt")]
+    with use_project_root(tmp_path):
+        assert released == [Run().artifact(step, ".txt")]
 
 
 def test_file_output_is_written_under_locked_outside_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("roadie.run.repository_root", lambda: tmp_path)
+    _isolate_repo(monkeypatch, tmp_path)
     destination = tmp_path / "new/dir/output.txt"
     assert execute([TextFile("new\n", output=destination)], locked=True) == destination
 
 
 def test_locked_file_output_reports_git_failure_and_keeps_destination(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("roadie.run.repository_root", lambda: tmp_path)
+    _isolate_repo(monkeypatch, tmp_path)
     (tmp_path / ".git").write_text("invalid git metadata\n")
     destination = tmp_path / "output.txt"
     destination.write_text("old\n")
@@ -575,8 +585,7 @@ class _Stopped:
 
 
 def _isolate_repo(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
-    for module in ("roadie.run", "roadie.fingerprint", "roadie.inputs"):
-        monkeypatch.setattr(f"{module}.repository_root", lambda: root)
+    monkeypatch.setattr(f"{__name__}._forced_root", root)
 
 
 def _write_build(directory: Path, source: str) -> None:
@@ -881,45 +890,44 @@ def test_plain_attribute_of_unsupported_type_is_an_error() -> None:
 
 def test_step_fingerprint_covers_files_dependency_outputs_and_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path.resolve()
-    monkeypatch.setattr("roadie.inputs.repository_root", lambda: root)
-    monkeypatch.setattr("roadie.fingerprint.repository_root", lambda: root)
     monkeypatch.chdir(root)
-    bundle = root / "dist"
-    bundle.mkdir()
-    (bundle / "app.js").write_text("one")
-    outside = root / "outside.txt"
-    outside.write_text("one")
-    (bundle / "link.js").symlink_to(outside)
+    with use_project_root(root):
+        bundle = root / "dist"
+        bundle.mkdir()
+        (bundle / "app.js").write_text("one")
+        outside = root / "outside.txt"
+        outside.write_text("one")
+        (bundle / "link.js").symlink_to(outside)
 
-    @dataclass(eq=False)
-    class Bundle(Step[None]):
-        files: Files
-        source: Step[str]
+        @dataclass(eq=False)
+        class Bundle(Step[None]):
+            files: Files
+            source: Step[str]
 
-        def build(self, run: Run) -> None:
-            pass
+            def build(self, run: Run) -> None:
+                pass
 
-    source = Value("built")
-    step = Bundle(Files("dist"), source)
-    outputs = {source: "a" * 64}
-    original = fingerprint(step, outputs=outputs)
-    (bundle / "app.js").write_text("two")
-    edited = fingerprint(step, outputs=outputs)
-    assert edited != original
-    outside.write_text("two")
-    followed = fingerprint(step, outputs=outputs)
-    assert followed != edited
-    assert fingerprint(step, outputs={source: "b" * 64}) != followed
-    assert fingerprint(step, outputs=outputs, env={"PORT": "1"}) != fingerprint(step, outputs=outputs, env={})
-    step.env_values = {"PORT": "9"}
-    assert fingerprint(step, outputs=outputs) == fingerprint(step, outputs=outputs, env={"PORT": "9"})
-    step.env_values = {"PORT": "10"}
-    assert fingerprint(step, outputs=outputs) != fingerprint(step, outputs=outputs, env={"PORT": "9"})
+        source = Value("built")
+        step = Bundle(Files("dist"), source)
+        outputs = {source: "a" * 64}
+        original = fingerprint(step, outputs=outputs)
+        (bundle / "app.js").write_text("two")
+        edited = fingerprint(step, outputs=outputs)
+        assert edited != original
+        outside.write_text("two")
+        followed = fingerprint(step, outputs=outputs)
+        assert followed != edited
+        assert fingerprint(step, outputs={source: "b" * 64}) != followed
+        assert fingerprint(step, outputs=outputs, env={"PORT": "1"}) != fingerprint(step, outputs=outputs, env={})
+        step.env_values = {"PORT": "9"}
+        assert fingerprint(step, outputs=outputs) == fingerprint(step, outputs=outputs, env={"PORT": "9"})
+        step.env_values = {"PORT": "10"}
+        assert fingerprint(step, outputs=outputs) != fingerprint(step, outputs=outputs, env={"PORT": "9"})
 
-    missing = Files("absent")
-    before = missing.fingerprint(root)
-    (root / "absent").write_text("created")
-    assert missing.fingerprint(root) != before
+        missing = Files("absent")
+        before = missing.fingerprint(root)
+        (root / "absent").write_text("created")
+        assert missing.fingerprint(root) != before
 
 
 def test_http_service_waits_for_its_health_path_and_fails_when_the_process_exits(tmp_path: Path) -> None:
@@ -1234,6 +1242,7 @@ def test_env_files_override_step_settings_and_not_the_reverse(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
+    _isolate_repo(monkeypatch, tmp_path)
     monkeypatch.setenv("PORT", "process")
     monkeypatch.setenv("EXTRA", "process")
     first = tmp_path / "a.env"
@@ -1345,3 +1354,51 @@ def test_config_env_applies_before_cli_env(tmp_path: Path, monkeypatch: pytest.M
     cli_env.write_text("MODE=cli\n")
     execute(load(tmp_path).plan(), env=(cli_env,))
     assert (tmp_path / "seen.txt").read_text() == "cli from-config"
+
+
+def _git(directory: Path) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=directory, check=True)
+
+
+def test_project_root_outside_load_and_execute_is_an_error() -> None:
+    with pytest.raises(
+        RoadieError,
+        match="no project root: run steps through roadie's load and execute",
+    ):
+        project_root()
+
+
+def test_subdirectory_of_a_work_tree_records_under_the_top_level(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _git(repo)
+    _write_build(repo / "jammer", _EMITTER)
+    graph = load(repo / "jammer")
+    assert graph.root == repo.resolve()
+    execute(graph.plan(), root=graph.root)
+    assert (repo / "target" / "roadie" / "jammer" / "api.txt").is_file()
+    assert not (repo / "jammer" / "target").exists()
+
+
+def test_build_outside_a_work_tree_records_under_its_own_directory(tmp_path: Path) -> None:
+    _write_build(tmp_path, _EMITTER)
+    graph = load(tmp_path)
+    assert graph.root == tmp_path.resolve()
+    execute(graph.plan(), root=graph.root)
+    assert (tmp_path / "target" / "roadie" / "api.txt").read_text() == "v1"
+    assert not (tmp_path / "jammer").exists()
+
+
+def test_included_file_shares_the_including_files_root(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    other = tmp_path / "other"
+    _git(repo)
+    _write_build(other, _EMITTER)
+    _write_build(repo / "app", 'other = include("../../other")\nresult = other.api\n')
+    graph = load(repo / "app")
+    assert graph.root == repo.resolve()
+    execute(graph.plan("result"), root=graph.root)
+    assert not (other / "target").exists()
+    recorded = list((repo / "target" / "roadie" / "_outside").rglob("api.txt"))
+    assert recorded
+    assert recorded[0].read_text() == "v1"

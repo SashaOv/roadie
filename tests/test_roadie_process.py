@@ -44,7 +44,8 @@ def test_stopping_a_server_stops_its_tree_not_only_the_wrapper(tmp_path: Path) -
             "else:\n"
             "    pid_file.write_text(str(child))\n"
             "    os.waitpid(child, 0)\n"),
-        )
+        ),
+        cwd=tmp_path,
     )
     deadline = time.monotonic() + 10
     while not pid_file.read_text().strip() if pid_file.exists() else True:
@@ -77,6 +78,7 @@ def test_running_process_waits_for_port_and_stops() -> None:
          "while True: s.accept()[0].close()")),
         port=port,
         timeout=5,
+        cwd=Path.cwd(),
     )
     try:
         assert processes.port_is_busy(port)
@@ -105,7 +107,7 @@ def test_running_process_cleans_up_failed_start(ending: str, monkeypatch: pytest
         else f"{re.escape(Path(sys.executable).name)} did not start listening"
     )
     with pytest.raises(SystemExit, match=reason):
-        processes.RunningProcess.start((sys.executable, "-c", command), port=processes.available_port(), timeout=0.5)
+        processes.RunningProcess.start((sys.executable, "-c", command), port=processes.available_port(), timeout=0.5, cwd=Path.cwd())
     assert len(started) == 1
     assert started[0].poll() is not None
 
@@ -176,6 +178,7 @@ def test_http_start_waits_until_the_health_path_returns_200() -> None:
         port=port,
         health_path="/health",
         timeout=5,
+        cwd=Path.cwd(),
     )
     try:
         with urllib.request.urlopen(f"{server.url}/health", timeout=1) as response:
@@ -205,4 +208,5 @@ def test_http_start_fails_when_the_process_exits_or_never_returns_200(ending: st
             port=port,
             health_path="/health",
             timeout=timeout,
+            cwd=Path.cwd(),
         )
