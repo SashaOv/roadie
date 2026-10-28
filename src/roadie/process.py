@@ -14,8 +14,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
-from roadie.root import project_root
-
 _COMMAND_NAME_WORDS = 3
 
 
@@ -30,25 +28,25 @@ class RunningProcess:
         command: Sequence[str],
         *,
         port: int,
+        cwd: Path,
         environment: Mapping[str, str] | None = None,
         timeout: float = 120,
-        cwd: Path | None = None,
         health_path: str | None = None,
     ) -> "RunningProcess":
         process = spawn_server(command, environment=environment, cwd=cwd)
         url = f"http://127.0.0.1:{port}"
         try:
             if health_path is None:
-                wait_for_dev_server(process, port=port, timeout=timeout)
+                wait_for_port(process, port=port, timeout=timeout)
             else:
                 wait_for_http_server(process, url=f"{url}{health_path}", timeout=timeout)
             return cls(process, url)
         except BaseException:
-            stop_dev_server(process)
+            stop_process_tree(process)
             raise
 
     def stop(self) -> None:
-        stop_dev_server(self.process)
+        stop_process_tree(self.process)
 
 
 def port_is_busy(port: int) -> bool:
@@ -65,7 +63,7 @@ def available_port() -> int:
         return int(listener.getsockname()[1])
 
 
-def wait_for_dev_server(
+def wait_for_port(
     process: subprocess.Popen[bytes],
     *,
     port: int,
@@ -141,9 +139,9 @@ def _process_name(process: subprocess.Popen[bytes]) -> str:
 def spawn_server(
     command: Sequence[str],
     *,
+    cwd: Path,
     environment: Mapping[str, str] | None = None,
     stdout: BinaryIO | None = None,
-    cwd: Path | None = None,
 ) -> subprocess.Popen[bytes]:
     """Start a server in its own process group.
 
@@ -153,7 +151,7 @@ def spawn_server(
     """
     return subprocess.Popen(
         command,
-        cwd=project_root() if cwd is None else cwd,
+        cwd=cwd,
         env=None if environment is None else dict(environment),
         stdout=stdout,
         start_new_session=os.name == "posix",
@@ -237,7 +235,7 @@ def interrupt_on_terminate() -> Generator[None]:
         signal.signal(signal.SIGTERM, previous)
 
 
-def stop_dev_server(process: subprocess.Popen[bytes]) -> None:
+def stop_process_tree(process: subprocess.Popen[bytes]) -> None:
     tree = (
         _posix_descendant_pids(process.pid)
         if os.name == "posix" and process.poll() is None

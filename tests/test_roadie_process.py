@@ -55,7 +55,7 @@ def test_stopping_a_server_stops_its_tree_not_only_the_wrapper(tmp_path: Path) -
         time.sleep(0.05)
     grandchild = int(pid_file.read_text().strip())
 
-    processes.stop_dev_server(process)
+    processes.stop_process_tree(process)
 
     assert process.poll() is not None
     deadline = time.monotonic() + 10
@@ -150,7 +150,7 @@ def test_startup_errors_identify_the_command(
 
     monkeypatch.setattr(processes, "port_is_busy", lambda port: False)
     with pytest.raises(SystemExit) as error:
-        processes.wait_for_dev_server(Process(), port=43210, timeout=0)
+        processes.wait_for_port(Process(), port=43210, timeout=0)
     reason = (
         "exited with status 7 before becoming ready"
         if ending == "exit"
@@ -210,3 +210,8 @@ def test_http_start_fails_when_the_process_exits_or_never_returns_200(ending: st
             timeout=timeout,
             cwd=Path.cwd(),
         )
+
+
+def test_spawn_server_requires_a_directory() -> None:
+    with pytest.raises(TypeError):
+        processes.spawn_server((sys.executable, "-c", "pass"))

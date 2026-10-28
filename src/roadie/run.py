@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
-from forge.environment import dotenv_values
+from dotenv import dotenv_values
 
 from roadie.cargo import cargo_snapshot
 from roadie.errors import RoadieError, StepFailed
