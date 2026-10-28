@@ -9,8 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from forge.environment import repository_root
-from jammer_build.steps import OpenApi
+import roadie
 from roadie import (
     Binary,
     CargoPackage,
@@ -30,7 +29,7 @@ from roadie.fingerprint import fingerprint
 from roadie.graph import Graph, load
 from roadie.inputs import Files
 from roadie.process import RunningProcess, available_port
-from roadie.root import project_root, use_project_root
+from roadie.root import find_project_root, project_root, use_project_root
 from roadie.run import Run
 from roadie.run import execute as _execute
 from roadie.steps import RustBinary
@@ -42,7 +41,7 @@ _forced_root: Path | None = None
 def execute(steps, **kwargs):
     root = kwargs.pop("root", None)
     if root is None:
-        root = _forced_root if _forced_root is not None else repository_root()
+        root = _forced_root if _forced_root is not None else find_project_root(Path.cwd())
     return _execute(steps, root=root, **kwargs)
 
 
@@ -366,20 +365,6 @@ def test_rust_binary_rejects_missing_executable(
     )
     with pytest.raises(StepFailed, match="produced no executable"):
         execute([RustBinary(CargoPackage("missing"))])
-
-
-def test_cli_names_failing_step_and_does_not_run_later_steps(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fail(self: RustBinary, run: Run) -> Path:
-        raise RuntimeError("cannot compile")
-
-    def unexpected(self: OpenApi, run: Run) -> Path:
-        raise AssertionError("ran after failure")
-
-    monkeypatch.setattr(RustBinary, "build", fail)
-    monkeypatch.setattr(OpenApi, "build", unexpected)
-    monkeypatch.setattr("roadie.run.load_records", lambda build_dir, root: {})
-    with pytest.raises(SystemExit, match="jammer_server failed: cannot compile"):
-        cli.run(repository_root() / "jammer", "api")
 
 
 @pytest.mark.parametrize("failed", [False, True])
@@ -1225,7 +1210,7 @@ def test_requested_service_reads_the_terminal_input(
     _write_build(tmp_path, _STDIN_SERVER)
     finished = subprocess.run(
         (sys.executable, "-c", "from roadie.cli import main; main()", str(tmp_path)),
-        cwd=repository_root(),
+        cwd=Path(roadie.__file__).resolve().parent.parent,
         input=typed,
         capture_output=True,
         timeout=60,
