@@ -1,0 +1,29 @@
+[project]
+name = "roadie"
+version = "0.1.0"
+description = "Wire up multi-language, incremental builds in a few lines of Python."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.13"
+dependencies = [
+    "cyclopts>=4.20.0,<5.0.0",
+    "python-dotenv>=1.2.1,<2.0.0",
+]
+
+[project.scripts]
+roadie = "roadie.cli:main"
+
+[dependency-groups]
+dev = [
+    "mypy",
+    "pytest",
+    "ruff",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/roadie"]

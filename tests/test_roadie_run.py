@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+
 import roadie
 from roadie import (
     Binary,
@@ -1211,6 +1212,7 @@ def test_requested_service_reads_the_terminal_input(
     finished = subprocess.run(
         (sys.executable, "-c", "from roadie.cli import main; main()", str(tmp_path)),
         cwd=Path(roadie.__file__).resolve().parent.parent,
+        check=False,
         input=typed,
         capture_output=True,
         timeout=60,
