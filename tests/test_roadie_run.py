@@ -272,14 +272,14 @@ def test_start_cmd_reports_early_exit() -> None:
 
 def test_run_artifact_uses_the_build_directory_and_variable(tmp_path: Path) -> None:
     with use_project_root(tmp_path):
-        jammer = tmp_path / "jammer"
+        services = tmp_path / "services"
         other = tmp_path / "other"
         first, second = Value("one"), Value("two")
-        first.variable, first.build_dir = "api", jammer
+        first.variable, first.build_dir = "api", services
         second.variable, second.build_dir = "api", other
         run = Run()
 
-        assert run.artifact(first, ".yaml") == tmp_path / "target" / "roadie" / "jammer" / "api.yaml"
+        assert run.artifact(first, ".yaml") == tmp_path / "target" / "roadie" / "services" / "api.yaml"
         assert run.artifact(second, ".yaml") == tmp_path / "target" / "roadie" / "other" / "api.yaml"
         # build_dir is outside the repository root the run was given.
         external = Value("ext")
@@ -311,14 +311,14 @@ def test_run_releases_values_at_end() -> None:
     ("package", "fixture", "executable"),
     [
         (
-            "jammer_server",
-            "cargo-build-jammer-server.jsonl",
-            "/tmp/wright-cargo-ws-o7sjppt2/target/debug/jammer-server",
+            "api_server",
+            "cargo-build-workspace.jsonl",
+            "/tmp/roadie-cargo-ws/target/debug/api-server",
         ),
         (
             "sample",
             "cargo-build-sample.jsonl",
-            "/tmp/wright-cargo-sample-48b05n8f/sample/target/debug/sample",
+            "/tmp/roadie-cargo-sample/sample/target/debug/sample",
         ),
     ],
 )
@@ -821,13 +821,13 @@ def test_rust_binary_is_rebuilt_when_its_recorded_copy_changes(tmp_path: Path, m
 def test_build_files_keep_separate_records_and_include_reuses_them(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path.resolve()
     _isolate_repo(monkeypatch, root)
-    _write_build(root / "jammer", _EMITTER)
+    _write_build(root / "services", _EMITTER)
     _write_build(root / "other", _EMITTER)
-    execute(load(root / "jammer").plan())
+    execute(load(root / "services").plan())
     execute(load(root / "other").plan())
-    assert (root / "target" / "roadie" / "jammer" / "api.txt").is_file()
+    assert (root / "target" / "roadie" / "services" / "api.txt").is_file()
     assert (root / "target" / "roadie" / "other" / "api.txt").is_file()
-    assert (root / "target" / "roadie" / "jammer" / "build.record.json").is_file()
+    assert (root / "target" / "roadie" / "services" / "build.record.json").is_file()
     assert (root / "target" / "roadie" / "other" / "build.record.json").is_file()
 
     _write_build(root / "module", _EMITTER)
@@ -1346,12 +1346,12 @@ def test_project_root_outside_load_and_execute_is_an_error() -> None:
 def test_subdirectory_of_a_work_tree_records_under_the_top_level(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _git(repo)
-    _write_build(repo / "jammer", _EMITTER)
-    graph = load(repo / "jammer")
+    _write_build(repo / "services", _EMITTER)
+    graph = load(repo / "services")
     assert graph.root == repo.resolve()
     execute(graph.plan(), root=graph.root)
-    assert (repo / "target" / "roadie" / "jammer" / "api.txt").is_file()
-    assert not (repo / "jammer" / "target").exists()
+    assert (repo / "target" / "roadie" / "services" / "api.txt").is_file()
+    assert not (repo / "services" / "target").exists()
 
 
 def test_build_outside_a_work_tree_records_under_its_own_directory(tmp_path: Path) -> None:
@@ -1360,7 +1360,7 @@ def test_build_outside_a_work_tree_records_under_its_own_directory(tmp_path: Pat
     assert graph.root == tmp_path.resolve()
     execute(graph.plan(), root=graph.root)
     assert (tmp_path / "target" / "roadie" / "api.txt").read_text() == "v1"
-    assert not (tmp_path / "jammer").exists()
+    assert not (tmp_path / "services").exists()
 
 
 def test_included_file_shares_the_including_files_root(tmp_path: Path) -> None:

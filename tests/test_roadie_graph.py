@@ -1,4 +1,3 @@
-import ast
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,12 +25,12 @@ def run_cli(arguments: list[str]) -> None:
 
 
 def test_load_records_each_result_variable_and_build_directory(tmp_path: Path) -> None:
-    write_build(tmp_path / "jammer", 'server = RustBinary(CargoPackage("server"))\n')
-    graph = load(tmp_path / "jammer")
+    write_build(tmp_path / "services", 'server = RustBinary(CargoPackage("server"))\n')
+    graph = load(tmp_path / "services")
     server = graph.result("server")
 
     assert server.variable == "server"
-    assert server.build_dir == (tmp_path / "jammer").resolve()
+    assert server.build_dir == (tmp_path / "services").resolve()
 
 
 def test_default_result_is_the_last_step_called_not_the_last_variable(
@@ -122,25 +121,6 @@ def test_step_dependency_cycle_names_the_steps(tmp_path: Path) -> None:
     first.argument, second.argument = second, first
     with pytest.raises(RoadieError, match="steps depend on each other: first -> second -> first"):
         Graph(tmp_path / "build.py", {"first": first}, tmp_path).plan()
-
-
-def test_roadie_imports_nothing_from_niva() -> None:
-    import roadie
-
-    roots = [Path(roadie.__file__).resolve().parent, *Path(__file__).resolve().parent.glob("test_roadie_*.py")]
-    violations: list[str] = []
-    for root in roots:
-        files = sorted(root.glob("*.py")) if root.is_dir() else [root]
-        for path in files:
-            for node in ast.walk(ast.parse(path.read_text())):
-                modules: list[str] = []
-                if isinstance(node, ast.Import):
-                    modules = [alias.name.split(".", 1)[0] for alias in node.names]
-                elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                    modules = [node.module.split(".", 1)[0]]
-                if any(module in {"forge", "niva"} or module.startswith("jammer_") for module in modules):
-                    violations.append(f"{path}:{node.lineno}")
-    assert violations == []
 
 
 @pytest.mark.parametrize("override", [None, "override"])

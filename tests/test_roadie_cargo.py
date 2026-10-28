@@ -53,20 +53,20 @@ def test_cargo_package_discovery_is_module_neutral(
 
 def test_local_dependency_closure_includes_transitive_dependents() -> None:
     packages = (
-        cargo.RustPackage("core", Path("jammer/core"), ()),
-        cargo.RustPackage("app", Path("jammer/app"), ("core",)),
-        cargo.RustPackage("other", Path("jammer/other"), ()),
+        cargo.RustPackage("core", Path("services/core"), ()),
+        cargo.RustPackage("app", Path("services/app"), ("core",)),
+        cargo.RustPackage("other", Path("services/other"), ()),
     )
 
     assert cargo.select_rust_packages(
-        packages, (Path("jammer/core/src/lib.rs"),)
+        packages, (Path("services/core/src/lib.rs"),)
     ) == ("core", "app")
 
 
 def test_local_dependency_closure_ignores_unrelated_changes() -> None:
     packages = (
-        cargo.RustPackage("core", Path("jammer/core"), ()),
-        cargo.RustPackage("app", Path("jammer/app"), ("core",)),
+        cargo.RustPackage("core", Path("services/core"), ()),
+        cargo.RustPackage("app", Path("services/app"), ("core",)),
     )
 
     assert cargo.select_rust_packages(packages, (Path("docs/dev.md"),)) == ()
