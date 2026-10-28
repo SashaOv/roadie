@@ -138,9 +138,11 @@ def test_service_process_is_stopped_after_run(ending: str) -> None:
             server = self._start_cmd(
                 sys.executable,
                 "-c",
+                # Keep accepting: the readiness poll is itself a connection.
                 (
                     "import socket; s = socket.socket(); "
-                    f"s.bind(('127.0.0.1', {port})); s.listen(); s.accept()"
+                    f"s.bind(('127.0.0.1', {port})); s.listen()\n"
+                    "while True: s.accept()[0].close()"
                 ),
                 port=port,
                 timeout=5,
@@ -1176,6 +1178,56 @@ def test_cli_ctrl_c_on_a_requested_service_exits_0(tmp_path: Path, capsys: pytes
     )
     cli.run(tmp_path)
     assert "dev is up: http://127.0.0.1:9 (Ctrl-C to stop)" in capsys.readouterr().out
+
+
+_STDIN_SERVER = """
+import sys
+
+from wright.process import available_port
+
+
+class Reader(Service):
+    def build(self, run):
+        port = available_port()
+        return self._start_cmd(
+            sys.executable,
+            "-c",
+            "import socket, sys, threading\\n"
+            "s = socket.socket()\\n"
+            f"s.bind(('127.0.0.1', {port}))\\n"
+            "s.listen()\\n"
+            "s.accept()[0].close()\\n"  # read only once the run waits on it
+            "def serve():\\n"
+            "    while True: s.accept()[0].close()\\n"
+            "threading.Thread(target=serve, daemon=True).start()\\n"
+            "sys.exit(0 if sys.stdin.readline() == 'b\\\\n' else 5)\\n",
+            port=port,
+        )
+
+
+dev = Reader()
+"""
+
+
+@pytest.mark.parametrize(("typed", "status"), [(b"b\n", 0), (b"x\n", 1)])
+def test_requested_service_reads_the_terminal_input(
+    typed: bytes, status: int, tmp_path: Path
+) -> None:
+    # A dev server's keyboard shortcuts (Vite's b and q) need its stdin.
+    _write_build(tmp_path, _STDIN_SERVER)
+    finished = subprocess.run(
+        (sys.executable, "-c", "from wright.cli import main; main()", str(tmp_path)),
+        cwd=repository_root(),
+        input=typed,
+        capture_output=True,
+        timeout=60,
+    )
+    output = (finished.stdout + finished.stderr).decode()
+    assert finished.returncode == status, output
+    if status == 0:
+        assert "dev exited" in output
+    else:
+        assert "exited with status 5" in output
 
 
 def test_env_files_override_step_settings_and_not_the_reverse(

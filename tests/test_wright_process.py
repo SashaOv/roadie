@@ -71,8 +71,10 @@ def test_stopping_a_server_stops_its_tree_not_only_the_wrapper(tmp_path: Path) -
 def test_running_process_waits_for_port_and_stops() -> None:
     port = processes.available_port()
     server = processes.RunningProcess.start(
+        # Keep accepting: the readiness poll is itself a connection.
         (sys.executable, "-c", ("import socket; s = socket.socket(); "
-         f"s.bind(('127.0.0.1', {port})); s.listen(); s.accept()")),
+         f"s.bind(('127.0.0.1', {port})); s.listen()\n"
+         "while True: s.accept()[0].close()")),
         port=port,
         timeout=5,
     )
