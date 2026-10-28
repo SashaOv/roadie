@@ -71,8 +71,26 @@ def test_local_dependency_closure_ignores_unrelated_changes() -> None:
     assert cargo.select_rust_packages(packages, (Path("docs/dev.md"),)) == ()
 
 
+def _installed_toolchain() -> str | None:
+    try:
+        listed = subprocess.run(
+            ["rustup", "toolchain", "list"], check=True, capture_output=True, text=True
+        )
+    except FileNotFoundError:
+        return None
+    names = listed.stdout.split()
+    return names[0] if names else None
+
+
 def _cargo_workspace(root: Path) -> None:
     subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+    # Pin a toolchain as a real workspace does: build hosts may install only a
+    # pinned toolchain and configure no rustup default.
+    toolchain = _installed_toolchain()
+    if toolchain is not None:
+        (root / "rust-toolchain.toml").write_text(
+            f'[toolchain]\nchannel = "{toolchain}"\n'
+        )
     (root / "Cargo.toml").write_text(
         '[workspace]\nresolver = "2"\nmembers = ["core", "app", "other"]\n'
     )
