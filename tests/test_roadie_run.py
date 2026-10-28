@@ -919,28 +919,15 @@ def test_step_fingerprint_covers_files_dependency_outputs_and_env(tmp_path: Path
 def test_http_service_waits_for_its_health_path_and_fails_when_the_process_exits(tmp_path: Path) -> None:
     port = available_port()
     ready = tmp_path / "ready"
-    script = (
-        "from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n"
-        "from pathlib import Path\n"
-        "class Handler(BaseHTTPRequestHandler):\n"
-        "    hits = 0\n"
-        "    def do_GET(self):\n"
-        "        Handler.hits += 1\n"
-        "        ok = self.path == '/health' and Handler.hits >= 3\n"
-        "        if ok:\n"
-        f"            Path({str(ready)!r}).write_text('ok')\n"
-        "        self.send_response(200 if ok else 503)\n"
-        "        self.end_headers()\n"
-        "    def log_message(self, format, *args):\n"
-        "        return\n"
-        f"ThreadingHTTPServer(('127.0.0.1', {port}), Handler).serve_forever()\n"
-    )
 
     class Api(HttpService):
         health_path = "/health"
 
         def build(self, run: Run) -> RunningProcess:
-            return self._start_cmd(sys.executable, "-c", script, port=port, timeout=5)
+            return self._start_cmd(
+                sys.executable, str(FIXTURES / "http_service.py"), str(port), str(ready),
+                port=port, timeout=5,
+            )
 
     @dataclass(eq=False)
     class After(Step[None]):

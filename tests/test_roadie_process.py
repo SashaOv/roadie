@@ -1,15 +1,28 @@
 import os
 import re
 import signal
+import socket
 import subprocess
 import sys
 import time
 import urllib.request
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 import pytest
+from fixtures.http_service import HealthServer
 
 from roadie import process as processes
+
+
+def test_loopback_http_fixture_does_not_resolve_hostnames(monkeypatch: pytest.MonkeyPatch) -> None:
+    def reject_lookup(host: str) -> str:
+        pytest.fail(f"loopback HTTP fixture tried to resolve {host}")
+
+    monkeypatch.setattr(socket, "getfqdn", reject_lookup)
+    with HealthServer(("127.0.0.1", 0), BaseHTTPRequestHandler) as server:
+        assert server.server_name == "127.0.0.1"
+        assert server.server_port == server.server_address[1]
 
 
 @pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX-only")
@@ -162,20 +175,8 @@ def test_startup_errors_identify_the_command(
 
 def test_http_start_waits_until_the_health_path_returns_200() -> None:
     port = processes.available_port()
-    script = (
-        "from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n"
-        "class Handler(BaseHTTPRequestHandler):\n"
-        "    hits = 0\n"
-        "    def do_GET(self):\n"
-        "        Handler.hits += 1\n"
-        "        self.send_response(200 if self.path == '/health' and Handler.hits >= 3 else 503)\n"
-        "        self.end_headers()\n"
-        "    def log_message(self, format, *args):\n"
-        "        return\n"
-        f"ThreadingHTTPServer(('127.0.0.1', {port}), Handler).serve_forever()\n"
-    )
     server = processes.RunningProcess.start(
-        (sys.executable, "-c", script),
+        (sys.executable, str(Path(__file__).parent / "fixtures/http_service.py"), str(port)),
         port=port,
         health_path="/health",
         timeout=5,
