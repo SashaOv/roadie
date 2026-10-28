@@ -6,6 +6,8 @@ import signal
 import socket
 import subprocess
 import time
+import urllib.error
+import urllib.request
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -31,11 +33,16 @@ class RunningProcess:
         environment: Mapping[str, str] | None = None,
         timeout: float = 120,
         cwd: Path | None = None,
+        health_path: str | None = None,
     ) -> "RunningProcess":
         process = spawn_server(command, environment=environment, cwd=cwd)
+        url = f"http://127.0.0.1:{port}"
         try:
-            wait_for_dev_server(process, port=port, timeout=timeout)
-            return cls(process, f"http://127.0.0.1:{port}")
+            if health_path is None:
+                wait_for_dev_server(process, port=port, timeout=timeout)
+            else:
+                wait_for_http_server(process, url=f"{url}{health_path}", timeout=timeout)
+            return cls(process, url)
         except BaseException:
             stop_dev_server(process)
             raise
@@ -77,6 +84,40 @@ def wait_for_dev_server(
         if remaining <= 0:
             raise SystemExit(
                 f"{_process_name(process)} did not start listening on port {port} within {timeout:g}s"
+            )
+        try:
+            process.wait(timeout=min(0.2, remaining))
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def http_url_is_ready(url: str) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=0.2) as response:
+            return response.status == 200
+    except (OSError, urllib.error.URLError):
+        return False
+
+
+def wait_for_http_server(
+    process: subprocess.Popen[bytes],
+    *,
+    url: str,
+    timeout: float = 120,
+) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        if http_url_is_ready(url):
+            return
+        return_code = process.poll()
+        if return_code is not None:
+            raise SystemExit(
+                f"{_process_name(process)} exited with status {return_code} before becoming ready"
+            )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise SystemExit(
+                f"{_process_name(process)} did not become ready at {url} within {timeout:g}s"
             )
         try:
             process.wait(timeout=min(0.2, remaining))

@@ -4,6 +4,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -152,3 +153,54 @@ def test_startup_errors_identify_the_command(
         else "did not start listening on port 43210 within 0s"
     )
     assert str(error.value) == f"{name} {reason}"
+
+
+def test_http_start_waits_until_the_health_path_returns_200() -> None:
+    port = processes.available_port()
+    script = (
+        "from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n"
+        "class Handler(BaseHTTPRequestHandler):\n"
+        "    hits = 0\n"
+        "    def do_GET(self):\n"
+        "        Handler.hits += 1\n"
+        "        self.send_response(200 if self.path == '/health' and Handler.hits >= 3 else 503)\n"
+        "        self.end_headers()\n"
+        "    def log_message(self, format, *args):\n"
+        "        return\n"
+        f"ThreadingHTTPServer(('127.0.0.1', {port}), Handler).serve_forever()\n"
+    )
+    server = processes.RunningProcess.start(
+        (sys.executable, "-c", script),
+        port=port,
+        health_path="/health",
+        timeout=5,
+    )
+    try:
+        with urllib.request.urlopen(f"{server.url}/health", timeout=1) as response:
+            assert response.status == 200
+    finally:
+        server.stop()
+
+
+@pytest.mark.parametrize("ending", ["exit", "timeout"])
+def test_http_start_fails_when_the_process_exits_or_never_returns_200(ending: str) -> None:
+    port = processes.available_port()
+    if ending == "exit":
+        command = (
+            "import socket, time; "
+            f"s = socket.socket(); s.bind(('127.0.0.1', {port})); s.listen(); "
+            "time.sleep(0.3); raise SystemExit(4)"
+        )
+        reason = "exited with status 4 before becoming ready"
+        timeout = 2
+    else:
+        command = "import time; time.sleep(30)"
+        reason = f"did not become ready at http://127.0.0.1:{port}/health within 0.4s"
+        timeout = 0.4
+    with pytest.raises(SystemExit, match=re.escape(reason)):
+        processes.RunningProcess.start(
+            (sys.executable, "-c", command),
+            port=port,
+            health_path="/health",
+            timeout=timeout,
+        )

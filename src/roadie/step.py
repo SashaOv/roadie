@@ -108,10 +108,16 @@ class Step[T](ABC):
         port: int,
         environment: Mapping[str, str] | None = None,
         timeout: float = 120,
+        health_path: str | None = None,
     ) -> RunningProcess:
         print("+", shlex.join(args), flush=True)
         return RunningProcess.start(
-            args, port=port, environment=environment, timeout=timeout, cwd=self.base_dir
+            args,
+            port=port,
+            environment=environment,
+            timeout=timeout,
+            cwd=self.base_dir,
+            health_path=health_path,
         )
 
 
@@ -138,6 +144,26 @@ class Service(Step[Deployment]):
 
     def teardown(self, value: Deployment) -> None:
         value.stop()
+
+
+class HttpService(Service):
+    health_path: ClassVar[str] = "/"
+
+    def _start_cmd(
+        self,
+        *args: str,
+        port: int,
+        environment: Mapping[str, str] | None = None,
+        timeout: float = 120,
+        health_path: str | None = None,
+    ) -> RunningProcess:
+        return super()._start_cmd(
+            *args,
+            port=port,
+            environment=environment,
+            timeout=timeout,
+            health_path=self.health_path if health_path is None else health_path,
+        )
 
 
 class Tests(Step[TestResults]):

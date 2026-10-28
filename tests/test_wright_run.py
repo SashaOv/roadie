@@ -9,7 +9,17 @@ from pathlib import Path
 import pytest
 from forge.environment import repository_root
 from jammer_build.steps import OpenApi
-from wright import Binary, CargoPackage, File, Group, Service, Step, WrightError, cli
+from wright import (
+    Binary,
+    CargoPackage,
+    File,
+    Group,
+    HttpService,
+    Service,
+    Step,
+    WrightError,
+    cli,
+)
 from wright import TestFailure as Failure
 from wright import TestResults as Results
 from wright import Tests as Checks
@@ -886,6 +896,53 @@ def test_step_fingerprint_covers_files_dependency_outputs_and_env(tmp_path: Path
     before = missing.fingerprint(root)
     (root / "absent").write_text("created")
     assert missing.fingerprint(root) != before
+
+
+def test_http_service_waits_for_its_health_path_and_fails_when_the_process_exits(tmp_path: Path) -> None:
+    port = available_port()
+    ready = tmp_path / "ready"
+    script = (
+        "from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n"
+        "from pathlib import Path\n"
+        "class Handler(BaseHTTPRequestHandler):\n"
+        "    hits = 0\n"
+        "    def do_GET(self):\n"
+        "        Handler.hits += 1\n"
+        "        ok = self.path == '/health' and Handler.hits >= 3\n"
+        "        if ok:\n"
+        f"            Path({str(ready)!r}).write_text('ok')\n"
+        "        self.send_response(200 if ok else 503)\n"
+        "        self.end_headers()\n"
+        "    def log_message(self, format, *args):\n"
+        "        return\n"
+        f"ThreadingHTTPServer(('127.0.0.1', {port}), Handler).serve_forever()\n"
+    )
+
+    class Api(HttpService):
+        health_path = "/health"
+
+        def build(self, run: Run) -> RunningProcess:
+            return self._start_cmd(sys.executable, "-c", script, port=port, timeout=5)
+
+    api = Api()
+    api.name = "api"
+    execute([api])
+    assert ready.read_text() == "ok"
+
+    class Exits(HttpService):
+        def build(self, run: Run) -> RunningProcess:
+            listen = available_port()
+            command = (
+                "import socket, time; "
+                f"s = socket.socket(); s.bind(('127.0.0.1', {listen})); s.listen(); "
+                "time.sleep(0.3); raise SystemExit(4)"
+            )
+            return self._start_cmd(sys.executable, "-c", command, port=listen, timeout=2)
+
+    dead = Exits()
+    dead.name = "api"
+    with pytest.raises(StepFailed, match="api failed:.*exited with status 4 before becoming ready"):
+        execute([dead])
 
 
 def test_service_starts_only_when_a_consumer_must_run(
