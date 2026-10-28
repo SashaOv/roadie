@@ -1,6 +1,7 @@
 """Declare steps and the commands they run."""
 
 import itertools
+import os
 import shlex
 import subprocess
 from abc import ABC, abstractmethod
@@ -9,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, Self
 
-from wright.config import base_directory, loading_directory
+from wright.config import base_directory, configured_env, loading_directory
 from wright.errors import StepFailed
 from wright.process import RunningProcess
 from wright.testing import TestResults
@@ -28,6 +29,8 @@ class Step[T](ABC):
     build_dir: Path | None
     variable: str | None
     build_variables: frozenset[str] | None
+    env_files: tuple[Path, ...]
+    env_values: dict[str, str]
     name: str | None
 
     def __new__(cls, *args: object, **kwargs: object) -> Self:
@@ -38,6 +41,8 @@ class Step[T](ABC):
         instance.build_variables = None
         instance.base_dir = base_directory()
         instance.build_dir = loading_directory()
+        instance.env_files = configured_env()
+        instance.env_values = {}
         return instance
 
     def attributes(self) -> dict[str, object]:
@@ -52,6 +57,8 @@ class Step[T](ABC):
                 "build_dir",
                 "variable",
                 "build_variables",
+                "env_files",
+                "env_values",
             }
         }
 
@@ -83,7 +90,7 @@ class Step[T](ABC):
         completed = subprocess.run(
             args,
             cwd=self.base_dir,
-            env=None if environment is None else dict(environment),
+            env=self._command_env(environment),
             stdout=subprocess.PIPE if capture_output else None,
             stderr=subprocess.PIPE,
             text=True,
@@ -114,11 +121,15 @@ class Step[T](ABC):
         return RunningProcess.start(
             args,
             port=port,
-            environment=environment,
+            environment=self._command_env(environment),
             timeout=timeout,
             cwd=self.base_dir,
             health_path=health_path,
         )
+
+    def _command_env(self, environment: Mapping[str, str] | None) -> dict[str, str]:
+        # Process environment, then the step's settings, then env files.
+        return {**os.environ, **(environment or {}), **self.env_values}
 
 
 class Binary(Step[Path]):

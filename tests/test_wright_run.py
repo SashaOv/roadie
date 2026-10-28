@@ -909,6 +909,10 @@ def test_step_fingerprint_covers_files_dependency_outputs_and_env(tmp_path: Path
     assert followed != edited
     assert fingerprint(step, outputs={source: "b" * 64}) != followed
     assert fingerprint(step, outputs=outputs, env={"PORT": "1"}) != fingerprint(step, outputs=outputs, env={})
+    step.env_values = {"PORT": "9"}
+    assert fingerprint(step, outputs=outputs) == fingerprint(step, outputs=outputs, env={"PORT": "9"})
+    step.env_values = {"PORT": "10"}
+    assert fingerprint(step, outputs=outputs) != fingerprint(step, outputs=outputs, env={"PORT": "9"})
 
     missing = Files("absent")
     before = missing.fingerprint(root)
@@ -1172,3 +1176,120 @@ def test_cli_ctrl_c_on_a_requested_service_exits_0(tmp_path: Path, capsys: pytes
     )
     cli.run(tmp_path)
     assert "dev is up: http://127.0.0.1:9 (Ctrl-C to stop)" in capsys.readouterr().out
+
+
+def test_env_files_override_step_settings_and_not_the_reverse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PORT", "process")
+    monkeypatch.setenv("EXTRA", "process")
+    first = tmp_path / "a.env"
+    second = tmp_path / "b.env"
+    first.write_text("PORT=a\nNAME=from-a\n")
+    second.write_text("PORT=b\n")
+    seen: list[dict[str, str]] = []
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        environment = kwargs["env"]
+        assert isinstance(environment, dict)
+        seen.append(environment)
+        return subprocess.CompletedProcess((), 0, "", "")
+
+    def fake_start(*args: object, **kwargs: object) -> _Stopped:
+        environment = kwargs["environment"]
+        assert isinstance(environment, dict)
+        seen.append(environment)
+        return _Stopped()
+
+    monkeypatch.setattr("wright.step.subprocess.run", fake_run)
+    monkeypatch.setattr("wright.step.RunningProcess.start", fake_start)
+
+    class Server(Service):
+        def build(self, run: Run) -> _Stopped:
+            return self._start_cmd(
+                "serve",
+                port=9,
+                environment={"PORT": "step", "NAME": "step", "ONLY": "step"},
+            )
+
+    @dataclass(eq=False)
+    class After(Step[None]):
+        server: Service
+
+        def build(self, run: Run) -> None:
+            self._cmd("tool", environment={"PORT": "step", "NAME": "step", "ONLY": "step"})
+
+    server = Server()
+    execute([server, After(server)], env=(first, second))
+    assert [item["PORT"] for item in seen] == ["b", "b"]
+    assert [item["NAME"] for item in seen] == ["from-a", "from-a"]
+    assert [item["ONLY"] for item in seen] == ["step", "step"]
+    assert [item["EXTRA"] for item in seen] == ["process", "process"]
+
+    seen.clear()
+    server.env_files = ()
+    execute([server, After(server)])
+    assert seen[0]["PORT"] == "step"
+    assert seen[0]["EXTRA"] == "process"
+
+
+def test_changed_env_file_reruns_a_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    _isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    env_file = root / "dev.env"
+    env_file.write_text("MODE=one\n")
+    built: list[str] = []
+
+    @dataclass(eq=False)
+    class Note(File):
+        def build(self, run: Run) -> Path:
+            built.append(self.env_values["MODE"])
+            path = run.artifact(self, ".txt")
+            path.write_text(self.env_values["MODE"])
+            return path
+
+    note = Note()
+    note.name = note.variable = "note"
+    note.env_files = (env_file,)
+    execute([note])
+    execute([note])
+    assert built == ["one"]
+    env_file.write_text("MODE=two\n")
+    execute([note])
+    assert built == ["one", "two"]
+
+
+def test_missing_env_file_stops_before_any_step(tmp_path: Path) -> None:
+    missing = tmp_path / "nope.env"
+
+    class Note(Step[None]):
+        def build(self, run: Run) -> None:
+            raise AssertionError("ran")
+
+    note = Note()
+    note.env_files = (missing,)
+    with pytest.raises(WrightError, match="environment file does not exist:.*nope.env"):
+        execute([note])
+
+
+def test_config_env_applies_before_cli_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _isolate_repo(monkeypatch, tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _write_build(
+        tmp_path,
+        "from pathlib import Path\n"
+        "class Probe(Step[None]):\n"
+        "    def build(self, run):\n"
+        "        Path('seen.txt').write_text(self.env_values['MODE'] + ' ' + self.env_values['TOKEN'])\n"
+        'config(env=["from-config.env"])\n'
+        "probe = Probe()\n",
+    )
+    (tmp_path / "from-config.env").write_text("MODE=config\nTOKEN=from-config\n")
+    cli_env = tmp_path / "cli.env"
+    cli_env.write_text("MODE=cli\n")
+    execute(load(tmp_path).plan(), env=(cli_env,))
+    assert (tmp_path / "seen.txt").read_text() == "cli from-config"

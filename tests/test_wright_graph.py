@@ -243,9 +243,42 @@ def test_config_changes_only_subsequent_steps_and_is_released_after_load(tmp_pat
     assert RustBinary(CargoPackage("outside")).base_dir == tmp_path
 
 
+def test_config_env_is_recorded_per_file_and_released(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    write_build(
+        tmp_path / "project/module",
+        'config(env=["module.env"])\nserver = RustBinary(CargoPackage("module"))\n',
+    )
+    write_build(
+        tmp_path / "project",
+        'config(env=["root.env"])\n'
+        'before = RustBinary(CargoPackage("before"))\n'
+        'module = include("module")\n'
+        "included = module.server\n"
+        'after = RustBinary(CargoPackage("after"))\n',
+    )
+    graph = load(tmp_path / "project")
+    assert graph.results["before"].env_files == ((tmp_path / "project/root.env").resolve(),)
+    assert graph.results["included"].env_files == ((tmp_path / "project/module/module.env").resolve(),)
+    assert graph.results["after"].env_files == ((tmp_path / "project/root.env").resolve(),)
+    assert RustBinary(CargoPackage("outside")).env_files == ()
+
+
+def test_cli_passes_env_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    write_build(tmp_path, 'item = RustBinary(CargoPackage("server"))\n')
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(cli, "execute", lambda steps, **kwargs: seen.update(kwargs))
+    run_cli(["--env", "dev.env", "--env", "extra.env", str(tmp_path)])
+    assert seen["env"] == [Path("dev.env"), Path("extra.env")] or seen["env"] == (
+        Path("dev.env"),
+        Path("extra.env"),
+    )
+
+
 def test_unknown_config_name_lists_known_names(tmp_path: Path) -> None:
     write_build(tmp_path, 'config(unknown="value")\nserver = RustBinary(CargoPackage("server"))\n')
-    with pytest.raises(WrightError, match="unknown.*known.*base_dir"):
+    with pytest.raises(WrightError, match="unknown.*known settings: base_dir, env"):
         load(tmp_path)
 
 
@@ -292,10 +325,14 @@ def test_group_rejects_a_non_step(tmp_path: Path) -> None:
 
 def test_cli_passes_locked_and_prints_keyword_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     write_build(tmp_path, 'server = RustBinary(CargoPackage("server"))\napi = OpenApi(server, output="api.yaml")\n')
-    observed: list[bool] = []
-    monkeypatch.setattr(cli, "execute", lambda steps, *, locked: observed.append(locked))
+    observed: list[tuple[bool, object]] = []
+    monkeypatch.setattr(
+        cli,
+        "execute",
+        lambda steps, *, locked, env=(): observed.append((locked, env)),
+    )
     run_cli(["--locked", str(tmp_path)])
-    assert observed == [True]
+    assert observed == [(True, ())]
     monkeypatch.setattr("wright.cargo.CargoPackage.fingerprint", lambda self, base_dir: f"package:{self.name}")
     run_cli(["--dry", str(tmp_path)])
     assert capsys.readouterr().out.splitlines()[-1] == "api = OpenApi(server, output='api.yaml')  # run"

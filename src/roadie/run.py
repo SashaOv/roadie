@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
-from forge.environment import repository_root
+from forge.environment import dotenv_values, repository_root
 
 from wright.cargo import cargo_snapshot
 from wright.errors import StepFailed, WrightError
@@ -39,7 +39,10 @@ class Run:
         return destination
 
 
-def execute(steps: Sequence[Step[Any]], *, locked: bool = False) -> object:
+def execute(
+    steps: Sequence[Step[Any]], *, locked: bool = False, env: Sequence[Path] = ()
+) -> object:
+    _apply_env(steps, env)
     run = Run()
     live: list[Step[Any]] = []
     last_use = {id(step): index for index, step in enumerate(steps)}
@@ -156,8 +159,37 @@ def _start_services(
         started.add(id(dependency))
 
 
-def reuse_markers(steps: Sequence[Step[Any]]) -> list[bool]:
+def _apply_env(steps: Sequence[Step[Any]], env: Sequence[Path]) -> None:
+    """Read env files once. ``config(env=...)`` applies first, then ``--env``."""
+    cli_paths = tuple(_resolve_env_path(path) for path in env)
+    cache: dict[Path, dict[str, str]] = {}
+
+    def read(path: Path) -> dict[str, str]:
+        if path not in cache:
+            if not path.is_file():
+                raise WrightError(f"environment file does not exist: {path}")
+            loaded = dotenv_values(path)
+            cache[path] = {key: value for key, value in loaded.items() if value is not None}
+        return cache[path]
+
+    for path in cli_paths:
+        read(path)
+    for step in steps:
+        merged: dict[str, str] = {}
+        for path in (*step.env_files, *cli_paths):
+            merged.update(read(path))
+        step.env_values = merged
+
+
+def _resolve_env_path(path: Path) -> Path:
+    if path.is_absolute():
+        return path
+    return (Path.cwd() / path).resolve()
+
+
+def reuse_markers(steps: Sequence[Step[Any]], *, env: Sequence[Path] = ()) -> list[bool]:
     """True when `--dry` can promise the step will not run."""
+    _apply_env(steps, env)
     marks: dict[int, bool] = {}
     outputs: dict[int, str] = {}
     ordered: list[bool] = []

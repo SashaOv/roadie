@@ -1,5 +1,6 @@
 """Run a result of a Wright build file and the steps it depends on."""
 
+from collections.abc import Sequence
 from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Annotated, Any
@@ -21,6 +22,10 @@ def run(
     *,
     base_dir: Annotated[Path | None, Parameter(name="--base_dir", help="Resolve step paths and commands from this directory")] = None,
     locked: Annotated[bool, Parameter(negative=False, help="Fail when generated tracked files would change")] = False,
+    env: Annotated[
+        Sequence[Path] | None,
+        Parameter(name="--env", help="KEY=VALUE environment file; may be repeated", negative=False),
+    ] = None,
     dry_run: Annotated[
         bool,
         Parameter(
@@ -37,7 +42,7 @@ def run(
         raise SystemExit(str(error)) from error
     if dry_run:
         try:
-            marks = reuse_markers(steps)
+            marks = reuse_markers(steps, env=env or ())
         except WrightError as error:
             raise SystemExit(str(error)) from error
         for step, reused in zip(steps, marks, strict=True):
@@ -45,7 +50,7 @@ def run(
             print(f"{line}  # {'reuse' if reused else 'run'}")
         return
     try:
-        execute(steps, locked=locked)
+        execute(steps, locked=locked, env=env or ())
     except WrightError as error:
         raise SystemExit(str(error)) from error
 

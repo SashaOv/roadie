@@ -41,7 +41,7 @@ def fingerprint(
             "class": f"{type(step).__module__}.{type(step).__qualname__}",
             "code": _code_hash(step),
             "base_dir": _relative(step.base_dir),
-            "env": dict(env or {}),
+            "env": dict(step.env_values if env is None else env),
             "attributes": attributes,
             "inputs": {name: item.fingerprint(step.base_dir) for name, item in inputs.items()},
             "dependencies": dependency_hashes,
