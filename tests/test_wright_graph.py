@@ -100,10 +100,17 @@ def test_dry_run_prints_the_steps_in_dependency_order(
     ]
 
 
+def test_jammer_dev_server_uses_the_fixed_port_and_cache() -> None:
+    server = load(JAMMER).result("dev_server")
+    assert server.port == 8811
+    assert server.storage == "../cache/jammer"
+    assert server.resolve(server.storage) == (repository_root() / "cache" / "jammer").resolve()
+
+
 def test_cli_reports_an_unknown_result_with_the_known_ones() -> None:
     with pytest.raises(
         SystemExit,
-        match="has no result named 'nope'; results: jammer_server, snap_viewer, api, python_models, web_schema, viewer_api, viewer_web_schema, generated, deployed, fuzzed",
+        match="has no result named 'nope'; results: jammer_server, snap_viewer, api, python_models, web_schema, viewer_api, viewer_web_schema, generated, dev_server, deployed, fuzzed",
     ):
         run_cli(["--dry", str(JAMMER), "nope"])
 
