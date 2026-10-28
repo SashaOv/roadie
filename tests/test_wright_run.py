@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from forge.environment import repository_root
 from jammer_build.steps import OpenApi
-from wright import CargoPackage, File, Group, Service, Step, WrightError, cli
+from wright import Binary, CargoPackage, File, Group, Service, Step, WrightError, cli
 from wright import TestFailure as Failure
 from wright import TestResults as Results
 from wright import Tests as Checks
@@ -885,3 +885,93 @@ def test_step_fingerprint_covers_files_dependency_outputs_and_env(tmp_path: Path
     before = missing.fingerprint(root)
     (root / "absent").write_text("created")
     assert missing.fingerprint(root) != before
+
+
+def test_service_starts_only_when_a_consumer_must_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path.resolve()
+    _isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    events: list[str] = []
+
+    class Program(Binary):
+        def build(self, run: Run) -> Path:
+            events.append("binary")
+            path = run.artifact(self, "")
+            path.write_text("exe")
+            return path
+
+    @dataclass(eq=False)
+    class Note(File):
+        label: str = "a"
+
+        def build(self, run: Run) -> Path:
+            events.append("note")
+            path = run.artifact(self, ".txt")
+            path.write_text(self.label)
+            return path
+
+    @dataclass(eq=False)
+    class Server(Service):
+        binary: Binary
+
+        def build(self, run: Run) -> _Stopped:
+            events.append("server")
+            assert run[self.binary].read_text() == "exe"
+            return _Stopped()
+
+        def teardown(self, value: _Stopped) -> None:
+            events.append("stop")
+
+    @dataclass(eq=False)
+    class Between(File):
+        def build(self, run: Run) -> Path:
+            events.append("between")
+            path = run.artifact(self, ".txt")
+            path.write_text("between")
+            return path
+
+    @dataclass(eq=False)
+    class Consumer(File):
+        source: File
+        server: Service
+
+        def build(self, run: Run) -> Path:
+            events.append("consumer")
+            assert run[self.server].url == "http://127.0.0.1:9"
+            path = run.artifact(self, ".out")
+            path.write_text(run[self.source].read_text())
+            return path
+
+    binary, note, between = Program(), Note(), Between()
+    server = Server(binary)
+    consumer = Consumer(note, server)
+    for step, name in (
+        (binary, "binary"),
+        (note, "note"),
+        (server, "server"),
+        (between, "between"),
+        (consumer, "consumer"),
+    ):
+        step.name = step.variable = name
+    plan = [binary, note, server, between, consumer]
+
+    execute(plan)
+    assert events == ["binary", "note", "between", "server", "consumer", "stop"]
+    events.clear()
+    capsys.readouterr()
+
+    execute(plan)
+    output = capsys.readouterr().out
+    assert events == []
+    assert "not started server: no step that takes it runs" in output
+    assert "reused consumer" in output
+
+    events.clear()
+    note.label = "b"
+    execute(plan)
+    output = capsys.readouterr().out
+    assert events == ["note", "server", "consumer", "stop"]
+    assert "reused between" in output
+    assert "not started" not in output

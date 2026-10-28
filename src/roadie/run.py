@@ -45,40 +45,95 @@ def execute(steps: Sequence[Step[Any]], *, locked: bool = False) -> object:
     last_use = {id(step): index for index, step in enumerate(steps)}
     for index, step in enumerate(steps):
         for dependency in step.dependencies():
-            last_use[id(dependency)] = max(last_use[id(dependency)], index)
+            last_use[id(dependency)] = max(last_use.get(id(dependency), index), index)
+    requested = id(steps[-1]) if steps else None
+    _hold_service_dependencies(steps, last_use, requested)
     result: object = None
     outputs: dict[int, str] = {}
+    started: set[int] = set()
     with cargo_snapshot(), interrupt_on_terminate():
         try:
             for index, step in enumerate(steps):
                 try:
                     step_fingerprint = fingerprint(step, outputs=outputs)
-                    restored = _restore(step, step_fingerprint)
-                    if restored is not None:
-                        value = restored
-                        run.reused.add(id(step))
-                        print(f"reused {step.name or type(step).__name__}", flush=True)
+                    if isinstance(step, Service) and id(step) != requested:
+                        # A service's output fingerprint is its step fingerprint,
+                        # so a consumer can be reused without the service running.
+                        outputs[id(step)] = step_fingerprint
                     else:
-                        value = step.build(run)
-                    run._values[id(step)] = value
-                    live.append(step)
-                    if restored is None and isinstance(step, File):
-                        value = publish(step, cast(Path, value), locked=locked)
+                        restored = _restore(step, step_fingerprint)
+                        if restored is not None:
+                            value = restored
+                            run.reused.add(id(step))
+                            print(f"reused {step.name or type(step).__name__}", flush=True)
+                        else:
+                            _start_services(step, run, live, started)
+                            value = step.build(run)
+                            if isinstance(step, Service):
+                                started.add(id(step))
                         run._values[id(step)] = value
-                    if isinstance(step, Tests):
-                        _report_tests(step, value)
-                    _remember(step, step_fingerprint, value)
-                    outputs[id(step)] = _output_fingerprint(step, value, step_fingerprint, outputs)
+                        live.append(step)
+                        if restored is None and isinstance(step, File):
+                            value = publish(step, cast(Path, value), locked=locked)
+                            run._values[id(step)] = value
+                        if isinstance(step, Tests):
+                            _report_tests(step, value)
+                        _remember(step, step_fingerprint, value)
+                        outputs[id(step)] = _output_fingerprint(
+                            step, value, step_fingerprint, outputs
+                        )
+                        result = value
                 except (KeyboardInterrupt, StepFailed):
                     raise
                 except BaseException as error:
                     raise StepFailed(step.name or type(step).__name__, _reason(error)) from error
-                result = value
                 expired = [item for item in live if last_use[id(item)] == index]
                 _teardown(run, live, expired)
+            for step in steps:
+                if isinstance(step, Service) and id(step) not in started:
+                    name = step.name or type(step).__name__
+                    print(f"not started {name}: no step that takes it runs", flush=True)
             return result
         finally:
             _teardown(run, live, list(live))
+
+
+def _hold_service_dependencies(
+    steps: Sequence[Step[Any]], last_use: dict[int, int], requested: int | None
+) -> None:
+    """Keep a deferred service's dependencies until the service's last consumer."""
+
+    def extend(step: Step[Any], index: int, seen: set[int]) -> None:
+        for dependency in step.dependencies():
+            if id(dependency) in seen:
+                continue
+            seen.add(id(dependency))
+            if last_use.get(id(dependency), -1) < index:
+                last_use[id(dependency)] = index
+            extend(dependency, index, seen)
+
+    for step in steps:
+        if isinstance(step, Service) and id(step) != requested:
+            extend(step, last_use[id(step)], set())
+
+
+def _start_services(
+    step: Step[Any], run: Run, live: list[Step[Any]], started: set[int]
+) -> None:
+    """Start deferred services `step` takes, just before `step` builds."""
+    for dependency in step.dependencies():
+        if not isinstance(dependency, Service) or id(dependency) in started:
+            continue
+        _start_services(dependency, run, live, started)
+        try:
+            value = dependency.build(run)
+        except (KeyboardInterrupt, StepFailed):
+            raise
+        except BaseException as error:
+            raise StepFailed(dependency.name or type(dependency).__name__, _reason(error)) from error
+        run._values[id(dependency)] = value
+        live.append(dependency)
+        started.add(id(dependency))
 
 
 def reuse_markers(steps: Sequence[Step[Any]]) -> list[bool]:
