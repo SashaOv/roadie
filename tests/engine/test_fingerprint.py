@@ -1,11 +1,14 @@
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from support import Value
+from support import Value, write_build
 
+import roadie.engine.fingerprint as fingerprints
 from roadie.build import Files, RoadieError, Step
 from roadie.engine.fingerprint import fingerprint
+from roadie.engine.graph import load
 from roadie.engine.root import use_project_root
 from roadie.engine.run import Run
 
@@ -67,3 +70,67 @@ def test_step_fingerprint_covers_files_dependency_outputs_and_env(tmp_path: Path
         before = missing.fingerprint(root)
         (root / "absent").write_text("created")
         assert missing.fingerprint(root) != before
+
+
+# (spec) Step fingerprints
+def test_fingerprint_does_not_depend_on_the_checkout_location(tmp_path: Path) -> None:
+    source = """from dataclasses import dataclass
+from pathlib import Path
+
+@dataclass(eq=False)
+class Note(Step[None]):
+    source: Path
+    extras: tuple[Path, ...]
+    def build(self, run):
+        return None
+
+here = Path(__file__).parent
+item = Note((here / "src/main.py").resolve(), ((here / "src/lib.py").resolve(),))
+"""
+
+    def digest(name: str) -> str:
+        root = tmp_path / name
+        write_build(root, source)
+        graph = load(root)
+        with use_project_root(graph.root):
+            return fingerprint(graph.result("item"))
+
+    assert digest("first") == digest("second")
+
+    root = tmp_path / "first"
+    with use_project_root(root.resolve()):
+        inside = fingerprint(load(root).result("item"))
+        outside = load(root).result("item")
+        outside.source = Path("/tmp/roadie-outside.py")
+        moved = fingerprint(outside)
+    assert inside != moved
+
+
+# (spec) Step fingerprints
+def test_code_hash_keys_sources_by_module_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[bytes] = []
+    real = hashlib.sha256
+
+    class Spy:
+        def __init__(self, data: bytes = b"") -> None:
+            captured.append(data)
+            self._parts = [data]
+
+        def update(self, data: bytes) -> None:
+            captured.append(data)
+            self._parts.append(data)
+
+        def hexdigest(self) -> str:
+            return real(b"".join(self._parts)).hexdigest()
+
+    monkeypatch.setattr(fingerprints.hashlib, "sha256", Spy)
+
+    class Note(Step[None]):
+        def build(self, run: Run) -> None:
+            return None
+
+    fingerprint(Note())
+    joined = b"".join(captured)
+    assert b"roadie.engine.step\0" in joined
+    step_file = Path(fingerprints.__file__).resolve().parent / "step.py"
+    assert str(step_file).encode() not in joined

@@ -337,14 +337,16 @@ files and defines the extension points, `Step` and `Input`; it never imports
 
 A step's fingerprint is a SHA-256 digest of:
 
-- its class, by module and qualified name;
+- its class, by module and qualified name; a class defined in a build file
+  is `roadie:<path relative to the project root>.<qualname>`;
 - a hash of the source files of the modules that define the classes of the
-  step's class hierarchy, and of Roadie's own modules. The hierarchy includes
-  standard-library modules (`abc`, `typing`). A class defined in a build file
-  itself is not hashed;
+  step's class hierarchy, and of Roadie's own modules, each keyed by its
+  module name. The hierarchy includes standard-library modules (`abc`,
+  `typing`). A class defined in a build file itself is not hashed;
 - its base directory, relative to the project root;
 - the values of its environment files;
-- its plain attributes;
+- its plain attributes; a `Path` inside the project root counts as its
+  relative path in POSIX form;
 - the fingerprints of its inputs;
 - the output fingerprints of its dependencies.
 
@@ -402,11 +404,6 @@ and it becomes an item in [todo/backlog.md](todo/backlog.md).
   step class that is not a dataclass shows every attribute positionally. Must
   a step class be a dataclass?
   Code: `Step.call_arguments`.
-- **A `Path` attribute is fingerprinted by its `repr`.** An absolute path
-  gives `PosixPath('/…')`, so the fingerprint differs between checkouts and
-  between POSIX and Windows, while the base directory is made relative to the
-  project root.
-  Code: `fingerprint._classify`.
 - **Stopping a process tree depends on the platform.** On Linux Roadie
   signals the process group and every descendant it finds in `/proc`; on
   macOS, which has no `/proc`, only the group; on Windows the process alone,

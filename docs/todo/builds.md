@@ -66,7 +66,7 @@ at the author's request on 2026-10-29.
   whose stem is not a variable in its build directory's record, which
   includes all artifacts of unnamed steps. It also deletes each record
   directory whose build file no longer exists.
-- **R8.6: Make fingerprints independent of the checkout's location.** The
+- [x] **R8.6: Make fingerprints independent of the checkout's location.** The
   code hash keys each source file by its module name instead of its
   absolute path. A `Path` attribute is fingerprinted relative to the project
   root in POSIX form when inside it.

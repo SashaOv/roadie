@@ -38,7 +38,7 @@ def fingerprint(
             raise RoadieError(f"{label} dependency {name} has no output fingerprint") from None
     return digest(
         {
-            "class": f"{type(step).__module__}.{type(step).__qualname__}",
+            "class": _class_id(step),
             "code": _code_hash(step),
             "base_dir": _relative(step.base_dir),
             "env": dict(step.env_values if env is None else env),
@@ -68,7 +68,7 @@ def _classify(
             _classify(step, f"{name}[{index}]", item, attributes, inputs, dependencies)
         return
     if _plain(value):
-        attributes[name] = repr(value)
+        attributes[name] = _attribute_text(value)
         return
     label = step.name or type(step).__name__
     raise RoadieError(f"{label} attribute {name} must be a plain value, an input, or a step")
@@ -80,6 +80,37 @@ def _plain(value: object) -> bool:
     if isinstance(value, tuple):
         return all(item is None or isinstance(item, (str, int, float, bool, Path)) for item in value)
     return False
+
+
+def _class_id(step: Step[Any]) -> str:
+    module = type(step).__module__
+    prefix = "roadie:"
+    if module.startswith(prefix):
+        # The loader names a build file `roadie:<absolute path>`.
+        module = prefix + _relative(Path(module.removeprefix(prefix)))
+    return f"{module}.{type(step).__qualname__}"
+
+
+def _attribute_text(value: object) -> str:
+    if isinstance(value, Path):
+        return _path_attribute(value)
+    if isinstance(value, tuple):
+        inner = ", ".join(_attribute_text(item) for item in value)
+        return f"({inner}{',' if len(value) == 1 else ''})"
+    return repr(value)
+
+
+def _path_attribute(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        root = project_root().resolve()
+    except RoadieError:
+        return resolved.as_posix()
+    try:
+        relative = resolved.relative_to(root)
+    except ValueError:
+        return resolved.as_posix()
+    return relative.as_posix() if relative.parts else "."
 
 
 def _relative(path: Path) -> str:
@@ -96,18 +127,35 @@ def _relative(path: Path) -> str:
 
 
 def _code_hash(step: Step[Any]) -> str:
-    paths: set[Path] = set()
+    files: dict[str, Path] = {}
+
+    def add(name: str, path: Path) -> None:
+        # A build file's module name is `roadie:<absolute path>`, and a class
+        # defined there is not hashed.
+        if name.startswith("roadie:"):
+            return
+        files[name] = path.resolve()
+
     for cls in type(step).mro():
         module = sys.modules.get(cls.__module__)
         file = getattr(module, "__file__", None) if module is not None else None
         if isinstance(file, str) and file.endswith(".py"):
-            paths.add(Path(file).resolve())
+            add(cls.__module__, Path(file))
     package = Path(roadie.__file__).resolve().parent
-    paths.update(path.resolve() for path in package.rglob("*.py"))
+    for path in package.rglob("*.py"):
+        add(_module_name(package, path), path)
     hashed = hashlib.sha256()
-    for path in sorted(paths, key=lambda item: item.as_posix()):
-        hashed.update(path.as_posix().encode())
+    for name in sorted(files):
+        hashed.update(name.encode())
         hashed.update(b"\0")
-        hashed.update(path.read_bytes())
+        hashed.update(files[name].read_bytes())
         hashed.update(b"\0")
     return hashed.hexdigest()
+
+
+def _module_name(package: Path, path: Path) -> str:
+    relative = path.resolve().relative_to(package.resolve().parent)
+    parts = list(relative.with_suffix("").parts)
+    if parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
