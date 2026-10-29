@@ -12,7 +12,12 @@ from roadie.engine.fingerprint import fingerprint
 from roadie.engine.inputs import run_scope
 from roadie.engine.lock import HeldLock, acquire_run_lock
 from roadie.engine.process import interrupt_on_terminate
-from roadie.engine.records import artifact_dir, load_records, save_records
+from roadie.engine.records import (
+    artifact_dir,
+    load_records,
+    save_records,
+    sweep_stale_state,
+)
 from roadie.engine.root import project_root, use_project_root
 from roadie.engine.step import Step
 
@@ -108,6 +113,7 @@ def _run_steps(
                             # A served result, such as a dev server, outlives
                             # the run and must not keep the lock.
                             if run_lock is not None:
+                                sweep_stale_state(project_root())
                                 run_lock.release()
                             step.serve(value)
                 except (KeyboardInterrupt, StepFailed):

@@ -379,6 +379,18 @@ written through a temporary file and renamed.
 for the step's record. A step without a variable uses
 `<ClassName>-<serial>`, a number unique to the step within the process.
 
+After a successful run, while the run still holds its lock, Roadie reads
+`<root>/target/roadie/swept`. When the timestamp is missing, Roadie writes it
+and does not sweep. When it is missing a timezone, cannot be read, or is
+older than 24 hours, Roadie sweeps and then writes it. A failed run does not
+sweep. The sweep deletes each artifact whose stem is not a variable in that
+directory's record, which includes every artifact of an unnamed step, and
+deletes each record directory whose build file no longer exists. The root
+directory is kept, along with the lock and the timestamp; only its record
+and artifacts go. A directory under `_outside` is kept, because the sweep
+cannot recover the build file's path; unreferenced artifacts there are still
+deleted.
+
 ## Open questions
 
 Non-normative. Each item is behavior found in the code that no design states.
@@ -395,10 +407,6 @@ and it becomes an item in [todo/backlog.md](todo/backlog.md).
   between POSIX and Windows, while the base directory is made relative to the
   project root.
   Code: `fingerprint._classify`.
-- **Artifacts are never removed.** The artifact of a variable the build file
-  no longer defines, or of an unnamed step, stays under `target/roadie/`.
-  Reclaim them, or document that the directory only grows?
-  Code: `run.Run.artifact`.
 - **Stopping a process tree depends on the platform.** On Linux Roadie
   signals the process group and every descendant it finds in `/proc`; on
   macOS, which has no `/proc`, only the group; on Windows the process alone,
