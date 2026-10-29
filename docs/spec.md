@@ -287,8 +287,10 @@ overrides what its kind needs. Roadie calls:
 - `serve(value)` on the requested result, before the run tears it down.
 - `encode(value)` for the JSON value the record keeps, `matches(recorded)` to
   accept a recorded value for reuse, and `decode(recorded)` to restore the
-  value from it. By default the record keeps the value itself, which must then
-  be JSON-serializable.
+  value from it. By default both use a Pydantic `TypeAdapter` for the step's
+  value type `T`, so a tuple comes back as a tuple and a dictionary key comes
+  back as its declared type. A step class with no concrete `T` keeps the JSON
+  value as decoded. A recorded value that is not a valid `T` fails the step.
 - `output_fingerprint(fingerprint, value)` for the step's output fingerprint;
   by default a digest of the value.
 - `call_arguments()` for the positional and keyword arguments `--dry` shows;
@@ -370,10 +372,6 @@ and it becomes an item in [todo/backlog.md](todo/backlog.md).
   step class that is not a dataclass shows every attribute positionally. Must
   a step class be a dataclass?
   Code: `Step.call_arguments`.
-- **A reused value can differ in type from the built one.** With the default
-  `encode` and `decode`, the value is recorded as JSON, so a tuple comes back
-  as a list and non-string dictionary keys as strings.
-  Code: `Step.encode`, `Step.decode`.
 - **A `Path` attribute is fingerprinted by its `repr`.** An absolute path
   gives `PosixPath('/…')`, so the fingerprint differs between checkouts and
   between POSIX and Windows, while the base directory is made relative to the

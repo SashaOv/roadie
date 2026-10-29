@@ -559,6 +559,86 @@ def test_changed_env_file_reruns_a_step(
     assert built == ["one", "two"]
 
 
+# (spec) Step hooks
+# (spec) Reusing a step
+def test_recorded_values_restore_their_declared_type(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    built: list[str] = []
+
+    class Pair(Step[tuple[int, int]]):
+        def build(self, run: Run) -> tuple[int, int]:
+            built.append("pair")
+            return (1, 2)
+
+    class Child(Pair):
+        pass
+
+    class Codes(Step[dict[int, str]]):
+        def build(self, run: Run) -> dict[int, str]:
+            built.append("codes")
+            return {1: "a"}
+
+    class Plain(Step):  # no concrete value type: JSON stays as decoded
+        def build(self, run: Run) -> tuple[str, str]:
+            built.append("plain")
+            return ("a", "b")
+
+    pair = Child()
+    pair.name = pair.variable = "pair"
+    codes = Codes()
+    codes.name = codes.variable = "codes"
+    plain = Plain()
+    plain.name = plain.variable = "plain"
+
+    assert execute([pair]) == (1, 2)
+    restored = execute([pair])
+    assert built == ["pair"]
+    assert restored == (1, 2)
+    assert type(restored) is tuple
+
+    assert execute([codes]) == {1: "a"}
+    restored_codes = execute([codes])
+    assert built == ["pair", "codes"]
+    assert restored_codes == {1: "a"}
+    assert type(next(iter(restored_codes))) is int
+
+    assert execute([plain]) == ("a", "b")
+    restored_plain = execute([plain])
+    assert built == ["pair", "codes", "plain"]
+    assert restored_plain == ["a", "b"]
+
+    record = json.loads((root / "target" / "roadie" / "build.record.json").read_text())
+    assert record["pair"]["value"] == [1, 2]
+    assert record["codes"]["value"] == {"1": "a"}
+    assert record["plain"]["value"] == ["a", "b"]
+
+
+# (spec) Step hooks
+# (spec) Reusing a step
+def test_recorded_value_of_the_wrong_type_fails_the_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+
+    class Pair(Step[tuple[int, int]]):
+        def build(self, run: Run) -> tuple[int, int]:
+            return (1, 2)
+
+    pair = Pair()
+    pair.name = pair.variable = "pair"
+    execute([pair])
+    record = root / "target" / "roadie" / "build.record.json"
+    payload = json.loads(record.read_text())
+    payload["pair"]["value"] = "nope"
+    record.write_text(json.dumps(payload))
+    with pytest.raises(StepFailed, match="pair failed"):
+        execute([pair])
+
+
 # (spec) Environment files
 def test_missing_env_file_stops_before_any_step(tmp_path: Path) -> None:
     missing = tmp_path / "nope.env"

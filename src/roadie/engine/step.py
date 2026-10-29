@@ -8,7 +8,18 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
 from dataclasses import fields, is_dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Self,
+    TypeVar,
+    cast,
+    get_args,
+    get_origin,
+)
+
+from pydantic import TypeAdapter
 
 from roadie.engine.config import base_directory, configured_env, loading_directory
 from roadie.engine.errors import StepFailed
@@ -19,6 +30,62 @@ if TYPE_CHECKING:
     from roadie.engine.run import Run
 
 _serials = itertools.count()
+_value_adapters: dict[type, TypeAdapter[Any] | None] = {}
+
+
+def _type_params(cls: type) -> tuple[Any, ...]:
+    params = getattr(cls, "__type_params__", ())
+    return params if isinstance(params, tuple) else ()
+
+
+def _concrete_value_type(cls: type) -> Any:
+    """The step's value type `T` when it is a concrete type, else None."""
+    substitutions: dict[Any, Any] = {}
+
+    def visit(current: type, seen: set[type]) -> None:
+        if current in seen:
+            return
+        seen.add(current)
+        for base in getattr(current, "__orig_bases__", ()):
+            origin = get_origin(base)
+            if not isinstance(origin, type):
+                continue
+            params = _type_params(origin)
+            for param, arg in zip(params, get_args(base), strict=False):
+                if isinstance(param, TypeVar) and param not in substitutions:
+                    substitutions[param] = arg
+            visit(origin, seen)
+        for base in current.__bases__:
+            visit(base, seen)
+
+    visit(cls, set())
+    params = _type_params(Step)
+    if len(params) != 1 or not isinstance(params[0], TypeVar):
+        return None
+    if params[0] not in substitutions:
+        return None
+    arg = substitutions[params[0]]
+    seen_vars: set[Any] = set()
+    while isinstance(arg, TypeVar):
+        if arg in seen_vars or arg not in substitutions:
+            return None
+        seen_vars.add(arg)
+        arg = substitutions[arg]
+    if arg is Any:
+        return None
+    if arg is None:
+        return type(None)
+    return arg
+
+
+def _value_adapter(cls: type) -> TypeAdapter[Any] | None:
+    try:
+        return _value_adapters[cls]
+    except KeyError:
+        value_type = _concrete_value_type(cls)
+        adapter = None if value_type is None else TypeAdapter(value_type)
+        _value_adapters[cls] = adapter
+        return adapter
 
 
 # (spec) Dependencies and attributes
@@ -94,14 +161,20 @@ class Step[T](ABC):
 
     def encode(self, value: T) -> object:
         """Return the JSON value the step's record keeps."""
-        return value
+        adapter = _value_adapter(type(self))
+        if adapter is None:
+            return value
+        return adapter.dump_python(value, mode="json")
 
     def matches(self, recorded: object) -> bool:
         """True when a recorded value can still be restored."""
         return True
 
     def decode(self, recorded: object) -> T:
-        return cast(T, recorded)
+        adapter = _value_adapter(type(self))
+        if adapter is None:
+            return cast(T, recorded)
+        return cast(T, adapter.validate_python(recorded))
 
     def output_fingerprint(self, fingerprint: str, value: T) -> str:
         """Digest of what this step built, which its consumers' fingerprints include."""

@@ -41,7 +41,7 @@ at the author's request on 2026-10-29.
 
 ### Patches
 
-- **R8.1: Restore recorded values with their declared type.** The default
+- [x] **R8.1: Restore recorded values with their declared type.** The default
   `encode` and `decode` use a Pydantic `TypeAdapter` for the step's value
   type `T` from `Step[T]`, so a tuple comes back as a tuple. Adds the
   `pydantic` dependency. A step class with no concrete `T` keeps JSON as
