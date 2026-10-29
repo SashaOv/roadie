@@ -51,7 +51,7 @@ at the author's request on 2026-10-29.
   version counts as empty, so its steps rebuild. A record that cannot be
   read is also treated as empty, and Roadie prints `ignoring unreadable
   record <path>: <reason>`, so a damaged file never fails the run.
-- **R8.3: Allow one run per project root at a time.** A run takes
+- [x] **R8.3: Allow one run per project root at a time.** A run takes
   `<root>/target/roadie/run.lock`, created exclusively and holding the PID
   and start time. Another run fails with `another roadie run holds <lock>
   (pid <n>, started <time>)`. A lock whose process is gone, or which is

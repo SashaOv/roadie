@@ -10,6 +10,7 @@ from dotenv import dotenv_values
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.fingerprint import fingerprint
 from roadie.engine.inputs import run_scope
+from roadie.engine.lock import HeldLock, acquire_run_lock
 from roadie.engine.process import interrupt_on_terminate
 from roadie.engine.records import artifact_dir, load_records, save_records
 from roadie.engine.root import project_root, use_project_root
@@ -47,11 +48,19 @@ def execute(
     env: Sequence[Path] = (),
 ) -> object:
     with use_project_root(root):
-        return _run_steps(steps, locked=locked, env=env)
+        held = acquire_run_lock(root)
+        try:
+            return _run_steps(steps, locked=locked, env=env, run_lock=held)
+        finally:
+            held.release()
 
 
 def _run_steps(
-    steps: Sequence[Step[Any]], *, locked: bool = False, env: Sequence[Path] = ()
+    steps: Sequence[Step[Any]],
+    *,
+    locked: bool = False,
+    env: Sequence[Path] = (),
+    run_lock: HeldLock | None = None,
 ) -> object:
     _apply_env(steps, env)
     run = Run(locked=locked)
@@ -96,6 +105,10 @@ def _run_steps(
                         outputs[id(step)] = output
                         result = value
                         if id(step) == requested:
+                            # A served result, such as a dev server, outlives
+                            # the run and must not keep the lock.
+                            if run_lock is not None:
+                                run_lock.release()
                             step.serve(value)
                 except (KeyboardInterrupt, StepFailed):
                     raise

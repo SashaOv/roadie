@@ -63,7 +63,8 @@ held). Naming a result the file does not define is an error.
 - `--env FILE`: an environment file for every step; may be repeated.
 - `--dry-run`, `--dry`: print the plan, marking the steps that will be reused,
   and build nothing. A step is marked when its dependencies are all marked
-  and, if its kind keeps a record, its record matches.
+  and, if its kind keeps a record, its record matches. It takes no lock; see
+  [One run at a time](#one-run-at-a-time).
 
 There is no version option. `roadie --help` prints usage.
 
@@ -230,6 +231,15 @@ when the message is empty. A string passed to `SystemExit` is its own reason.
 An interrupt is not a failure. The command prints a `RoadieError` message to
 standard error and exits with status 1.
 
+### One run at a time
+
+A run takes `<root>/target/roadie/run.lock`, created exclusively, and writes
+its PID and start time. Another run fails with `another roadie run holds
+<lock> (pid <n>, started <time>)`. A lock whose process is gone, which is
+older than 24 hours, or which cannot be read, is stale and taken over. The
+lock is released before a requested result is served, so a running dev server
+does not block builds. `--dry` takes no lock.
+
 ### Requested result
 
 The requested result is built in plan order, even when deferred. After it
@@ -381,11 +391,6 @@ and it becomes an item in [todo/backlog.md](todo/backlog.md).
   between POSIX and Windows, while the base directory is made relative to the
   project root.
   Code: `fingerprint._classify`.
-- **Concurrent runs can lose record entries.** Two `roadie` runs on one
-  project root each rewrite `build.record.json` from what they read, through
-  the same `build.record.json.tmp`, so the later write drops the earlier
-  run's entries. Unsupported, serialized, or merged?
-  Code: `records.save_records`, `run._remember`.
 - **Artifacts are never removed.** The artifact of a variable the build file
   no longer defines, or of an unnamed step, stays under `target/roadie/`.
   Reclaim them, or document that the directory only grows?
