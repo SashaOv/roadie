@@ -27,7 +27,8 @@ value comes back with its built type. A record from another Roadie version,
 or a damaged one, is rebuilt instead of failing the run. Two runs on one
 project cannot corrupt each other's records. `target/roadie/` no longer
 grows without bound. Moving a checkout keeps its records valid. Stopping a
-server stops its whole process tree on macOS, as it does on Linux.
+server stops its whole process tree on macOS, as it does on Linux. The log
+shows each step, as code, when it builds.
 
 **Acceptance check.** `uv run ruff check`, `uv run mypy src` and
 `uv run pytest` pass on both CI platforms. Each patch adds tests for its own
@@ -35,7 +36,8 @@ success and failure paths, and removes its item from the spec's Open
 questions in favor of a rule. No item is left in Open questions.
 
 **Decisions at the checkpoint (2026-10-29).** `--clean` deletes
-`target/roadie/`. `--dry` shows every attribute as `name=value`.
+`target/roadie/`. `--dry` shows every attribute as `name=value`. R8.9 added
+at the author's request on 2026-10-29.
 
 ### Patches
 
@@ -78,6 +80,14 @@ questions in favor of a rule. No item is left in Open questions.
   descendants with `ps -A -o pid=,ppid=` where `/proc` is absent. Windows
   keeps its current behavior, marked as unverified until a Windows CI job
   exists (backlog).
+- **R8.9: Show each step as code when it builds.** Before a step builds,
+  Roadie prints `build <name> = <Class>(<arguments>)`, or
+  `build <Class>(<arguments>)` for a step with no name, with the arguments
+  `--dry` shows. A deferred step prints its line when it starts; a reused
+  step still prints only `reused <name>`; a step without a record, such as a
+  group, prints no line. The printer moves from `roadie.cli` into
+  `roadie.engine`, which may not import the CLI, and `--dry` uses it from
+  there.
 
 ## Backlog
 
