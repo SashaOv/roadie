@@ -347,8 +347,12 @@ step argument is shown by its name, or as its own call when it has none.
 A build file's record is `<root>/target/roadie/<directory>/build.record.json`,
 where `<directory>` is the build file's directory relative to the project
 root (none for the root itself; `_outside/<12 hex digits of a digest of the
-path>` when outside it). It maps each reusable variable to its step
-fingerprint, its output fingerprint, and its encoded value.
+path>` when outside it). The file holds a format version and its entries,
+both read through a Pydantic model. Each entry maps a reusable variable to
+its step fingerprint, its output fingerprint, and its encoded value. A record
+of another version counts as empty, so its steps rebuild. A record that
+cannot be read counts as empty too, and Roadie prints `ignoring unreadable
+record <path>: <reason>`, so a damaged file never fails the run.
 
 A successful step replaces its entry; entries of variables the build file no
 longer defines are dropped. A failed step writes nothing. The file is
@@ -377,12 +381,6 @@ and it becomes an item in [todo/backlog.md](todo/backlog.md).
   between POSIX and Windows, while the base directory is made relative to the
   project root.
   Code: `fingerprint._classify`.
-- **A corrupt record fails the run.** A `build.record.json` that is not JSON
-  fails the first reusable step of its build file with the JSON parser's
-  message, such as `copy failed: Expecting value: line 1 column 1 (char 0)`,
-  and under `--dry` with a traceback. The alternative is to treat it as no
-  record.
-  Code: `records.load_records`.
 - **Concurrent runs can lose record entries.** Two `roadie` runs on one
   project root each rewrite `build.record.json` from what they read, through
   the same `build.record.json.tmp`, so the later write drops the earlier

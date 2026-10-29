@@ -15,6 +15,7 @@ from support import (
     write_build,
 )
 
+from roadie import cli
 from roadie.build import (
     Binary,
     File,
@@ -343,7 +344,7 @@ def test_failed_step_writes_no_record_and_a_changed_output_is_rebuilt(tmp_path: 
     execute([note])
     assert record.is_file()
     payload = json.loads(record.read_text())
-    payload["gone"] = {"fingerprint": "x", "output": "y", "content": None, "value": "z"}
+    payload["entries"]["gone"] = {"fingerprint": "x", "output": "y", "value": "z"}
     record.write_text(json.dumps(payload))
     produced = execute([note])
     assert "gone" not in record.read_text()
@@ -353,6 +354,89 @@ def test_failed_step_writes_no_record_and_a_changed_output_is_rebuilt(tmp_path: 
     again.write_text("edited")
     rebuilt = execute([note])
     assert rebuilt.read_text() == "body"
+
+
+def _counted(name: str, built: list[str]) -> Step[str]:
+    class Note(Step[str]):
+        def build(self, run: Run) -> str:
+            built.append(name)
+            return name
+
+    note = Note()
+    note.name = note.variable = name
+    note.build_variables = frozenset({name})
+    return note
+
+
+# (spec) Records
+def test_record_file_keeps_a_version_and_reuses_its_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    built: list[str] = []
+    execute([_counted("note", built)])
+    record = json.loads((root / "target" / "roadie" / "build.record.json").read_text())
+    assert record["version"] == 1
+    assert set(record["entries"]) == {"note"}
+    execute([_counted("note", built)])
+    assert built == ["note"]
+
+
+# (spec) Records
+def test_record_of_another_version_is_rebuilt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    built: list[str] = []
+    note = _counted("note", built)
+    execute([note])
+    record = root / "target" / "roadie" / "build.record.json"
+    payload = json.loads(record.read_text())
+    payload["version"] = 2
+    record.write_text(json.dumps(payload))
+    capsys.readouterr()
+    execute([note])
+    assert built == ["note", "note"]
+    assert "ignoring unreadable record" not in capsys.readouterr().out
+
+
+# (spec) Records
+def test_unreadable_record_is_ignored_and_the_step_rebuilds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    built: list[str] = []
+    note = _counted("note", built)
+    execute([note])
+    record = root / "target" / "roadie" / "build.record.json"
+    record.write_text("not json")
+    capsys.readouterr()
+    execute([note])
+    assert built == ["note", "note"]
+    message = (
+        f"ignoring unreadable record {record}: Expecting value: line 1 column 1 (char 0)"
+    )
+    assert message in capsys.readouterr().out
+
+
+# (spec) Records
+# (spec) Command line
+def test_unreadable_record_does_not_fail_a_dry_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path.resolve()
+    write_build(root, "class Note(Step[str]):\n    def build(self, run):\n        return 'v'\nitem = Note()\n")
+    cli.run(root)
+    record = root / "target" / "roadie" / "build.record.json"
+    record.write_text("not json")
+    capsys.readouterr()
+    cli.run(root, dry_run=True)
+    output = capsys.readouterr().out
+    assert f"ignoring unreadable record {record}:" in output
+    assert "item = Note()  # run" in output
 
 
 # (spec) Records
@@ -611,9 +695,9 @@ def test_recorded_values_restore_their_declared_type(
     assert restored_plain == ["a", "b"]
 
     record = json.loads((root / "target" / "roadie" / "build.record.json").read_text())
-    assert record["pair"]["value"] == [1, 2]
-    assert record["codes"]["value"] == {"1": "a"}
-    assert record["plain"]["value"] == ["a", "b"]
+    assert record["entries"]["pair"]["value"] == [1, 2]
+    assert record["entries"]["codes"]["value"] == {"1": "a"}
+    assert record["entries"]["plain"]["value"] == ["a", "b"]
 
 
 # (spec) Step hooks
@@ -633,7 +717,7 @@ def test_recorded_value_of_the_wrong_type_fails_the_step(
     execute([pair])
     record = root / "target" / "roadie" / "build.record.json"
     payload = json.loads(record.read_text())
-    payload["pair"]["value"] = "nope"
+    payload["entries"]["pair"]["value"] = "nope"
     record.write_text(json.dumps(payload))
     with pytest.raises(StepFailed, match="pair failed"):
         execute([pair])

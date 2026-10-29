@@ -46,7 +46,7 @@ at the author's request on 2026-10-29.
   type `T` from `Step[T]`, so a tuple comes back as a tuple. Adds the
   `pydantic` dependency. A step class with no concrete `T` keeps JSON as
   is.
-- **R8.2: Version the record file.** The record holds a format version and
+- [x] **R8.2: Version the record file.** The record holds a format version and
   its entries, both read through a Pydantic model. A record of another
   version counts as empty, so its steps rebuild. A record that cannot be
   read is also treated as empty, and Roadie prints `ignoring unreadable
