@@ -1,29 +1,26 @@
 """Build a plan and tear down each step after its last consumer."""
 
-import hashlib
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
 from dotenv import dotenv_values
 
-from roadie.cargo import cargo_snapshot
-from roadie.errors import RoadieError, StepFailed
-from roadie.fingerprint import fingerprint
-from roadie.inputs import digest
-from roadie.output import publish
-from roadie.process import interrupt_on_terminate
-from roadie.records import artifact_dir, load_records, save_records
-from roadie.root import project_root, use_project_root
-from roadie.step import Binary, File, Service, Step, Tests
-from roadie.testing import TestResults
+from roadie.engine.errors import RoadieError, StepFailed
+from roadie.engine.fingerprint import fingerprint
+from roadie.engine.inputs import run_scope
+from roadie.engine.process import interrupt_on_terminate
+from roadie.engine.records import artifact_dir, load_records, save_records
+from roadie.engine.root import project_root, use_project_root
+from roadie.engine.step import Step
 
 
 class Run:
-    def __init__(self) -> None:
+    def __init__(self, *, locked: bool = False) -> None:
         self._values: dict[int, object] = {}
         self.reused: set[int] = set()
+        self.locked = locked
 
     # (spec) Step values
     def __getitem__[T](self, step: Step[T]) -> T:
@@ -57,51 +54,49 @@ def _run_steps(
     steps: Sequence[Step[Any]], *, locked: bool = False, env: Sequence[Path] = ()
 ) -> object:
     _apply_env(steps, env)
-    run = Run()
+    run = Run(locked=locked)
     live: list[Step[Any]] = []
     last_use = {id(step): index for index, step in enumerate(steps)}
     for index, step in enumerate(steps):
         for dependency in step.dependencies():
             last_use[id(dependency)] = max(last_use.get(id(dependency), index), index)
     requested = id(steps[-1]) if steps else None
-    _hold_service_dependencies(steps, last_use, requested)
+    _hold_deferred_dependencies(steps, last_use, requested)
     result: object = None
     outputs: dict[int, str] = {}
     started: set[int] = set()
-    with cargo_snapshot(), interrupt_on_terminate():
+    with run_scope(), interrupt_on_terminate():
         try:
             for index, step in enumerate(steps):
                 try:
                     step_fingerprint = fingerprint(step, outputs=outputs)
-                    if isinstance(step, Service) and id(step) != requested:
-                        # A service's output fingerprint is its step fingerprint,
-                        # so a consumer can be reused without the service running.
+                    if step.deferred and id(step) != requested:
+                        # A deferred step's output fingerprint is its step
+                        # fingerprint, so a consumer can be reused without it.
                         outputs[id(step)] = step_fingerprint
                     else:
-                        restored = _restore(step, step_fingerprint)
-                        if restored is not None:
-                            value = restored
+                        record = _matching(step, step_fingerprint)
+                        if record is not None:
+                            value = step.decode(record["value"])
                             run.reused.add(id(step))
                             print(f"reused {step.name or type(step).__name__}", flush=True)
                         else:
-                            _start_services(step, run, live, started)
+                            _start_deferred(step, run, live, started)
                             value = step.build(run)
-                            if isinstance(step, Service):
+                            if step.deferred:
                                 started.add(id(step))
                         run._values[id(step)] = value
                         live.append(step)
-                        if restored is None and isinstance(step, File):
-                            value = publish(step, cast(Path, value), locked=locked)
+                        if record is None:
+                            value = step.publish(run, value)
                             run._values[id(step)] = value
-                        if isinstance(step, Tests):
-                            _report_tests(step, value)
-                        _remember(step, step_fingerprint, value)
-                        outputs[id(step)] = _output_fingerprint(
-                            step, value, step_fingerprint, outputs
-                        )
+                        step.report(value)
+                        output = _output_fingerprint(step, value, step_fingerprint)
+                        _remember(step, step_fingerprint, output, value)
+                        outputs[id(step)] = output
                         result = value
-                        if isinstance(step, Service) and id(step) == requested:
-                            _await_requested_service(step, value)
+                        if id(step) == requested:
+                            step.serve(value)
                 except (KeyboardInterrupt, StepFailed):
                     raise
                 except BaseException as error:
@@ -109,7 +104,7 @@ def _run_steps(
                 expired = [item for item in live if last_use[id(item)] == index]
                 _teardown(run, live, expired)
             for step in steps:
-                if isinstance(step, Service) and id(step) not in started:
+                if step.deferred and id(step) != requested and id(step) not in started:
                     name = step.name or type(step).__name__
                     print(f"not started {name}: no step that takes it runs", flush=True)
             return result
@@ -117,29 +112,11 @@ def _run_steps(
             _teardown(run, live, list(live))
 
 
-# (spec) Requested services
-def _await_requested_service(step: Step[Any], value: object) -> None:
-    """Keep a requested service up until Ctrl-C, SIGTERM, or the process exits."""
-    name = step.name or type(step).__name__
-    url = getattr(value, "url", "")
-    print(f"{name} is up: {url} (Ctrl-C to stop)", flush=True)
-    process = getattr(value, "process", None)
-    if process is None:
-        return
-    try:
-        status = process.wait()
-    except KeyboardInterrupt:
-        return
-    if status == 0:
-        print(f"{name} exited", flush=True)
-        return
-    raise StepFailed(name, f"exited with status {status}")
-
-
-def _hold_service_dependencies(
+# (spec) Deferred steps
+def _hold_deferred_dependencies(
     steps: Sequence[Step[Any]], last_use: dict[int, int], requested: int | None
 ) -> None:
-    """Keep a deferred service's dependencies until the service's last consumer."""
+    """Keep a deferred step's dependencies until the step's last consumer."""
 
     def extend(step: Step[Any], index: int, seen: set[int]) -> None:
         for dependency in step.dependencies():
@@ -151,18 +128,19 @@ def _hold_service_dependencies(
             extend(dependency, index, seen)
 
     for step in steps:
-        if isinstance(step, Service) and id(step) != requested:
+        if step.deferred and id(step) != requested:
             extend(step, last_use[id(step)], set())
 
 
-def _start_services(
+# (spec) Deferred steps
+def _start_deferred(
     step: Step[Any], run: Run, live: list[Step[Any]], started: set[int]
 ) -> None:
-    """Start deferred services `step` takes, just before `step` builds."""
+    """Build the deferred steps `step` takes, just before `step` builds."""
     for dependency in step.dependencies():
-        if not isinstance(dependency, Service) or id(dependency) in started:
+        if not dependency.deferred or id(dependency) in started:
             continue
-        _start_services(dependency, run, live, started)
+        _start_deferred(dependency, run, live, started)
         try:
             value = dependency.build(run)
         except (KeyboardInterrupt, StepFailed):
@@ -216,7 +194,7 @@ def _reuse_markers(steps: Sequence[Step[Any]], *, env: Sequence[Path] = ()) -> l
     marks: dict[int, bool] = {}
     outputs: dict[int, str] = {}
     ordered: list[bool] = []
-    with cargo_snapshot():
+    with run_scope():
         for step in steps:
             step_fingerprint = fingerprint(step, outputs=outputs)
             dependencies_reused = all(marks.get(id(item), False) for item in step.dependencies())
@@ -225,8 +203,7 @@ def _reuse_markers(steps: Sequence[Step[Any]], *, env: Sequence[Path] = ()) -> l
             marks[id(step)] = mark
             ordered.append(mark)
             if not type(step).recorded:
-                members = getattr(step, "steps", ())
-                outputs[id(step)] = digest([outputs[id(item)] for item in members])
+                outputs[id(step)] = step_fingerprint
             elif record is not None:
                 outputs[id(step)] = str(record["output"])
             else:
@@ -245,43 +222,13 @@ def _matching(step: Step[Any], step_fingerprint: str) -> dict[str, Any] | None:
     record = load_records(step.build_dir, project_root()).get(step.variable or "")
     if not isinstance(record, dict) or record.get("fingerprint") != step_fingerprint:
         return None
-    if not _valid(step, record):
+    if not step.matches(record.get("value")):
         return None
     return record
 
 
-def _restore(step: Step[Any], step_fingerprint: str) -> object | None:
-    record = _matching(step, step_fingerprint)
-    if record is None:
-        return None
-    return _value(step, record)
-
-
-def _valid(step: Step[Any], record: dict[str, Any]) -> bool:
-    if isinstance(step, (File, Binary)):
-        stored = record.get("value")
-        content = record.get("content")
-        if not isinstance(stored, str) or not isinstance(content, str):
-            return False
-        path = _stored_path(stored)
-        if not path.is_file():
-            return False
-        return hashlib.sha256(path.read_bytes()).hexdigest() == content
-    return True
-
-
-def _value(step: Step[Any], record: dict[str, Any]) -> object:
-    if isinstance(step, (File, Binary)):
-        return _stored_path(str(record["value"]))
-    if isinstance(step, Tests):
-        payload = record.get("value")
-        messages = payload.get("messages", []) if isinstance(payload, dict) else []
-        return TestResults((), tuple(str(message) for message in messages))
-    return record.get("value")
-
-
 # (spec) Records
-def _remember(step: Step[Any], step_fingerprint: str, value: object) -> None:
+def _remember(step: Step[Any], step_fingerprint: str, output: str, value: object) -> None:
     if not _reusable(step):
         return
     root = project_root()
@@ -289,78 +236,19 @@ def _remember(step: Step[Any], step_fingerprint: str, value: object) -> None:
     if step.build_variables is not None:
         records = {key: item for key, item in records.items() if key in step.build_variables}
     assert step.variable is not None
-    records[step.variable] = _entry(step, step_fingerprint, value)
+    records[step.variable] = {
+        "fingerprint": step_fingerprint,
+        "output": output,
+        "value": step.encode(value),
+    }
     save_records(step.build_dir, records, root)
 
 
-def _entry(step: Step[Any], step_fingerprint: str, value: object) -> dict[str, Any]:
-    if isinstance(step, (File, Binary)):
-        path = Path(cast(Path, value))
-        content = hashlib.sha256(path.read_bytes()).hexdigest()
-        return {
-            "fingerprint": step_fingerprint,
-            "output": content if isinstance(step, File) else step_fingerprint,
-            "content": content,
-            "value": _relative(path),
-        }
-    if isinstance(step, Tests):
-        if not isinstance(value, TestResults):
-            raise RoadieError("A Tests step must return TestResults")
-        return {
-            "fingerprint": step_fingerprint,
-            "output": step_fingerprint,
-            "content": None,
-            "value": {"messages": list(value.messages)},
-        }
-    return {
-        "fingerprint": step_fingerprint,
-        "output": digest(value),
-        "content": None,
-        "value": value,
-    }
-
-
-# (spec) Output fingerprints
-def _output_fingerprint(
-    step: Step[Any], value: object, step_fingerprint: str, outputs: Mapping[int, str]
-) -> str:
-    members = getattr(step, "steps", None)
-    if not type(step).recorded and isinstance(members, tuple):
-        return digest([outputs[id(member)] for member in members])
-    if isinstance(step, File):
-        return hashlib.sha256(Path(cast(Path, value)).read_bytes()).hexdigest()
-    if isinstance(step, (Binary, Service, Tests)):
+# (spec) Step hooks
+def _output_fingerprint(step: Step[Any], value: object, step_fingerprint: str) -> str:
+    if not type(step).recorded:
         return step_fingerprint
-    return digest(value)
-
-
-def _report_tests(step: Step[Any], value: object) -> None:
-    if not isinstance(value, TestResults):
-        raise RoadieError("A Tests step must return TestResults")
-    for message in value.messages:
-        print(message, flush=True)
-    if value.failures:
-        reason = "\n".join(
-            f"{failure.name}: {failure.message}" for failure in value.failures
-        )
-        raise StepFailed(step.name or type(step).__name__, reason)
-
-
-def _stored_path(stored: str) -> Path:
-    path = Path(stored)
-    if path.is_absolute():
-        return path
-    return project_root() / path
-
-
-def _relative(path: Path) -> str:
-    resolved = path.resolve()
-    root = project_root().resolve()
-    try:
-        relative = resolved.relative_to(root)
-    except ValueError:
-        return str(resolved)
-    return relative.as_posix()
+    return step.output_fingerprint(step_fingerprint, value)
 
 
 def _reason(error: BaseException) -> str:

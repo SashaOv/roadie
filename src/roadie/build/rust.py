@@ -1,26 +1,28 @@
-"""Cargo workspace packages and the local dependency closure."""
+"""Rust: Cargo packages, workspace queries, and binaries built with cargo."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import shutil
 import subprocess
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
-from contextvars import ContextVar
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from roadie.errors import RoadieError
-from roadie.inputs import Input, digest
+from roadie.build.binary import Binary
+from roadie.build.files import Files
+from roadie.engine.errors import RoadieError
+from roadie.engine.inputs import Input, digest, run_state
+
+if TYPE_CHECKING:
+    from roadie.engine.run import Run
 
 _CARGO_ENV_EXACT = frozenset({"RUSTFLAGS", "RUSTDOCFLAGS", "CARGO_ENCODED_RUSTFLAGS"})
 _CARGO_ENV_PREFIXES = ("CARGO_PROFILE_", "CARGO_BUILD_")
 _ROOT_FILES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/config.toml")
-_cache: ContextVar[dict[Path, CargoSnapshot] | None] = ContextVar(
-    "roadie_cargo_snapshot", default=None
-)
 
 
 @dataclass(frozen=True)
@@ -99,16 +101,6 @@ class CargoSnapshot:
     rustc: str
 
 
-@contextmanager
-def cargo_snapshot() -> Iterator[None]:
-    """Reuse cargo metadata and rustc --version for every fingerprint in the block."""
-    token = _cache.set({})
-    try:
-        yield
-    finally:
-        _cache.reset(token)
-
-
 def _load_snapshot(directory: Path) -> CargoSnapshot:
     version = subprocess.run(
         ("rustc", "--version"),
@@ -122,16 +114,12 @@ def _load_snapshot(directory: Path) -> CargoSnapshot:
 
 def _snapshot(directory: Path) -> CargoSnapshot:
     directory = directory.resolve()
-    current = _cache.get()
-    if isinstance(current, dict):
-        cached = _cached_snapshot(current, directory)
-        if cached is not None:
-            return cached
+    snapshots: dict[Path, CargoSnapshot] = run_state(CargoSnapshot, dict)
+    cached = _cached_snapshot(snapshots, directory)
+    if cached is not None:
+        return cached
     loaded = _load_snapshot(directory)
-    if isinstance(current, dict):
-        current.setdefault(loaded.workspace.root, loaded)
-        return current[loaded.workspace.root]
-    return loaded
+    return snapshots.setdefault(loaded.workspace.root, loaded)
 
 
 def _cached_snapshot(
@@ -206,3 +194,82 @@ class CargoPackage(Input):
                 "files": {path: _content(root, path) for path in listed},
             }
         )
+
+
+# (spec) Step kinds
+@dataclass(eq=False)
+class RustBinary(Binary):
+    """Build the binary target of a Cargo package.
+
+    Run `cargo build --locked -p <package> --message-format=json` in the base
+    directory, take the executable cargo reports for the package's binary
+    target, and copy it, keeping its mode, to the step's artifact (with `.exe`
+    on Windows). Fail with `cargo build --locked -p <package> produced no
+    executable` when cargo reports none, and with `... produced multiple
+    executables` when it reports several different ones.
+    """
+
+    package: CargoPackage
+    files: Files | None = None
+
+    def build(self, run: Run) -> Path:
+        completed = self._cmd(
+            "cargo",
+            "build",
+            "--locked",
+            "-p",
+            self.package.name,
+            "--message-format=json",
+            capture_output=True,
+        )
+        source = _executable_from_cargo_messages(completed.stdout, self.package.name)
+        destination = run.artifact(self, ".exe" if os.name == "nt" else "")
+        shutil.copyfile(source, destination)
+        os.chmod(destination, source.stat().st_mode)
+        return destination
+
+
+def _executable_from_cargo_messages(output: str, package: str) -> Path:
+    """Return the bin executable cargo reported for `package`."""
+    found: str | None = None
+    for line in output.splitlines():
+        if not line.startswith("{"):
+            continue
+        parsed = json.loads(line)
+        if not isinstance(parsed, dict):
+            continue
+        if parsed.get("reason") != "compiler-artifact":
+            continue
+        if not _is_package(parsed.get("package_id"), package):
+            continue
+        target = parsed.get("target")
+        if not isinstance(target, dict):
+            continue
+        kinds = target.get("kind")
+        if not isinstance(kinds, list) or "bin" not in kinds:
+            continue
+        executable = parsed.get("executable")
+        if not isinstance(executable, str) or not executable:
+            continue
+        if found is not None and executable != found:
+            raise RuntimeError(
+                f"cargo build --locked -p {package} produced multiple executables"
+            )
+        found = executable
+    if found is None:
+        raise RuntimeError(f"cargo build --locked -p {package} produced no executable")
+    return Path(found)
+
+
+def _is_package(package_id: object, package: str) -> bool:
+    """True for cargo's `#name@version` id and its `/name#version` id."""
+    if not isinstance(package_id, str):
+        return False
+    if f"#{package}@" in package_id:
+        return True
+    marker = f"/{package}#"
+    index = package_id.rfind(marker)
+    if index < 0:
+        return False
+    rest = package_id[index + len(marker) :]
+    return bool(rest) and rest[0].isdigit()

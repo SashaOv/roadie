@@ -7,10 +7,10 @@ from pathlib import Path
 from typing import Any
 
 import roadie
-from roadie.errors import RoadieError
-from roadie.inputs import Input, digest
-from roadie.root import project_root
-from roadie.step import Step
+from roadie.engine.errors import RoadieError
+from roadie.engine.inputs import Input, digest
+from roadie.engine.root import project_root
+from roadie.engine.step import Step
 
 
 # (spec) Step fingerprints
@@ -103,7 +103,7 @@ def _code_hash(step: Step[Any]) -> str:
         if isinstance(file, str) and file.endswith(".py"):
             paths.add(Path(file).resolve())
     package = Path(roadie.__file__).resolve().parent
-    paths.update(path.resolve() for path in package.glob("*.py"))
+    paths.update(path.resolve() for path in package.rglob("*.py"))
     hashed = hashlib.sha256()
     for path in sorted(paths, key=lambda item: item.as_posix()):
         hashed.update(path.as_posix().encode())

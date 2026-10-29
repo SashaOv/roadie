@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
-from roadie.errors import RoadieError
+from roadie.engine.errors import RoadieError
 
 _file_directory: ContextVar[Path | None] = ContextVar(
     "roadie_file_directory", default=None

@@ -19,8 +19,50 @@ bullet, except the input-enforcement design, which is moved whole.
   build output can still be an input.
 - Reuse unnamed steps: an inline or loop-built step takes a derived identity,
   its consumer's variable and the path to it (`copy.source`, `checks[2]`).
+- Test steps for pytest and cargo-nextest that read the runner's JUnit report
+  into `TestResults`.
+- A Windows CI job, then stop a Windows process tree (`taskkill /T`) and
+  replace the `SIGKILL` that Windows lacks.
 - Rename `--base_dir` to `--base-dir`, keeping `--base_dir` as a hidden alias
   for one release.
+
+## Gaps
+
+Code that departs from the spec or from general engineering practice.
+
+- Roadie's bookkeeping shares the step's attributes: it stores `name`,
+  `variable`, `serial`, `base_dir`, `build_dir`, `build_variables`,
+  `env_files` and `env_values` on the step and leaves them out of the
+  fingerprint and `--dry`. A step attribute with one of those names overwrites
+  Roadie's value and is not fingerprinted. The spec reserves no names. The
+  step hooks (`publish`, `report`, `serve`, `encode`, `matches`, `decode`,
+  `output_fingerprint`, `call_arguments`) and the class attributes
+  `reusable`, `recorded` and `deferred` share the same namespace: a dataclass
+  field named `report` hides the hook.
+- `Files` skips a directory it cannot read without failing, so the
+  directory's files silently drop out of the fingerprint.
+- Ctrl-C or SIGTERM during a build prints a Python traceback.
+- Without `git` installed, finding the project root prints a Python traceback
+  instead of a message.
+- `Cannot check whether …` is capitalized; every other message is not.
+
+## User manual
+
+Guidance taken out of the spec because it follows from the rules.
+
+- For a step to rerun when an environment variable changes, the build file
+  reads it and passes it as a plain attribute, as in
+  `Bundle(mode=os.environ.get("MODE", "dev"))`.
+- A rebuilt `File` whose content is unchanged leaves its consumers reusable.
+- A Python upgrade reruns every step: the code hash covers `abc` and `typing`.
+- An inline step, as in `Copy(Emitter())`, is never reused; bind it to a
+  variable.
+- A requested service keeps the terminal's standard input, so a dev server
+  can read keystrokes.
+- A failed `Tests` step records nothing, so failures are never replayed.
+- A step that is not reusable, such as a service, builds on every run, and
+  its consumers can still be reused.
+- A `Group` lets one result stand for several steps.
 
 ## Tests to add
 

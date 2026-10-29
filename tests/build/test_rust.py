@@ -1,12 +1,14 @@
-"""Cargo workspace metadata lives in Roadie."""
-
 import json
 import subprocess
 from pathlib import Path
 
 import pytest
+from support import FIXTURES, execute, isolate_repo
 
-from roadie import cargo
+from roadie.build import CargoPackage, RustBinary, Step
+from roadie.build import rust as cargo
+from roadie.engine.errors import StepFailed
+from roadie.engine.inputs import run_scope
 
 
 # (spec) Cargo workspace queries
@@ -176,7 +178,7 @@ def test_cargo_package_fingerprint_reads_declared_cargo_settings(
 
 
 # (spec) Cargo packages
-def test_cargo_metadata_and_rustc_run_once_per_snapshot(
+def test_cargo_metadata_and_rustc_run_once_per_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = tmp_path.resolve()
@@ -192,12 +194,19 @@ def test_cargo_metadata_and_rustc_run_once_per_snapshot(
 
     monkeypatch.setattr(cargo.subprocess, "run", spy)
     package = cargo.CargoPackage("core")
-    with cargo.cargo_snapshot():
+    with run_scope():
         package.fingerprint(root / "app")
         package.fingerprint(root / "core")
 
     assert calls.count("cargo") == 1
     assert calls.count("rustc") == 1
+
+    # The next run sees a fresh workspace and toolchain.
+    with run_scope():
+        package.fingerprint(root / "app")
+
+    assert calls.count("cargo") == 2
+    assert calls.count("rustc") == 2
 
 
 # (spec) Cargo packages
@@ -210,3 +219,98 @@ def test_cargo_package_in_a_subdirectory_finds_the_workspace_root(tmp_path: Path
     fingerprint = package.fingerprint(root / "app")
     assert package.fingerprint(root / "core") == fingerprint
     assert package.fingerprint(root) == fingerprint
+
+
+# (spec) Step kinds
+@pytest.mark.parametrize(
+    ("package", "fixture", "executable"),
+    [
+        (
+            "api_server",
+            "cargo-build-workspace.jsonl",
+            "/tmp/roadie-cargo-ws/target/debug/api-server",
+        ),
+        (
+            "sample",
+            "cargo-build-sample.jsonl",
+            "/tmp/roadie-cargo-sample/sample/target/debug/sample",
+        ),
+    ],
+)
+def test_rust_binary_picks_executable_from_captured_cargo_json(
+    package: str, fixture: str, executable: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: list[tuple[str, ...]] = []
+
+    def command(
+        self: Step[object], *args: str, **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        captured.append(args)
+        return subprocess.CompletedProcess(
+            args, 0, (FIXTURES / fixture).read_text(), ""
+        )
+
+    monkeypatch.setattr(Step, "_cmd", command)
+    monkeypatch.setattr(
+        "roadie.build.rust.CargoPackage.fingerprint",
+        lambda self, base_dir: f"package:{self.name}",
+    )
+    source = Path(executable)
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"binary")
+    source.chmod(0o755)
+    step = RustBinary(CargoPackage(package))
+    copied = execute([step])
+    assert copied != source
+    assert copied.read_bytes() == b"binary"
+    assert copied.stat().st_mode == source.stat().st_mode
+    assert captured == [
+        ("cargo", "build", "--locked", "-p", package, "--message-format=json")
+    ]
+
+
+# (spec) Step kinds
+def test_rust_binary_rejects_missing_executable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "roadie.build.rust.CargoPackage.fingerprint",
+        lambda self, base_dir: f"package:{self.name}",
+    )
+    monkeypatch.setattr(
+        Step, "_cmd", lambda *args, **kwargs: subprocess.CompletedProcess([], 0, "", "")
+    )
+    with pytest.raises(StepFailed, match="produced no executable"):
+        execute([RustBinary(CargoPackage("missing"))])
+
+
+# (spec) Step kinds
+# (spec) Reusing a step
+def test_rust_binary_is_rebuilt_when_its_recorded_copy_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    source = root / "compiler-output"
+    source.write_bytes(b"v1")
+    source.chmod(0o755)
+    message = (
+        '{"reason":"compiler-artifact","package_id":"path+file:///tmp/app#app@0.1.0",'
+        f'"target":{{"kind":["bin"]}},"executable":"{source}"}}\n'
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def command(self: Step[object], *args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, message, "")
+
+    monkeypatch.setattr(Step, "_cmd", command)
+    monkeypatch.setattr("roadie.build.rust.CargoPackage.fingerprint", lambda self, base_dir: "package:app")
+    step = RustBinary(CargoPackage("app"))
+    step.name = step.variable = "app"
+    first = execute([step])
+    assert first.read_bytes() == b"v1"
+    execute([step])
+    assert len(calls) == 1
+    first.write_bytes(b"tampered")
+    execute([step])
+    assert len(calls) == 2
+    assert first.read_bytes() == b"v1"

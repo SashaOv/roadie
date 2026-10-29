@@ -1,25 +1,12 @@
-"""Inputs a step fingerprints without building them."""
+"""The `Files` input: files and directories a step reads."""
 
 import hashlib
-import json
 import os
-from abc import ABC, abstractmethod
 from pathlib import Path
 
-from roadie.errors import RoadieError
-from roadie.root import project_root
-
-
-def digest(payload: object) -> str:
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode()).hexdigest()
-
-
-# (spec) Input fingerprints
-class Input(ABC):
-    @abstractmethod
-    def fingerprint(self, base_dir: Path) -> str:
-        """Hash of this input as seen from a step's base directory."""
+from roadie.engine.errors import RoadieError
+from roadie.engine.inputs import Input, digest
+from roadie.engine.root import project_root
 
 
 def _entry_key(path: Path, root: Path | None) -> str:

@@ -17,7 +17,7 @@ from typing import BinaryIO
 _COMMAND_NAME_WORDS = 3
 
 
-# (spec) Started processes
+# (spec) Step helpers
 @dataclass(frozen=True)
 class RunningProcess:
     process: subprocess.Popen[bytes]
@@ -47,6 +47,8 @@ class RunningProcess:
             raise
 
     def stop(self) -> None:
+        """Signal the process tree with SIGTERM, wait up to 10 seconds, then
+        send SIGKILL, and kill any descendant that outlives its parent."""
         stop_process_tree(self.process)
 
 

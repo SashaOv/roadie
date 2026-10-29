@@ -1,16 +1,14 @@
 """Run a result of a Roadie build file and the steps it depends on."""
 
 from collections.abc import Sequence
-from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
 from cyclopts import App, Parameter
 
-from roadie.graph import RoadieError, load
-from roadie.run import execute, reuse_markers
-from roadie.step import Step
-from roadie.steps import Group
+from roadie.engine.graph import RoadieError, load
+from roadie.engine.run import execute, reuse_markers
+from roadie.engine.step import Step
 
 app = App(help=__doc__, version_flags=())
 
@@ -57,22 +55,11 @@ def run(
         raise SystemExit(str(error)) from error
 
 
+# (spec) Dry run output
 def call(result: Step[Any]) -> str:
-    if isinstance(result, Group):
-        arguments = [argument(value) for value in result.steps]
-    else:
-        attributes = result.attributes()
-        keywords: set[str] = {item.name for item in fields(result) if item.kw_only} if is_dataclass(result) else set()
-        arguments = [
-            argument(value)
-            for key, value in attributes.items()
-            if key not in keywords and value is not None
-        ]
-        arguments.extend(
-            f"{key}={argument(value)}"
-            for key, value in attributes.items()
-            if key in keywords and value is not None
-        )
+    positional, named = result.call_arguments()
+    arguments = [argument(value) for value in positional]
+    arguments.extend(f"{key}={argument(value)}" for key, value in named.items())
     return f"{type(result).__name__}({', '.join(arguments)})"
 
 

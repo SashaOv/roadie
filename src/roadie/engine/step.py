@@ -1,4 +1,4 @@
-"""Declare steps and the commands they run."""
+"""Declare steps, the hooks Roadie calls on them, and the commands they run."""
 
 import itertools
 import os
@@ -6,17 +6,17 @@ import shlex
 import subprocess
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import fields, is_dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
 
-from roadie.config import base_directory, configured_env, loading_directory
-from roadie.errors import StepFailed
-from roadie.process import RunningProcess
-from roadie.testing import TestResults
+from roadie.engine.config import base_directory, configured_env, loading_directory
+from roadie.engine.errors import StepFailed
+from roadie.engine.inputs import digest
+from roadie.engine.process import RunningProcess
 
 if TYPE_CHECKING:
-    from roadie.run import Run
+    from roadie.engine.run import Run
 
 _serials = itertools.count()
 
@@ -25,6 +25,7 @@ _serials = itertools.count()
 class Step[T](ABC):
     reusable: ClassVar[bool] = True
     recorded: ClassVar[bool] = True
+    deferred: ClassVar[bool] = False
     serial: int
     base_dir: Path
     build_dir: Path | None
@@ -73,6 +74,7 @@ class Step[T](ABC):
             elif isinstance(value, tuple):
                 yield from (item for item in value if isinstance(item, Step))
 
+    # (spec) Step hooks
     @abstractmethod
     def build(self, run: "Run") -> T:
         """Build this step from its dependencies' values."""
@@ -80,7 +82,44 @@ class Step[T](ABC):
     def teardown(self, value: T) -> None:
         pass
 
-    # (spec) Commands
+    def publish(self, run: "Run", value: T) -> T:
+        """Return the value of a step that just built, after acting on it."""
+        return value
+
+    def report(self, value: T) -> None:
+        """Show a built or reused value; raise to fail the step."""
+
+    def serve(self, value: T) -> None:
+        """Keep the requested result in use before the run tears it down."""
+
+    def encode(self, value: T) -> object:
+        """Return the JSON value the step's record keeps."""
+        return value
+
+    def matches(self, recorded: object) -> bool:
+        """True when a recorded value can still be restored."""
+        return True
+
+    def decode(self, recorded: object) -> T:
+        return cast(T, recorded)
+
+    def output_fingerprint(self, fingerprint: str, value: T) -> str:
+        """Digest of what this step built, which its consumers' fingerprints include."""
+        return digest(value)
+
+    def call_arguments(self) -> tuple[list[object], dict[str, object]]:
+        """Positional and keyword arguments that `--dry` shows."""
+        attributes = self.attributes()
+        keywords: set[str] = {item.name for item in fields(self) if item.kw_only} if is_dataclass(self) else set()
+        positional = [
+            value for key, value in attributes.items() if key not in keywords and value is not None
+        ]
+        named = {
+            key: value for key, value in attributes.items() if key in keywords and value is not None
+        }
+        return positional, named
+
+    # (spec) Step helpers
     def _cmd(
         self,
         *args: str,
@@ -88,6 +127,16 @@ class Step[T](ABC):
         environment: Mapping[str, str] | None = None,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
+        """Print `+ <command>` and run the command in the step's base directory.
+
+        Its environment is the process environment, then `environment`, then
+        the step's environment files. It inherits standard input. Standard
+        output is shown, or returned when `capture_output` is set. Standard
+        error is captured and shown only when the command fails: unless
+        `check` is false, a non-zero exit fails the step with `<name> failed:
+        <command> exited with status <n>: <last 2000 characters of standard
+        error>`.
+        """
         print("+", shlex.join(args), flush=True)
         completed = subprocess.run(
             args,
@@ -111,7 +160,7 @@ class Step[T](ABC):
                 f"{reason}: {detail}" if detail else reason,
             )
 
-    # (spec) Started processes
+    # (spec) Step helpers
     def _start_cmd(
         self,
         *args: str,
@@ -120,6 +169,22 @@ class Step[T](ABC):
         timeout: float = 120,
         health_path: str | None = None,
     ) -> RunningProcess:
+        """Print `+ <command>`, start a server, and return it once it is ready.
+
+        The command runs in the step's base directory with the environment of
+        `_cmd`, inherits standard input, and starts in a new session (POSIX)
+        so its whole process tree can be signalled. The result holds the
+        process and the URL `http://127.0.0.1:<port>`; it is ready once the
+        port accepts connections, or, with `health_path`, once
+        `GET <url><health_path>` answers 200.
+
+        If the process exits first, the step fails with `<process> exited with
+        status <n> before becoming ready`; if `timeout` seconds pass, with
+        `<process> did not start listening on port <port> within <timeout>s`
+        (or `did not become ready at <url> within <timeout>s`). `<process>` is
+        the executable's file name and up to two following arguments that are
+        not options. In both cases the process tree is stopped.
+        """
         print("+", shlex.join(args), flush=True)
         return RunningProcess.start(
             args,
@@ -133,55 +198,3 @@ class Step[T](ABC):
     def _command_env(self, environment: Mapping[str, str] | None) -> dict[str, str]:
         # Process environment, then the step's settings, then env files.
         return {**os.environ, **(environment or {}), **self.env_values}
-
-
-class Binary(Step[Path]):
-    pass
-
-
-# (spec) File steps
-@dataclass(eq=False, kw_only=True)
-class File(Step[Path]):
-    output: str | Path | None = None
-
-class Deployment(Protocol):
-    @property
-    def process(self) -> subprocess.Popen[bytes]: ...
-
-    @property
-    def url(self) -> str: ...
-
-    def stop(self) -> None: ...
-
-
-# (spec) Services
-class Service(Step[Deployment]):
-    reusable: ClassVar[bool] = False
-
-    def teardown(self, value: Deployment) -> None:
-        value.stop()
-
-
-class HttpService(Service):
-    health_path: ClassVar[str] = "/"
-
-    def _start_cmd(
-        self,
-        *args: str,
-        port: int,
-        environment: Mapping[str, str] | None = None,
-        timeout: float = 120,
-        health_path: str | None = None,
-    ) -> RunningProcess:
-        return super()._start_cmd(
-            *args,
-            port=port,
-            environment=environment,
-            timeout=timeout,
-            health_path=self.health_path if health_path is None else health_path,
-        )
-
-
-# (spec) Tests
-class Tests(Step[TestResults]):
-    pass

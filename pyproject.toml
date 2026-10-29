@@ -27,3 +27,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/roadie"]
+
+[tool.pytest.ini_options]
+addopts = ["--import-mode=importlib"]
+pythonpath = ["tests"]
+testpaths = ["tests"]
+# pytest's default skips directories named `build`, which tests/build mirrors.
+norecursedirs = [".*", "*.egg", "__pycache__", "dist", "node_modules", "venv"]

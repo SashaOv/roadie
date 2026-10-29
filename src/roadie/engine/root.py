@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
-from roadie.errors import RoadieError
+from roadie.engine.errors import RoadieError
 
 _project_root: ContextVar[Path | None] = ContextVar("roadie_project_root", default=None)
 
@@ -31,6 +31,20 @@ def project_root() -> Path:
     if root is None:
         raise RoadieError("no project root: run steps through roadie's load and execute")
     return root
+
+
+def to_stored(path: Path) -> str:
+    """`path` relative to the project root when inside it, else absolute."""
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(project_root().resolve()).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
+def from_stored(stored: str) -> Path:
+    path = Path(stored)
+    return path if path.is_absolute() else project_root() / path
 
 
 @contextmanager

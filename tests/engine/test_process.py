@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from fixtures.http_service import HealthServer
 
-from roadie import process as processes
+from roadie.engine import process as processes
 
 
 def test_loopback_http_fixture_does_not_resolve_hostnames(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -36,7 +36,7 @@ def test_sigterm_takes_the_same_cleanup_path_as_ctrl_c() -> None:
     assert signal.getsignal(signal.SIGTERM) is previous
 
 
-# (spec) Started processes
+# (spec) Step helpers
 @pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX-only")
 def test_stopping_a_server_stops_its_tree_not_only_the_wrapper(tmp_path: Path) -> None:
     """`cargo run` and `pnpm dev` hold the port in a grandchild, so a stop that
@@ -85,7 +85,7 @@ def test_stopping_a_server_stops_its_tree_not_only_the_wrapper(tmp_path: Path) -
     pytest.fail(f"grandchild {grandchild} survived the stop")
 
 
-# (spec) Started processes
+# (spec) Step helpers
 def test_running_process_waits_for_port_and_stops() -> None:
     port = processes.available_port()
     server = processes.RunningProcess.start(
@@ -106,7 +106,7 @@ def test_running_process_waits_for_port_and_stops() -> None:
     assert not processes.port_is_busy(port)
 
 
-# (spec) Started processes
+# (spec) Step helpers
 @pytest.mark.parametrize("ending", ["exit", "timeout"])
 def test_running_process_cleans_up_failed_start(ending: str, monkeypatch: pytest.MonkeyPatch) -> None:
     started: list[subprocess.Popen[bytes]] = []
@@ -130,7 +130,7 @@ def test_running_process_cleans_up_failed_start(ending: str, monkeypatch: pytest
     assert started[0].poll() is not None
 
 
-# (spec) Started processes
+# (spec) Step helpers
 @pytest.mark.parametrize("ending", ["exit", "timeout"])
 @pytest.mark.parametrize(
     ("command", "name"),
@@ -178,11 +178,11 @@ def test_startup_errors_identify_the_command(
     assert str(error.value) == f"{name} {reason}"
 
 
-# (spec) Started processes
+# (spec) Step helpers
 def test_http_start_waits_until_the_health_path_returns_200() -> None:
     port = processes.available_port()
     server = processes.RunningProcess.start(
-        (sys.executable, str(Path(__file__).parent / "fixtures/http_service.py"), str(port)),
+        (sys.executable, str(Path(__file__).parents[1] / "fixtures/http_service.py"), str(port)),
         port=port,
         health_path="/health",
         timeout=5,
@@ -195,7 +195,7 @@ def test_http_start_waits_until_the_health_path_returns_200() -> None:
         server.stop()
 
 
-# (spec) Started processes
+# (spec) Step helpers
 @pytest.mark.parametrize("ending", ["exit", "timeout"])
 def test_http_start_fails_when_the_process_exits_or_never_returns_200(ending: str) -> None:
     port = processes.available_port()
@@ -221,7 +221,7 @@ def test_http_start_fails_when_the_process_exits_or_never_returns_200(ending: st
         )
 
 
-# (spec) Started processes
+# (spec) Step helpers
 def test_spawn_server_requires_a_directory() -> None:
     with pytest.raises(TypeError):
         processes.spawn_server((sys.executable, "-c", "pass"))
