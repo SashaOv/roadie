@@ -33,7 +33,7 @@ def test_file_output_is_published_and_equal_file_is_not_rewritten(previous: str 
     assert destination.read_text() == "new\n"
     output = capsys.readouterr().out
     if previous == "new\n":
-        assert output == ""
+        assert "updated" not in output
         assert destination.stat().st_mtime_ns == 1_000_000_000
     else:
         assert f"updated {destination}" in output

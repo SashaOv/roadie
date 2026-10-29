@@ -2,16 +2,16 @@
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 from cyclopts import App, Parameter
 
+from roadie.engine.display import format_step
 from roadie.engine.errors import RoadieError
 from roadie.engine.graph import load
 from roadie.engine.lock import clean_project
 from roadie.engine.root import find_project_root
 from roadie.engine.run import execute, reuse_markers
-from roadie.engine.step import Step
 
 app = App(help=__doc__, version_flags=())
 
@@ -56,34 +56,12 @@ def run(
         except RoadieError as error:
             raise SystemExit(str(error)) from error
         for step, reused in zip(steps, marks, strict=True):
-            line = f"{step.name} = {call(step)}" if step.name else call(step)
-            print(f"{line}  # {'reuse' if reused else 'run'}")
+            print(f"{format_step(step)}  # {'reuse' if reused else 'run'}")
         return
     try:
         execute(steps, root=graph.root, locked=locked, env=env or ())
     except RoadieError as error:
         raise SystemExit(str(error)) from error
-
-
-# (spec) Dry run output
-def call(result: Step[Any]) -> str:
-    positional, named = result.call_arguments()
-    arguments = [argument(value) for value in positional]
-    arguments.extend(f"{key}={argument(value)}" for key, value in named.items())
-    return f"{type(result).__name__}({', '.join(arguments)})"
-
-
-def argument(value: object) -> str:
-    if isinstance(value, Step):
-        return reference(value)
-    if isinstance(value, tuple):
-        items = ", ".join(argument(item) for item in value)
-        return f"({items}{',' if len(value) == 1 else ''})"
-    return repr(value)
-
-
-def reference(result: Step[Any]) -> str:
-    return result.name or call(result)
 
 
 def main() -> None:

@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from dotenv import dotenv_values
 
+from roadie.engine.display import announce
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.fingerprint import fingerprint
 from roadie.engine.inputs import run_scope
@@ -96,6 +97,7 @@ def _run_steps(
                             print(f"reused {step.name or type(step).__name__}", flush=True)
                         else:
                             _start_deferred(step, run, live, started)
+                            announce(step)
                             value = step.build(run)
                             if step.deferred:
                                 started.add(id(step))
@@ -161,6 +163,7 @@ def _start_deferred(
             continue
         _start_deferred(dependency, run, live, started)
         try:
+            announce(dependency)
             value = dependency.build(run)
         except (KeyboardInterrupt, StepFailed):
             raise

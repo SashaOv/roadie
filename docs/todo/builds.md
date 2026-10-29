@@ -80,7 +80,7 @@ at the author's request on 2026-10-29.
   descendants with `ps -A -o pid=,ppid=` where `/proc` is absent. Windows
   keeps its current behavior, marked as unverified until a Windows CI job
   exists (backlog).
-- **R8.9: Show each step as code when it builds.** Before a step builds,
+- [x] **R8.9: Show each step as code when it builds.** Before a step builds,
   Roadie prints `build <name> = <Class>(<arguments>)`, or
   `build <Class>(<arguments>)` for a step with no name, with the arguments
   `--dry` shows. A deferred step prints its line when it starts; a reused

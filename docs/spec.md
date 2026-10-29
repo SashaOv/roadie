@@ -258,6 +258,12 @@ record has the same fingerprint and the step's kind accepts the recorded
 value. It prints `reused <name>`, and the step's value is restored from the
 record.
 
+Before a step that keeps a record builds, Roadie prints
+`build <name> = <Class>(<arguments>)`, or `build <Class>(<arguments>)` when
+the step has no name, with the same arguments `--dry` shows. A deferred step
+prints that line when it starts. A reused step prints only `reused <name>`.
+A step that keeps no record, such as a group, prints no build line.
+
 ## Customization
 
 ### Dependencies and attributes
