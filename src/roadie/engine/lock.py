@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -41,6 +42,16 @@ class HeldLock:
 
 def lock_path(root: Path) -> Path:
     return root / "target" / "roadie" / "run.lock"
+
+
+# (spec) Command line
+def clean_project(root: Path) -> None:
+    """Take the run lock, delete `target/roadie/`, and return."""
+    held = acquire_run_lock(root)
+    try:
+        shutil.rmtree(root / "target" / "roadie")
+    finally:
+        held.release()
 
 
 # (spec) One run at a time

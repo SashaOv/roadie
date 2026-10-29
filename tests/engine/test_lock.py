@@ -175,3 +175,51 @@ def test_dry_run_takes_no_lock(tmp_path: Path, capsys: pytest.CaptureFixture[str
     cli.run(root, dry_run=True)
     assert "item = Note()  # run" in capsys.readouterr().out
     assert lock.is_file()
+
+
+# (spec) Command line
+def test_clean_deletes_roadie_state_without_building(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path.resolve()
+    (root / "build.py").write_text("raise SystemExit('loaded')\n")
+    state = root / "target" / "roadie"
+    state.mkdir(parents=True)
+    (state / "build.record.json").write_text("{}")
+    (state / "note.txt").write_text("artifact")
+    cli.run(root, clean=True, dry_run=True)
+    assert not state.exists()
+    assert capsys.readouterr().out == ""
+    cli.run(root, clean=True)
+    assert not state.exists()
+
+
+# (spec) Command line
+# (spec) One run at a time
+def test_clean_fails_while_another_run_holds_the_lock(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+    state = root / "target" / "roadie"
+    state.mkdir(parents=True)
+    (state / "note.txt").write_text("keep")
+    lock = state / "run.lock"
+    started = _stamp(datetime.now(UTC))
+    _plant(lock, os.getpid(), started)
+    with pytest.raises(
+        SystemExit,
+        match=(
+            f"another roadie run holds {lock} \\(pid {os.getpid()}, started {started}\\)"
+        ),
+    ):
+        cli.run(root, clean=True)
+    assert (state / "note.txt").read_text() == "keep"
+
+
+# (spec) Command line
+def test_clean_takes_over_a_stale_lock(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+    state = root / "target" / "roadie"
+    state.mkdir(parents=True)
+    (state / "note.txt").write_text("artifact")
+    _plant(state / "run.lock", _dead_pid(), _stamp(datetime.now(UTC)))
+    cli.run(root, clean=True)
+    assert not state.exists()

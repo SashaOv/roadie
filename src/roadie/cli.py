@@ -6,7 +6,10 @@ from typing import Annotated, Any
 
 from cyclopts import App, Parameter
 
-from roadie.engine.graph import RoadieError, load
+from roadie.engine.errors import RoadieError
+from roadie.engine.graph import load
+from roadie.engine.lock import clean_project
+from roadie.engine.root import find_project_root
 from roadie.engine.run import execute, reuse_markers
 from roadie.engine.step import Step
 
@@ -33,9 +36,16 @@ def run(
             help="Print the steps the result needs and run none",
         ),
     ] = False,
+    clean: Annotated[
+        bool,
+        Parameter(negative=False, help="Delete target/roadie and exit"),
+    ] = False,
 ) -> None:
     """Run `result` of `<directory>/build.py`, by default the last one defined."""
     try:
+        if clean:
+            clean_project(find_project_root(directory.resolve()))
+            return
         graph = load(directory, base_dir=base_dir)
         steps = graph.plan(result)
     except RoadieError as error:

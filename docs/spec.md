@@ -49,7 +49,7 @@ files steps build.
 ## Command line
 
 ```
-roadie [--dry-run | --dry] [--locked] [--base_dir DIR] [--env FILE]... [directory] [result]
+roadie [--dry-run | --dry] [--locked] [--clean] [--base_dir DIR] [--env FILE]... [directory] [result]
 ```
 
 `directory` (default `.`) holds the root build file. `result` names the
@@ -60,6 +60,10 @@ held). Naming a result the file does not define is an error.
 - `--base_dir DIR`: the base directory of every step whose build file's
   settings do not set one.
 - `--locked`: fail instead of changing a generated file that git tracks.
+- `--clean`: take the lock, delete `<root>/target/roadie/` (records, artifacts,
+  and the lock), and exit without building. It exits before a dry run. Another
+  run's lock fails it with the message in [One run at a time](#one-run-at-a-time),
+  and nothing is deleted.
 - `--env FILE`: an environment file for every step; may be repeated.
 - `--dry-run`, `--dry`: print the plan, marking the steps that will be reused,
   and build nothing. A step is marked when its dependencies are all marked

@@ -58,7 +58,7 @@ at the author's request on 2026-10-29.
   older than 24 hours, is stale and taken over. The lock is released before
   a requested result is served, so a running dev server does not block
   builds. `--dry` takes no lock.
-- **R8.4: Add `--clean`.** Takes the lock, deletes `target/roadie/`
+- [x] **R8.4: Add `--clean`.** Takes the lock, deletes `target/roadie/`
   (records, artifacts, lock) and exits.
 - **R8.5: Remove artifacts no record keeps, once a day.** After a
   successful run, while it still holds the lock, Roadie checks a timestamp
