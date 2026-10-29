@@ -73,7 +73,7 @@ at the author's request on 2026-10-29.
 - [x] **R8.7: Show `--dry` arguments without dataclass metadata.** Default
   `call_arguments` shows every attribute that is not `None` as `name=value`;
   `Group` keeps its members positional.
-- **R8.8: Separate platform-specific process code behind one API.**
+- [x] **R8.8: Separate platform-specific process code behind one API.**
   `engine/process.py` keeps `RunningProcess.start` and `stop`. The
   per-platform parts move into clearly named functions: process groups and
   descendant discovery on POSIX, signalling on Windows. macOS finds

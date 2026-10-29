@@ -290,6 +290,12 @@ its environment files: `_cmd` runs it to completion, and `_start_cmd` starts
 a server and returns a `RunningProcess` once it is ready. Their docstrings
 specify them.
 
+Stopping a server signals its process group and every descendant. On Linux
+the descendants come from `/proc`; on macOS, where `/proc` is absent, from
+`ps -A -o pid=,ppid=`. A `ps` that cannot be run leaves the group signal as
+the only one. Windows signals the process alone, which is unverified until
+the Windows CI job in the backlog.
+
 ### Step hooks
 
 A step writer subclasses `Step` or one of its subclasses, and
@@ -393,15 +399,3 @@ directory is kept, along with the lock and the timestamp; only its record
 and artifacts go. A directory under `_outside` is kept, because the sweep
 cannot recover the build file's path; unreferenced artifacts there are still
 deleted.
-
-## Open questions
-
-Non-normative. Each item is behavior found in the code that no design states.
-Answer *intended* and the item moves into its section as a rule, or *change*
-and it becomes an item in [todo/backlog.md](todo/backlog.md).
-
-- **Stopping a process tree depends on the platform.** On Linux Roadie
-  signals the process group and every descendant it finds in `/proc`; on
-  macOS, which has no `/proc`, only the group; on Windows the process alone,
-  without a new session, and `SIGKILL` does not exist there.
-  Code: `process.signal_server`, `process.stop_process_tree`.

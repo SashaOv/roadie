@@ -86,6 +86,75 @@ def test_stopping_a_server_stops_its_tree_not_only_the_wrapper(tmp_path: Path) -
 
 
 # (spec) Step helpers
+@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX-only")
+def test_stopping_reaches_a_descendant_outside_the_process_group(tmp_path: Path) -> None:
+    """A grandchild can leave the wrapper's process group; stopping still finds it."""
+    pid_file = tmp_path / "child.pid"
+    process = processes.spawn_server(
+        (
+            sys.executable,
+            "-c",
+            (
+                "import subprocess, sys, time\n"
+                "from pathlib import Path\n"
+                f"pid_file = Path({str(pid_file)!r})\n"
+                "child = subprocess.Popen(\n"
+                "    [sys.executable, '-c', 'import time; time.sleep(120)'],\n"
+                "    start_new_session=True,\n"
+                ")\n"
+                "pid_file.write_text(str(child.pid))\n"
+                "time.sleep(120)\n"
+            ),
+        ),
+        cwd=tmp_path,
+    )
+    child: int | None = None
+    try:
+        deadline = time.monotonic() + 10
+        while not pid_file.is_file() or not pid_file.read_text().strip():
+            if process.poll() is not None or time.monotonic() > deadline:
+                pytest.fail("child never reported its pid")
+            time.sleep(0.05)
+        child = int(pid_file.read_text().strip())
+        processes.stop_process_tree(process)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                os.kill(child, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.05)
+        pytest.fail(f"child {child} survived the stop")
+    finally:
+        if process.poll() is None:
+            process.kill()
+        if child is not None:
+            try:
+                os.kill(child, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+# (spec) Step helpers
+def test_ps_discovery_keeps_the_root_when_ps_cannot_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise OSError("no ps")
+
+    monkeypatch.setattr(processes.subprocess, "run", fail)
+    assert processes._ps_descendant_pids(os.getpid()) == (os.getpid(),)
+
+
+# (spec) Step helpers
+def test_ps_discovery_skips_lines_that_are_not_pids(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Completed:
+        returncode = 0
+        stdout = "nope\n"
+
+    monkeypatch.setattr(processes.subprocess, "run", lambda *_args, **_kwargs: Completed())
+    assert processes._ps_descendant_pids(4) == (4,)
+
+
+# (spec) Step helpers
 def test_running_process_waits_for_port_and_stops() -> None:
     port = processes.available_port()
     server = processes.RunningProcess.start(

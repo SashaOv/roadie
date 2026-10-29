@@ -162,11 +162,16 @@ def spawn_server(
 
 
 def _posix_descendant_pids(root_pid: int) -> tuple[int, ...]:
-    """Return root_pid and every descendant found via /proc ppid links."""
-    proc = Path("/proc")
-    if not proc.is_dir():
-        return (root_pid,)
+    """Return root_pid and every descendant, from `/proc` or `ps`."""
+    if Path("/proc").is_dir():
+        return _proc_descendant_pids(root_pid)
+    return _ps_descendant_pids(root_pid)
+
+
+def _proc_descendant_pids(root_pid: int) -> tuple[int, ...]:
+    """Descendants from `/proc/<pid>/stat` ppid links. Linux."""
     children: dict[int, list[int]] = {}
+    proc = Path("/proc")
     for entry in proc.iterdir():
         if not entry.name.isdigit():
             continue
@@ -186,6 +191,36 @@ def _posix_descendant_pids(root_pid: int) -> tuple[int, ...]:
         except ValueError:
             continue
         children.setdefault(ppid, []).append(pid)
+    return _collect_descendants(root_pid, children)
+
+
+def _ps_descendant_pids(root_pid: int) -> tuple[int, ...]:
+    """Descendants from `ps -A -o pid=,ppid=`. macOS, where `/proc` is absent."""
+    try:
+        completed = subprocess.run(
+            ["ps", "-A", "-o", "pid=,ppid="],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return (root_pid,)
+    if completed.returncode != 0:
+        return (root_pid,)
+    children: dict[int, list[int]] = {}
+    for line in completed.stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        try:
+            pid, ppid = int(parts[0]), int(parts[1])
+        except ValueError:
+            continue
+        children.setdefault(ppid, []).append(pid)
+    return _collect_descendants(root_pid, children)
+
+
+def _collect_descendants(root_pid: int, children: dict[int, list[int]]) -> tuple[int, ...]:
     found: list[int] = []
     stack = [root_pid]
     seen: set[int] = set()
@@ -200,18 +235,29 @@ def _posix_descendant_pids(root_pid: int) -> tuple[int, ...]:
 
 
 def signal_server(process: subprocess.Popen[bytes], sent: signal.Signals) -> None:
-    if os.name != "posix":
-        process.send_signal(sent)
+    if os.name == "nt":
+        _signal_windows_process(process, sent)
         return
-    # Snapshot the tree before any signal: once the wrapper dies, orphans are
-    # reparented and a later /proc walk from process.pid misses them.
+    _signal_posix_group(process, sent)
+
+
+def _signal_windows_process(process: subprocess.Popen[bytes], sent: signal.Signals) -> None:
+    """Signal the process alone. Unverified until a Windows CI job exists."""
+    process.send_signal(sent)
+
+
+def _signal_posix_group(process: subprocess.Popen[bytes], sent: signal.Signals) -> None:
+    """Signal the process group, then every descendant found before the signal.
+
+    Snapshot the tree first: once the wrapper dies, orphans are reparented and
+    a later walk from process.pid misses them. killpg alone misses a grandchild
+    that sits outside the wrapper's group.
+    """
     tree = _posix_descendant_pids(process.pid)
     try:
         os.killpg(os.getpgid(process.pid), sent)
     except (ProcessLookupError, PermissionError):
         process.send_signal(sent)
-    # killpg alone is not enough on some self-hosted Actions runners: a
-    # background grandchild can sit outside the wrapper's group.
     for pid in reversed(tree):
         try:
             os.kill(pid, sent)
@@ -239,11 +285,26 @@ def interrupt_on_terminate() -> Generator[None]:
 
 
 def stop_process_tree(process: subprocess.Popen[bytes]) -> None:
-    tree = (
-        _posix_descendant_pids(process.pid)
-        if os.name == "posix" and process.poll() is None
-        else (process.pid,)
-    )
+    if os.name == "nt":
+        _stop_windows_process(process)
+        return
+    _stop_posix_process_tree(process)
+
+
+def _stop_windows_process(process: subprocess.Popen[bytes]) -> None:
+    """Signal the process alone, with no new session. Unverified until a
+    Windows CI job exists; `SIGKILL` is not a Windows signal."""
+    if process.poll() is None:
+        _signal_windows_process(process, signal.SIGTERM)
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            _signal_windows_process(process, signal.SIGKILL)
+            process.wait()
+
+
+def _stop_posix_process_tree(process: subprocess.Popen[bytes]) -> None:
+    tree = _posix_descendant_pids(process.pid) if process.poll() is None else (process.pid,)
     if process.poll() is None:
         signal_server(process, signal.SIGTERM)
         try:
@@ -253,8 +314,6 @@ def stop_process_tree(process: subprocess.Popen[bytes]) -> None:
             process.wait()
     # The wrapper can exit while a background grandchild keeps running
     # (seen on self-hosted Actions runners with `sh -c 'sleep &'`).
-    if os.name != "posix":
-        return
     deadline = time.monotonic() + 2
     while time.monotonic() < deadline:
         alive = []
