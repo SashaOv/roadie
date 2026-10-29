@@ -70,7 +70,7 @@ at the author's request on 2026-10-29.
   code hash keys each source file by its module name instead of its
   absolute path. A `Path` attribute is fingerprinted relative to the project
   root in POSIX form when inside it.
-- **R8.7: Show `--dry` arguments without dataclass metadata.** Default
+- [x] **R8.7: Show `--dry` arguments without dataclass metadata.** Default
   `call_arguments` shows every attribute that is not `None` as `name=value`;
   `Group` keeps its members positional.
 - **R8.8: Separate platform-specific process code behind one API.**

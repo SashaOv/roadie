@@ -16,10 +16,10 @@ def test_dry_run_marks_reuse_and_run(tmp_path: Path, monkeypatch: pytest.MonkeyP
     cli.run(project)
     capsys.readouterr()
     cli.run(project, dry_run=True)
-    assert capsys.readouterr().out.splitlines() == ["api = Emitter('v1')  # reuse"]
+    assert capsys.readouterr().out.splitlines() == ["api = Emitter(text='v1')  # reuse"]
     write_build(project, EMITTER.replace("api = Emitter()", 'api = Emitter("v2")\n'))
     cli.run(project, dry_run=True)
-    assert capsys.readouterr().out.splitlines() == ["api = Emitter('v2')  # run"]
+    assert capsys.readouterr().out.splitlines() == ["api = Emitter(text='v2')  # run"]
 
 
 # (spec) Settings
@@ -68,7 +68,7 @@ combined = Combined((first, second))
 ''')
     assert plan_names(tmp_path) == ["first", "second", "combined"]
     run_cli(["--dry", str(tmp_path)])
-    assert capsys.readouterr().out.splitlines()[-1] == "combined = Combined((first, second))  # run"
+    assert capsys.readouterr().out.splitlines()[-1] == "combined = Combined(inputs=(first, second))  # run"
 
 
 # (spec) Dry run output
@@ -113,3 +113,20 @@ def test_dry_run_omits_attributes_whose_value_is_none(tmp_path: Path, capsys: py
     )
     run_cli(["--dry", str(tmp_path)])
     assert capsys.readouterr().out.splitlines()[-1] == "item = Setting()  # run"
+
+
+# (spec) Dry run output
+def test_dry_run_prints_attributes_of_a_plain_class_as_keywords(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_build(
+        tmp_path,
+        "class Plain(Step[None]):\n"
+        "    def __init__(self, label):\n"
+        "        self.label = label\n"
+        "    def build(self, run):\n"
+        "        return None\n"
+        "item = Plain('v')\n",
+    )
+    run_cli(["--dry", str(tmp_path)])
+    assert capsys.readouterr().out.splitlines()[-1] == "item = Plain(label='v')  # run"

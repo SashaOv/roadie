@@ -6,7 +6,6 @@ import shlex
 import subprocess
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
-from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -182,15 +181,8 @@ class Step[T](ABC):
 
     def call_arguments(self) -> tuple[list[object], dict[str, object]]:
         """Positional and keyword arguments that `--dry` shows."""
-        attributes = self.attributes()
-        keywords: set[str] = {item.name for item in fields(self) if item.kw_only} if is_dataclass(self) else set()
-        positional = [
-            value for key, value in attributes.items() if key not in keywords and value is not None
-        ]
-        named = {
-            key: value for key, value in attributes.items() if key in keywords and value is not None
-        }
-        return positional, named
+        named = {key: value for key, value in self.attributes().items() if value is not None}
+        return [], named
 
     # (spec) Step helpers
     def _cmd(

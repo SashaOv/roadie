@@ -308,8 +308,8 @@ overrides what its kind needs. Roadie calls:
 - `output_fingerprint(fingerprint, value)` for the step's output fingerprint;
   by default a digest of the value.
 - `call_arguments()` for the positional and keyword arguments `--dry` shows;
-  by default the attributes that are not `None`, with the keyword-only fields
-  of a dataclass as keywords.
+  by default every attribute that is not `None`, as `name=value`. A group
+  shows its members positionally.
 
 A step class sets these class attributes:
 
@@ -355,8 +355,9 @@ A step's fingerprint is a SHA-256 digest of:
 `--dry` prints one line per step in plan order:
 `<name> = <Class>(<arguments>)  # reuse` for a marked step, `# run` for any
 other, without `<name> = ` for a step with no name. `<arguments>` are the
-step's call arguments, positional ones first, keyword ones as `name=value`; a
-step argument is shown by its name, or as its own call when it has none.
+step's call arguments: by default every attribute that is not `None`, as
+`name=value`. A group shows its members positionally. A step argument is
+shown by its name, or as its own call when it has none.
 
 ### Records
 
@@ -399,11 +400,6 @@ Non-normative. Each item is behavior found in the code that no design states.
 Answer *intended* and the item moves into its section as a rule, or *change*
 and it becomes an item in [todo/backlog.md](todo/backlog.md).
 
-- **`--dry` reads dataclass fields.** The default `call_arguments` shows
-  keyword-only attributes as `name=value` only for fields of a dataclass; a
-  step class that is not a dataclass shows every attribute positionally. Must
-  a step class be a dataclass?
-  Code: `Step.call_arguments`.
 - **Stopping a process tree depends on the platform.** On Linux Roadie
   signals the process group and every descendant it finds in `/proc`; on
   macOS, which has no `/proc`, only the group; on Windows the process alone,
