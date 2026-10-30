@@ -31,7 +31,7 @@ def _repository(tmp_path: Path, version: str = "0.1.0") -> tuple[Path, Path]:
     tmp_path.mkdir(parents=True, exist_ok=True)
     bare = tmp_path / "remote.git"
     repo = tmp_path / "repo"
-    subprocess.run(["git", "init", "--bare", "-q", str(bare)], check=True)
+    subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(bare)], check=True)
     subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
     _git(repo, "config", "user.email", "release@example.com")
     _git(repo, "config", "user.name", "Release")
