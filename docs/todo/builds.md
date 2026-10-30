@@ -215,7 +215,7 @@ messages instead of a traceback or a silent skip.
   `uv.lock` beside it, which then joins the commit, because `uv version`
   otherwise creates or rewrites that lockfile. The docstrings specify the
   kind, as for every step kind.
-- [ ] **R9.8: Check Roadie with Roadie.** The repository root gets a
+- [x] **R9.8: Check Roadie with Roadie.** The repository root gets a
   `build.py`: ruff and mypy as `Check` steps and the suite as `Pytest`, each
   taking `Files("src", "tests", "pyproject.toml", "build.py")` and
   `PythonEnv()`; `release = Release(PyProject("pyproject.toml"),

@@ -1,6 +1,7 @@
 """Helpers shared by Roadie's tests."""
 
 import subprocess
+import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,19 +11,31 @@ import pytest
 from roadie import cli
 from roadie.build import File, Service, Step
 from roadie.engine.graph import load
-from roadie.engine.root import find_project_root
 from roadie.engine.run import Run
 from roadie.engine.run import execute as _execute
 
 FIXTURES = Path(__file__).parent / "fixtures"
 _forced_root: Path | None = None
+_sandbox_root: Path | None = None
 
 
 def execute(steps, **kwargs):
+    """Run `steps`.
+
+    Without `root`, records go to a sandbox outside this checkout. The suite
+    runs under `roadie`, which already holds the checkout's lock.
+    """
     root = kwargs.pop("root", None)
     if root is None:
-        root = _forced_root if _forced_root is not None else find_project_root(Path.cwd())
+        root = _forced_root if _forced_root is not None else _sandbox()
     return _execute(steps, root=root, **kwargs)
+
+
+def _sandbox() -> Path:
+    global _sandbox_root
+    if _sandbox_root is None:
+        _sandbox_root = Path(tempfile.mkdtemp(prefix="roadie-test-root-"))
+    return _sandbox_root
 
 
 def isolate_repo(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:

@@ -23,6 +23,4 @@ jobs:
       # The hosted images' preinstalled rustup and stable toolchain serve the
       # Cargo tests.
       - run: uv sync
-      - run: uv run ruff check
-      - run: uv run mypy src
-      - run: uv run pytest
+      - run: uv run roadie . checks
