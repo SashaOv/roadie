@@ -9,3 +9,7 @@ __pycache__/
 /dist/
 /target/
 uv.lock
+# Code Annotation plugin
+.annotations.json
+# Worktree directory
+/wt/
