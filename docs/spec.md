@@ -195,7 +195,7 @@ publish.
 Under `--locked`, a destination that git tracks and that would change is left
 unwritten: Roadie prints a unified diff and fails with `generated file is
 stale: <destination>`. An untracked destination is written. If git cannot say
-whether the destination is tracked, the step fails with `Cannot check
+whether the destination is tracked, the step fails with `cannot check
 whether <destination> is tracked: <git's message>`.
 
 ### Deferred steps

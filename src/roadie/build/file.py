@@ -76,6 +76,6 @@ def _tracked(path: Path) -> bool:
     )
     if completed.returncode != 0:
         raise RoadieError(
-            f"Cannot check whether {path} is tracked: {completed.stderr.strip()}"
+            f"cannot check whether {path} is tracked: {completed.stderr.strip()}"
         )
     return bool(completed.stdout)

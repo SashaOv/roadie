@@ -173,7 +173,7 @@ messages instead of a traceback or a silent skip.
   find the project root: <reason>` when git cannot be started. Both reach
   the command as a `RoadieError`, with and without `--clean`. The spec's
   Project root section gains both messages; the backlog gap goes.
-- [ ] **R9.2: Start `cannot check whether` in lower case.** The message, its
+- [x] **R9.2: Start `cannot check whether` in lower case.** The message, its
   test and the spec's Generated files section change together.
 - [ ] **R9.3: Make `Files` follow git.** In a git work tree, a directory
   stands for the files `git ls-files --cached --others --exclude-standard`

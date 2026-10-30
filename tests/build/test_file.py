@@ -120,8 +120,7 @@ def test_locked_file_output_reports_git_failure_and_keeps_destination(tmp_path: 
     destination.write_text("old\n")
     with pytest.raises(StepFailed) as error:
         execute([TextFile("new\n", output=destination)], locked=True)
-    assert str(destination) in str(error.value)
-    assert "Cannot check whether" in str(error.value)
+    assert f"cannot check whether {destination} is tracked:" in str(error.value)
     assert destination.read_text() == "old\n"
 
 
