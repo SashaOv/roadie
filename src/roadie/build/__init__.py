@@ -3,6 +3,7 @@ from roadie.build.check import Check
 from roadie.build.file import File
 from roadie.build.files import Files
 from roadie.build.group import Group
+from roadie.build.pytest_step import Pytest
 from roadie.build.python_env import PythonEnv
 from roadie.build.rust import (
     CargoPackage,
@@ -29,6 +30,7 @@ __all__ = [
     "Group",
     "HttpService",
     "Input",
+    "Pytest",
     "PythonEnv",
     "RoadieError",
     "Run",

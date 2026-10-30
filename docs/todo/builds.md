@@ -192,7 +192,7 @@ messages instead of a traceback or a silent skip.
   `Tests` step that runs `command` in its base directory. Exit status 0 is a
   pass; any other status is one failure named after the command, with the
   tail of its output. `inputs` are fingerprinted.
-- [ ] **R9.6: Add the `Pytest` step.** `Pytest(*args, inputs=(...))` runs
+- [x] **R9.6: Add the `Pytest` step.** `Pytest(*args, inputs=(...))` runs
   `<interpreter running Roadie> -m pytest --junitxml=<artifact> <args>`
   and reads each `testcase` with a `failure` or `error` element into a
   `TestFailure` named `<classname>::<name>`. Exit status 0 and 1 are read
