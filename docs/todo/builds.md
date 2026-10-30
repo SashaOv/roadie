@@ -127,7 +127,7 @@ the backlog item for a Windows CI job and `taskkill /T` covers it.
 
 ## R9: Roadie checks and releases itself with Roadie
 
-Status: planned, approved 2026-10-29
+Status: executed, pending author verification
 
 **Improvement.** Roadie's own repository has a `build.py`. `roadie . checks`
 runs ruff, mypy and pytest as reusable steps, so an unchanged tree reuses
@@ -221,20 +221,59 @@ messages instead of a traceback or a silent skip.
   `PythonEnv()`; `release = Release(PyProject("pyproject.toml"),
   requires=(...))` on the three checks; and `checks`, a `Group` of the
   three, constructed last, so a bare `roadie .` checks and never releases.
-  CI runs `uv run roadie . checks` in place of the three commands.
+  CI runs `uv run roadie . checks` in place of the three commands. Tests
+  that run steps without a project root record into a sandbox outside the
+  checkout, so the suite can run while `roadie` holds the checkout lock.
+
+**Acceptance run (2026-10-30).** Commit `9104d71dbb823fbdfd12146dda8f1e3d05416592`,
+tree `70d8791690afb2206bd869f52d7e34a9628120a9`. Host Darwin 25.6.0 arm64.
+uv 0.12.23 (Homebrew 2026-10-03 aarch64-apple-darwin). Python 3.13.13.
+`uv run roadie . --clean`, then `uv run roadie . checks` twice. The raw log
+is outside the repo at
+`/Users/sasha/.local/share/roadie/r9-acceptance.log`, sha256
+`049d3874b6d420f985f05a83553948f10b48e4f44b1589e16f6935f7ba0652cf`.
+
+The first `checks` exited 0 and built ruff, mypy and pytest. The second
+exited 0 and printed `reused` for ruff, mypy and pytest.
+
+**CI.** Not observed. The commits are local; `main` has not been pushed, so
+the workflow on `ubuntu-latest` and `macos-latest` has not run.
+
+**Review (2026-10-30).** `main` was then pushed. CI run 41021717841 on
+`9104d71` ran `uv run roadie . checks` and failed on both platforms:
+`test_release_fails_before_changing_anything: DID NOT RAISE StepFailed`. The
+test's bare remote took its default branch from git config. macOS's Command
+Line Tools set `init.defaultBranch=main` system-wide, and CI runners do not,
+so there the clone pushed to `master` and the release branch was never
+behind. Reproduced locally with `GIT_CONFIG_NOSYSTEM=1
+GIT_CONFIG_GLOBAL=/dev/null`. Fixed by creating the bare remote with
+`-b main`, in `6df0323 Create release test remotes on main.`, merged to
+`main` as `65d3505` (pull request #1). CI run 41090651785 on `65d3505`
+passed on `ubuntu-latest` and `macos-latest`, running `uv run roadie .
+checks`. That discharges the CI clause.
+
+The review also found `--dry release` marking `release` as `# reuse`, though
+Release never reuses: a kind with no record was marked whenever its
+dependencies were. A kind that disallows reuse is now always `# run`, with a
+test for both cases and the spec's `--dry` rule updated.
+
+With the `--dry` fix, uncommitted, on `65d3505`: the suite passes (193)
+with no system or global git config, `uv run roadie . checks` exits 0, and
+`--dry release` marks `release` as `# run`. CI is not yet observed on it.
 
 **Live step, approved at the checkpoint.** After R9.8 is pushed and CI is
 green, release Roadie 0.1.2 with `uv run roadie . release`. It pushes a
 commit and a tag to `main` and publishes to PyPI, which cannot be undone.
+Not run.
 
-**Author action required.**
+**Author action required at completion.**
 
-- Before execution: delete the untracked nested checkout `roadie/` at the
-  repository root. `ruff check`, which R9.8 runs as a step, lints it and
-  fails on its import order.
-- At completion: run, or authorize the executor to run, the live release
-  above, and confirm PyPI lists 0.1.2. This discharges the live clause of the
-  acceptance check.
+- ~~Push `main` and confirm CI on `ubuntu-latest` and `macos-latest` runs
+  `uv run roadie . checks` and passes.~~ Done: run 41090651785 on `65d3505`.
+- Then run, or authorize the executor to run, `uv run roadie . release` on
+  that clean, pushed `main` (pyproject still says 0.1.1), and confirm PyPI
+  lists 0.1.2. That discharges the live clause. The nested checkout
+  `roadie/` was already absent before execution.
 
 ## Backlog
 
