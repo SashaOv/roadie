@@ -7,7 +7,7 @@ from support import FIXTURES, execute, isolate_repo
 
 from roadie.build import CargoPackage, RustBinary, Step
 from roadie.build import rust as cargo
-from roadie.engine.errors import StepFailed
+from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.inputs import run_scope
 
 
@@ -149,6 +149,33 @@ def test_cargo_package_fingerprint_follows_its_dependency_closure(tmp_path: Path
     lock = root / "Cargo.lock"
     lock.write_text(lock.read_text() + "# marker\n" if lock.exists() else "# marker\n")
     assert core.fingerprint(root) != ignored_base
+
+
+# (spec) Cargo packages
+# (spec) Files input
+def test_cargo_package_reports_an_unreadable_directory(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+    _cargo_workspace(root)
+    hidden = root / "core" / "secret"
+    hidden.mkdir()
+    (hidden / "note.rs").write_text("// hidden\n")
+    hidden.chmod(0)
+    try:
+        with pytest.raises(RoadieError) as error:
+            cargo.CargoPackage("core").fingerprint(root)
+        completed = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "--", "core"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        warning = next(
+            line for line in completed.stderr.splitlines() if line.startswith("warning:")
+        )
+        assert str(error.value) == f"cannot read {root / 'core'}: {warning}"
+    finally:
+        hidden.chmod(0o755)
 
 
 # (spec) Cargo packages

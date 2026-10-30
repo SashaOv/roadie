@@ -175,7 +175,7 @@ messages instead of a traceback or a silent skip.
   Project root section gains both messages; the backlog gap goes.
 - [x] **R9.2: Start `cannot check whether` in lower case.** The message, its
   test and the spec's Generated files section change together.
-- [ ] **R9.3: Make `Files` follow git.** In a git work tree, a directory
+- [x] **R9.3: Make `Files` follow git.** In a git work tree, a directory
   stands for the files `git ls-files --cached --others --exclude-standard`
   lists under it; a file named explicitly counts even when ignored. Outside
   a work tree, a directory stands for every file under it, as today. A

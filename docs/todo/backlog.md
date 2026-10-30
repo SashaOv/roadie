@@ -39,9 +39,6 @@ Code that departs from the spec or from general engineering practice.
   `output_fingerprint`, `call_arguments`) and the class attributes
   `reusable`, `recorded` and `deferred` share the same namespace: a dataclass
   field named `report` hides the hook.
-- `Files` skips a directory it cannot read without failing, so the
-  directory's files silently drop out of the fingerprint.
-
 ## User manual
 
 Guidance taken out of the spec because it follows from the rules.

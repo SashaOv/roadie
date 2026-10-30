@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from roadie.build.binary import Binary
-from roadie.build.files import Files
+from roadie.build.files import Files, listed_files
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import Input, digest, run_state
 
@@ -154,18 +154,6 @@ def _closure(packages: Sequence[RustPackage], name: str) -> tuple[RustPackage, .
     return tuple(package for package in packages if package.name in selected)
 
 
-def _git_files(root: Path, paths: Sequence[str]) -> list[str]:
-    if not paths:
-        return []
-    result = subprocess.run(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *paths],
-        cwd=root,
-        check=True,
-        capture_output=True,
-    )
-    return [item for item in result.stdout.decode().split("\0") if item]
-
-
 def _content(root: Path, relative: str) -> str:
     path = root / relative
     if not path.is_file():
@@ -182,7 +170,11 @@ class CargoPackage(Input):
         snapshot = _snapshot(base_dir)
         root = snapshot.workspace.root
         packages = _closure(snapshot.workspace.packages, self.name)
-        listed = set(_git_files(root, [package.root.as_posix() for package in packages]))
+        listed: set[str] = set()
+        workspace = root.resolve()
+        for package in packages:
+            for path in listed_files(root / package.root):
+                listed.add(path.relative_to(workspace).as_posix())
         for name in _ROOT_FILES:
             if (root / name).exists():
                 listed.add(name)

@@ -139,12 +139,17 @@ roadie's load and execute`.
 ### Files input
 
 `Files(*paths)` names files and directories, relative to the step's base
-directory. A directory stands for every file under it, recursively,
-git-ignored files included. Symbolic links are followed, and a directory
-reached by several links counts once; empty directories do not count. The fingerprint covers each file's path, relative
-to the project root when inside it, and the SHA-256 of its content; a path
-that does not exist counts as missing, so creating it changes the
-fingerprint.
+directory. In a git work tree, a directory stands for the files
+`git ls-files --cached --others --exclude-standard` lists under it. Outside
+a work tree, a directory stands for every file under it, recursively:
+symbolic links are followed, a directory reached by several links counts
+once, and empty directories do not count. A file named explicitly counts
+even when it is ignored. A directory that cannot be read fails with
+`cannot read <path>: <reason>`; under git, `<reason>` is the warning
+`git ls-files` prints, because git skips an unreadable directory and exits
+0. The fingerprint covers each file's path, relative to the project root
+when inside it, and the SHA-256 of its content. A path that does not exist
+counts as missing, so creating it changes the fingerprint.
 
 ### Cargo packages
 
@@ -156,7 +161,8 @@ step's base directory with `cargo metadata`. Its fingerprint covers:
   `CARGO_PROFILE_*` and `CARGO_BUILD_*` variables of the process environment;
 - the content of every file git lists, tracked or untracked and not ignored,
   under the package and under the workspace packages it depends on, directly
-  or indirectly;
+  or indirectly, using the same listing as a `Files` directory; an
+  unreadable directory fails with `cannot read <path>: <reason>`;
 - the content of the workspace's `Cargo.toml`, `Cargo.lock`,
   `rust-toolchain.toml` and `.cargo/config.toml`, where they exist.
 
