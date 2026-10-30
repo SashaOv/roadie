@@ -1,6 +1,6 @@
 [project]
 name = "roadie"
-version = "0.1.1"
+version = "0.1.2"
 description = "Wire up multi-language, incremental builds in a few lines of Python."
 readme = "README.md"
 license = "MIT"
