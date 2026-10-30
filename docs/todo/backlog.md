@@ -8,19 +8,19 @@ bullet, except the input-enforcement design, which is moved whole.
 - `AuthorTask`: a `Tests` step that waits for the author to run checks and
   report the results.
 - `AuthorApproval`: an author task that continues the run or cancels it.
+- Release process can take Rust and JS manifests as sources
+- `Release` takes a custom commit message, once steps take parameters.
 - Enforce declared inputs (the design below).
 - Hash step classes defined in a build file, so editing one reruns its steps;
   today only classes in imported modules are hashed.
 - A project-root override (`config(root=...)`) for a project whose root is not
   its git top level.
 - `Env(*names)` input: the values of the named process environment variables.
-- `Files` follows git: a directory expands to the files git lists, skipping
-  ignored ones; a path named explicitly counts even when ignored, so an ignored
-  build output can still be an input.
+- Add the ability to specify step parameters on the command line  
 - Reuse unnamed steps: an inline or loop-built step takes a derived identity,
   its consumer's variable and the path to it (`copy.source`, `checks[2]`).
-- Test steps for pytest and cargo-nextest that read the runner's JUnit report
-  into `TestResults`.
+- A cargo-nextest test step that reads the runner's JUnit report into
+  `TestResults`.
 - A Windows CI job, then stop a Windows process tree (`taskkill /T`) and
   replace the `SIGKILL` that Windows lacks.
 - Rename `--base_dir` to `--base-dir`, keeping `--base_dir` as a hidden alias
@@ -41,7 +41,6 @@ Code that departs from the spec or from general engineering practice.
   field named `report` hides the hook.
 - `Files` skips a directory it cannot read without failing, so the
   directory's files silently drop out of the fingerprint.
-- Ctrl-C or SIGTERM during a build prints a Python traceback.
 - Without `git` installed, finding the project root prints a Python traceback
   instead of a message.
 - `Cannot check whether …` is capitalized; every other message is not.
@@ -82,7 +81,6 @@ Guidance taken out of the spec because it follows from the rules.
   id.
 - `Toolchain` input: the pinned toolchain file and the compiler version it
   resolves to.
-- `PythonEnv` input: the Python lockfile and the interpreter version.
 - `NodeEnv` input: the `package.json` files, the pnpm lockfile and the Node
   version.
 - `Host(label)` input: the class of machine a step needs.
