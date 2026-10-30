@@ -6,12 +6,11 @@ from typing import Annotated
 
 from cyclopts import App, Parameter
 
-from roadie.engine.display import format_step
 from roadie.engine.errors import RoadieError
 from roadie.engine.graph import load
 from roadie.engine.lock import clean_project
 from roadie.engine.root import find_project_root
-from roadie.engine.run import execute, reuse_markers
+from roadie.engine.run import execute
 
 app = App(help=__doc__, version_flags=())
 
@@ -33,7 +32,7 @@ def run(
         Parameter(
             name=["--dry-run", "--dry"],
             negative=False,
-            help="Print the steps the result needs and run none",
+            help="Print how a run would report each step, and build nothing",
         ),
     ] = False,
     clean: Annotated[
@@ -50,16 +49,8 @@ def run(
         steps = graph.plan(result)
     except RoadieError as error:
         raise SystemExit(str(error)) from error
-    if dry_run:
-        try:
-            marks = reuse_markers(steps, root=graph.root, env=env or ())
-        except RoadieError as error:
-            raise SystemExit(str(error)) from error
-        for step, reused in zip(steps, marks, strict=True):
-            print(f"{format_step(step)}  # {'reuse' if reused else 'run'}")
-        return
     try:
-        execute(steps, root=graph.root, locked=locked, env=env or ())
+        execute(steps, root=graph.root, locked=locked, env=env or (), dry=dry_run)
     except RoadieError as error:
         raise SystemExit(str(error)) from error
 

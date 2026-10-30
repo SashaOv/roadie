@@ -92,11 +92,14 @@ define is an error.
   run's lock fails it with the message in [One run at a time](#one-run-at-a-time),
   and nothing is deleted.
 - `--env FILE`: an environment file for every step; may be repeated.
-- `--dry-run`, `--dry`: print the plan, marking the steps that will be reused,
-  and build nothing. A step is marked when its kind allows reuse, its
-  dependencies are all marked and, if its kind keeps a record, its record
-  matches. It takes no lock; see
-  [One run at a time](#one-run-at-a-time).
+- `--dry-run`, `--dry`: walk the plan through the same loop as a run:
+  environment files, fingerprints, record matching, and deferred steps. It
+  marks each step the way that run reports it: `# reuse` where the run
+  prints `reused <name>`, `# not started` where it prints `not started
+  <name>`, and `# run` otherwise. Where the run would build a step or start
+  a deferred one, the dry run keeps a placeholder output fingerprint
+  instead. It takes no lock, writes no records, and does not publish, serve,
+  sweep, or tear down. See [One run at a time](#one-run-at-a-time).
 
 There is no version option. `roadie --help` prints usage.
 

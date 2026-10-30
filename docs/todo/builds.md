@@ -331,7 +331,7 @@ not start is marked `# run`.
   a stub, writes `checks = default_step(Group(ruff, mypy, pytest))` and then
   `release = Release(PyProject("pyproject.toml"), requires=checks)`. This
   builds on the author's uncommitted `build.py`.
-- [ ] **R10.4: Make `--dry` the run itself.** `--dry` goes through the run's
+- [x] **R10.4: Make `--dry` the run itself.** `--dry` goes through the run's
   own loop: loading, environment files, fingerprints, record matching,
   deferred steps. Where a run would build a step or start a deferred one, a
   dry run marks it `# run` and gives it a placeholder output fingerprint

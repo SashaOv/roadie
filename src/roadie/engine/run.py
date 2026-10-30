@@ -7,7 +7,7 @@ from typing import Any, cast
 
 from dotenv import dotenv_values
 
-from roadie.engine.display import announce
+from roadie.engine.display import announce, format_step
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.fingerprint import fingerprint
 from roadie.engine.inputs import run_scope
@@ -52,8 +52,11 @@ def execute(
     root: Path,
     locked: bool = False,
     env: Sequence[Path] = (),
+    dry: bool = False,
 ) -> object:
     with use_project_root(root):
+        if dry:
+            return _run_steps(steps, locked=locked, env=env, dry=True)
         held = acquire_run_lock(root)
         try:
             return _run_steps(steps, locked=locked, env=env, run_lock=held)
@@ -67,6 +70,7 @@ def _run_steps(
     locked: bool = False,
     env: Sequence[Path] = (),
     run_lock: HeldLock | None = None,
+    dry: bool = False,
 ) -> object:
     _apply_env(steps, env)
     run = Run(locked=locked)
@@ -80,6 +84,7 @@ def _run_steps(
     result: object = None
     outputs: dict[int, str] = {}
     started: set[int] = set()
+    marks: dict[int, str] = {}
     with run_scope(), interrupt_on_terminate():
         try:
             for index, step in enumerate(steps):
@@ -89,48 +94,61 @@ def _run_steps(
                         # A deferred step's output fingerprint is its step
                         # fingerprint, so a consumer can be reused without it.
                         outputs[id(step)] = step_fingerprint
+                        if dry:
+                            marks[id(step)] = "not started"
                     else:
                         record = _matching(step, step_fingerprint)
-                        if record is not None:
+                        if record is not None and dry:
+                            run.reused.add(id(step))
+                            marks[id(step)] = "reuse"
+                            outputs[id(step)] = str(record["output"])
+                        elif record is not None:
                             value = step.decode(record["value"])
                             run.reused.add(id(step))
                             print(f"reused {step.name or type(step).__name__}", flush=True)
+                            result, output = _kept(
+                                step, run, live, value, built=False,
+                                step_fingerprint=step_fingerprint, requested=requested, run_lock=run_lock,
+                            )
+                            outputs[id(step)] = output
+                        elif dry and _reuses_without_record(step, run):
+                            run.reused.add(id(step))
+                            marks[id(step)] = "reuse"
+                            outputs[id(step)] = step_fingerprint
+                        elif dry:
+                            _dry_start_deferred(step, marks)
+                            marks[id(step)] = "run"
+                            outputs[id(step)] = "dry"
                         else:
                             _start_deferred(step, run, live, started)
                             announce(step)
                             value = step.build(run)
                             if step.deferred:
                                 started.add(id(step))
-                        run._values[id(step)] = value
-                        live.append(step)
-                        if record is None:
-                            value = step.publish(run, value)
-                            run._values[id(step)] = value
-                        step.report(value)
-                        output = _output_fingerprint(step, value, step_fingerprint)
-                        _remember(step, step_fingerprint, output, value)
-                        outputs[id(step)] = output
-                        result = value
-                        if id(step) == requested:
-                            # A served result, such as a dev server, outlives
-                            # the run and must not keep the lock.
-                            if run_lock is not None:
-                                sweep_stale_state(project_root())
-                                run_lock.release()
-                            step.serve(value)
+                            result, output = _kept(
+                                step, run, live, value, built=True,
+                                step_fingerprint=step_fingerprint, requested=requested, run_lock=run_lock,
+                            )
+                            outputs[id(step)] = output
                 except (KeyboardInterrupt, StepFailed):
                     raise
                 except BaseException as error:
                     raise StepFailed(step.name or type(step).__name__, _reason(error)) from error
-                expired = [item for item in live if last_use[id(item)] == index]
-                _teardown(run, live, expired)
-            for step in steps:
-                if step.deferred and id(step) != requested and id(step) not in started:
-                    name = step.name or type(step).__name__
-                    print(f"not started {name}: no step that takes it runs", flush=True)
+                if not dry:
+                    expired = [item for item in live if last_use[id(item)] == index]
+                    _teardown(run, live, expired)
+            if dry:
+                for step in steps:
+                    print(f"{format_step(step)}  # {marks[id(step)]}", flush=True)
+            else:
+                for step in steps:
+                    if step.deferred and id(step) != requested and id(step) not in started:
+                        name = step.name or type(step).__name__
+                        print(f"not started {name}: no step that takes it runs", flush=True)
             return result
         finally:
-            _teardown(run, live, list(live))
+            if not dry:
+                _teardown(run, live, list(live))
 
 
 # (spec) Deferred steps
@@ -151,6 +169,51 @@ def _hold_deferred_dependencies(
     for step in steps:
         if step.deferred and id(step) != requested:
             extend(step, last_use[id(step)], set())
+
+
+def _reuses_without_record(step: Step[Any], run: Run) -> bool:
+    """True when a run would print `reused` for a step that keeps no record."""
+    if type(step).recorded or not type(step).reusable:
+        return False
+    return all(id(item) in run.reused for item in step.dependencies())
+
+
+def _dry_start_deferred(step: Step[Any], marks: dict[int, str]) -> None:
+    """Mark the deferred steps `step` would start, without building them."""
+    for dependency in step.dependencies():
+        if not dependency.deferred or marks.get(id(dependency)) == "run":
+            continue
+        _dry_start_deferred(dependency, marks)
+        marks[id(dependency)] = "run"
+
+
+def _kept(
+    step: Step[Any],
+    run: Run,
+    live: list[Step[Any]],
+    value: object,
+    *,
+    built: bool,
+    step_fingerprint: str,
+    requested: int | None,
+    run_lock: HeldLock | None,
+) -> tuple[object, str]:
+    run._values[id(step)] = value
+    live.append(step)
+    if built:
+        value = step.publish(run, value)
+        run._values[id(step)] = value
+    step.report(value)
+    output = _output_fingerprint(step, value, step_fingerprint)
+    _remember(step, step_fingerprint, output, value)
+    if id(step) == requested:
+        # A served result, such as a dev server, outlives the run and must not
+        # keep the lock.
+        if run_lock is not None:
+            sweep_stale_state(project_root())
+            run_lock.release()
+        step.serve(value)
+    return value, output
 
 
 # (spec) Deferred steps
@@ -201,39 +264,6 @@ def _resolve_env_path(path: Path) -> Path:
     if path.is_absolute():
         return path
     return (Path.cwd() / path).resolve()
-
-
-def reuse_markers(
-    steps: Sequence[Step[Any]], *, root: Path, env: Sequence[Path] = ()
-) -> list[bool]:
-    """True when `--dry` can promise the step will not run."""
-    with use_project_root(root):
-        return _reuse_markers(steps, env=env)
-
-
-def _reuse_markers(steps: Sequence[Step[Any]], *, env: Sequence[Path] = ()) -> list[bool]:
-    _apply_env(steps, env)
-    marks: dict[int, bool] = {}
-    outputs: dict[int, str] = {}
-    ordered: list[bool] = []
-    with run_scope():
-        for step in steps:
-            step_fingerprint = fingerprint(step, outputs=outputs)
-            dependencies_reused = all(marks.get(id(item), False) for item in step.dependencies())
-            record = _matching(step, step_fingerprint) if dependencies_reused else None
-            if type(step).recorded:
-                mark = record is not None
-            else:
-                mark = dependencies_reused and type(step).reusable
-            marks[id(step)] = mark
-            ordered.append(mark)
-            if not type(step).recorded:
-                outputs[id(step)] = step_fingerprint
-            elif record is not None:
-                outputs[id(step)] = str(record["output"])
-            else:
-                outputs[id(step)] = "pending"
-    return ordered
 
 
 def _reusable(step: Step[Any]) -> bool:

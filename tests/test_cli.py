@@ -158,16 +158,16 @@ def test_cli_passes_locked_and_prints_keyword_output(tmp_path: Path, monkeypatch
         "        return self.output\n"
         "api = Note(output='api.yaml')\n",
     )
+    run_cli(["--dry", str(tmp_path)])
+    assert capsys.readouterr().out.splitlines()[-1] == "api = Note(output='api.yaml')  # run"
     observed: list[tuple[bool, object]] = []
     monkeypatch.setattr(
         cli,
         "execute",
-        lambda steps, *, root, locked, env=(): observed.append((locked, env)),
+        lambda steps, *, root, locked, env=(), dry=False: observed.append((locked, env)),
     )
     run_cli(["--locked", str(tmp_path)])
     assert observed == [(True, ())]
-    run_cli(["--dry", str(tmp_path)])
-    assert capsys.readouterr().out.splitlines()[-1] == "api = Note(output='api.yaml')  # run"
 
 
 # (spec) Dry run output
@@ -204,3 +204,65 @@ def test_dry_run_prints_attributes_of_a_plain_class_as_keywords(
     )
     run_cli(["--dry", str(tmp_path)])
     assert capsys.readouterr().out.splitlines()[-1] == "item = Plain(label='v')  # run"
+
+
+# (spec) Dry run output
+# (spec) Deferred steps
+def test_dry_run_marks_a_deferred_step_not_started_unless_a_consumer_runs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_build(
+        tmp_path,
+        "from pathlib import Path\n"
+        "class Up:\n"
+        "    def stop(self):\n"
+        "        Path(__file__).with_name('stopped.txt').write_text('stopped')\n"
+        "class Server(Service):\n"
+        "    def build(self, run):\n"
+        "        (self.base_dir / 'server.txt').write_text('up')\n"
+        "        return Up()\n"
+        "class Job(Step[str]):\n"
+        "    def __init__(self, server, label='a'):\n"
+        "        self.server = server\n"
+        "        self.label = label\n"
+        "    def build(self, run):\n"
+        "        return self.label\n"
+        "server = Server()\n"
+        "job = Job(server)\n",
+    )
+    cli.run(tmp_path)
+    capsys.readouterr()
+    (tmp_path / "server.txt").unlink()
+    (tmp_path / "stopped.txt").unlink()
+    cli.run(tmp_path, dry_run=True)
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[-2].endswith("# not started")
+    assert lines[-1].endswith("# reuse")
+    assert not (tmp_path / "server.txt").exists()
+    assert not (tmp_path / "stopped.txt").exists()
+
+    write_build(
+        tmp_path,
+        "from pathlib import Path\n"
+        "class Up:\n"
+        "    def stop(self):\n"
+        "        Path(__file__).with_name('stopped.txt').write_text('stopped')\n"
+        "class Server(Service):\n"
+        "    def build(self, run):\n"
+        "        (self.base_dir / 'server.txt').write_text('up')\n"
+        "        return Up()\n"
+        "class Job(Step[str]):\n"
+        "    def __init__(self, server, label='b'):\n"
+        "        self.server = server\n"
+        "        self.label = label\n"
+        "    def build(self, run):\n"
+        "        return self.label\n"
+        "server = Server()\n"
+        "job = Job(server)\n",
+    )
+    cli.run(tmp_path, dry_run=True)
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[-2].endswith("# run")
+    assert lines[-1].endswith("# run")
+    assert not (tmp_path / "server.txt").exists()
+    assert not (tmp_path / "stopped.txt").exists()
