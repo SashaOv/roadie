@@ -326,7 +326,7 @@ not start is marked `# run`.
   attributes must not change after construction: they are fingerprinted. An
   element of the wrong kind fails with `<Class> <parameter> takes <kind>:
   got <type>`.
-- [ ] **R10.3: Type-check Roadie's `build.py`.** The mypy step runs
+- [x] **R10.3: Type-check Roadie's `build.py`.** The mypy step runs
   `mypy src build.py`. `build.py` imports `default_step` instead of defining
   a stub, writes `checks = default_step(Group(ruff, mypy, pytest))` and then
   `release = Release(PyProject("pyproject.toml"), requires=checks)`. This
