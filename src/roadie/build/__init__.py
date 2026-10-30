@@ -5,6 +5,7 @@ from roadie.build.files import Files
 from roadie.build.group import Group
 from roadie.build.pytest_step import Pytest
 from roadie.build.python_env import PythonEnv
+from roadie.build.release import PyProject, Release
 from roadie.build.rust import (
     CargoPackage,
     RustBinary,
@@ -30,8 +31,10 @@ __all__ = [
     "Group",
     "HttpService",
     "Input",
+    "PyProject",
     "Pytest",
     "PythonEnv",
+    "Release",
     "RoadieError",
     "Run",
     "RustBinary",

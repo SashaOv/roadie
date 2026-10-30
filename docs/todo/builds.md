@@ -199,7 +199,7 @@ messages instead of a traceback or a silent skip.
   from the report; any other status (usage error, no tests collected) fails
   the step with the status and the tail of standard error. The pytest half
   of the backlog's test-steps item goes; cargo-nextest stays.
-- [ ] **R9.7: Add the `Release` step and the `PyProject` version source.**
+- [x] **R9.7: Add the `Release` step and the `PyProject` version source.**
   `Release(primary, *secondary, requires=(...))` never reuses and keeps no
   record. It fails, before changing anything, with `cannot release: <reason>`
   when the work tree has uncommitted changes, the branch has no upstream, or
