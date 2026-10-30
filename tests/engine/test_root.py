@@ -8,7 +8,6 @@ from roadie.engine.graph import load
 from roadie.engine.root import project_root
 
 
-# (spec) Project root
 def test_project_root_outside_load_and_execute_is_an_error() -> None:
     with pytest.raises(
         RoadieError,

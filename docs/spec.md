@@ -14,12 +14,16 @@ Roadie is a build tool. It wires up multi-language, incremental builds in a few 
 
 ## Concepts
 
+### Steps and values
+
 A **step** is a unit of work. **Building** a step produces its **value**;
 **tearing it down** releases or cleans up the value, if the value is temporary (as in running server or temporary directory). A step's **attributes** are what it
 builds from: other steps, its **dependencies**, which build before it;
 **inputs**, such as files, which the step reads but Roadie does not build;
 and plain values. Each step has a **base directory**, the directory it runs
 programs in and resolves its paths from.
+
+### Kinds of step
 
 Roadie provides these kinds of step: a **file step** builds a file; a file
 that belongs in the source tree, such as committed generated code, is a
@@ -28,23 +32,38 @@ builds an executable; a **service** starts a process that runs until the step
 is torn down; a **test step** builds test results; a **group** stands for
 several steps. **Step writers** add kinds of step and input in Python.
 
+### Build files and settings
+
 A **build file**, `<directory>/build.py`, is a Python file that constructs steps and
 binds them to module variables that can be accessed by name. A
 build file can include other build files. Its **settings** set the base
 directory and the **environment files**, files of environment variables for the
 programs a step runs, of the steps it constructs.
 
+### Fingerprints and records
+
 A step's **fingerprint** is a digest of everything its build reads,
 including its inputs, its plain values, and each dependency's **output
 fingerprint**, a digest of what that dependency built. A step's build reads nothing else, except the process environment and the tools it runs. A build file's **record** keeps, for each of its steps, the fingerprint and value of its last success. A step whose result is recorded can be reused instead of building, if fingerprints match. This is the core of **incremental builds**.
+
+### Plans and runs
 
 The **plan** of a result is the result and the steps it depends on, directly
 or indirectly. A **run** goes through a plan in order, building or reusing
 each step, and tears each step down after the last step that takes it. The
 `roadie` command loads the **root build file** and runs the plan of one of
 its results.
-The **project root** of a run holds the records and the **artifacts**, the
-files steps build.
+
+### Project root
+
+The **project root** of a run is where Roadie keeps its state: the records,
+the **artifacts** (the files steps build) and the run lock, under
+`target/roadie/`. Paths inside it are fingerprinted relative to it, so a
+moved checkout keeps its records. It is the git top level of the root build
+file's directory, or that directory when it is not in a git work tree, so
+every build file in a repository shares one state. When git cannot be
+started, the run fails with `cannot run git to find the project root:
+<reason>`.
 
 ## Command line
 
@@ -52,7 +71,8 @@ files steps build.
 roadie [--dry-run | --dry] [--locked] [--clean] [--base_dir DIR] [--env FILE]... [directory] [result]
 ```
 
-`directory` (default `.`) holds the root build file. `result` names the
+`directory` (default `.`) holds the root build file; a directory that does
+not exist fails with `directory does not exist: <path>`. `result` names the
 result to run; without it, `roadie` runs the result constructed last. (Note: that is
 not the last name assigned: reassigning a name does not move the step it
 held). Naming a result the file does not define is an error.
@@ -124,16 +144,6 @@ path is relative to the working directory.
 
 A file that does not exist fails the run with `environment file does not
 exist: <path>` before any step builds, also under `--dry`.
-
-### Project root
-
-The project root of a run is the git top level of the root build file's
-directory, or that directory when it is not in a git work tree. A directory
-that does not exist fails with `directory does not exist: <path>`. When git
-cannot be started, finding the root fails with `cannot run git to find the
-project root: <reason>`. `load` and `execute` set the project root; code that
-asks for it outside them fails with `no project root: run steps through
-roadie's load and execute`.
 
 ## Inputs
 
