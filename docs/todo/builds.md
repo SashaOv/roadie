@@ -339,7 +339,7 @@ not start is marked `# run`.
   nothing, and tears nothing down. It prints the marks as the checkpoint
   decision says. `reuse_markers` goes, and the spec's `--dry` rule is
   restated from the run's.
-- [ ] **R10.5: Run the suite without the machine's git config.** A session
+- [x] **R10.5: Run the suite without the machine's git config.** A session
   fixture sets `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL` to an empty
   file, so a test cannot pass only because of a system default such as
   macOS's `init.defaultBranch=main`, as happened in R9.
