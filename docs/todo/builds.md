@@ -279,7 +279,7 @@ changed) and pushed it with the tag `v0.1.2`. CI and the Release workflow on
 
 ## R10: Build files say what they mean, and `--dry` is the run itself
 
-Status: planned, awaiting author checkpoint
+Status: planned, approved 2026-10-30
 
 **Improvement.** A build file names its default result with
 `default_step(...)`, so `release` can be written last and a bare `roadie .`
@@ -308,7 +308,7 @@ not start is marked `# run`.
 
 ### Patches
 
-- [ ] **R10.1: Mark the default result with `default_step`.**
+- [x] **R10.1: Mark the default result with `default_step`.**
   `default_step(step)` returns `step` and makes it the result `roadie` runs
   when no result is named; without a mark, the result constructed last runs,
   as today. Only the root build file's mark counts; an included file's mark

@@ -1,10 +1,11 @@
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from support import plan_names, write_build
 
-from roadie.build import CargoPackage, RoadieError, Step
+from roadie.build import CargoPackage, Group, RoadieError, Step, default_step
 from roadie.engine.graph import Graph, load
 from roadie.engine.run import Run
 
@@ -34,6 +35,57 @@ def test_default_result_is_the_last_step_called_not_the_last_variable(
 
     assert graph.result().package == CargoPackage("second")
     assert plan_names(tmp_path, "api") == [None, "api"]
+
+
+# (spec) Command line
+def test_default_step_is_the_result_when_none_is_named(tmp_path: Path) -> None:
+    write_build(
+        tmp_path / "module",
+        "api = default_step(Group())\nlater = Group(api)\n",
+    )
+    write_build(
+        tmp_path,
+        'module = include("module")\n'
+        "checks = default_step(Group(module.api))\n"
+        "release = Group(checks)\n",
+    )
+
+    assert plan_names(tmp_path) == ["module:api", "checks"]
+    assert plan_names(tmp_path, "release") == ["module:api", "checks", "release"]
+    assert plan_names(tmp_path / "module") == ["api"]
+
+
+# (spec) Command line
+def test_marking_two_default_results_names_both(tmp_path: Path) -> None:
+    write_build(tmp_path, "a = default_step(Group())\nb = default_step(Group())\n")
+    path = (tmp_path / "build.py").resolve()
+
+    with pytest.raises(
+        RoadieError,
+        match=re.escape(f"{path} marks more than one default result: a, b"),
+    ):
+        load(tmp_path)
+
+
+# (spec) Command line
+def test_an_unbound_default_result_fails(tmp_path: Path) -> None:
+    write_build(tmp_path, "other = Group()\ndefault_step(Group())\n")
+    path = (tmp_path / "build.py").resolve()
+
+    with pytest.raises(
+        RoadieError,
+        match=re.escape(f"{path}: the default result is not bound to a variable"),
+    ):
+        load(tmp_path)
+
+
+# (spec) Command line
+def test_default_step_outside_a_build_file_fails() -> None:
+    with pytest.raises(
+        RoadieError,
+        match=r"default_step\(\) works only in a build.py that Roadie loads",
+    ):
+        default_step(Group())
 
 
 # (spec) Including build files

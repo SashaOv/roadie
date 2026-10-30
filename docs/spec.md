@@ -73,9 +73,16 @@ roadie [--dry-run | --dry] [--locked] [--clean] [--base_dir DIR] [--env FILE]...
 
 `directory` (default `.`) holds the root build file; a directory that does
 not exist fails with `directory does not exist: <path>`. `result` names the
-result to run; without it, `roadie` runs the result constructed last. (Note: that is
-not the last name assigned: reassigning a name does not move the step it
-held). Naming a result the file does not define is an error.
+result to run. `default_step(step)` returns `step` and marks it as that
+result; only the root build file's mark counts, and an included file's mark
+is ignored. Marking two results fails with `<path> marks more than one
+default result: <a>, <b>`. Marking a step that no variable of the file holds
+fails with `<path>: the default result is not bound to a variable`. Calling
+it outside a loading build file fails with `default_step() works only in a
+build.py that Roadie loads`. Without a mark, `roadie` runs the result
+constructed last. (Note: that is not the last name assigned: reassigning a
+name does not move the step it held). Naming a result the file does not
+define is an error.
 
 - `--base_dir DIR`: the base directory of every step whose build file's
   settings do not set one.

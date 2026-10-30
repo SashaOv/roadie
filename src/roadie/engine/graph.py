@@ -27,10 +27,13 @@ class Graph:
     path: Path
     results: Mapping[str, Step[Any]]
     root: Path
+    default: Step[Any] | None = None
 
-    # (spec) Results
+    # (spec) Command line
     def result(self, name: str | None = None) -> Step[Any]:
         if name is None:
+            if self.default is not None:
+                return self.default
             return max(self.results.values(), key=lambda result: result.serial)
         if name not in self.results:
             known = ", ".join(self.results)
@@ -70,6 +73,7 @@ class _Session:
     base_dir: Path | None = None
     graphs: dict[Path, Graph] = field(default_factory=dict)
     loading: list[Path] = field(default_factory=list)
+    marks: dict[Path, list[Step[Any]]] = field(default_factory=dict)
 
 
 _session: ContextVar[_Session | None] = ContextVar("roadie_session", default=None)
@@ -89,6 +93,16 @@ def load(directory: Path, *, base_dir: Path | None = None) -> Graph:
             return _load(session, session.root)
     finally:
         _session.reset(token)
+
+
+# (spec) Command line
+def default_step(step: Step[Any]) -> Step[Any]:
+    """Return `step` and mark it as the result run when no result is named."""
+    session = _session.get()
+    if session is None:
+        raise RoadieError("default_step() works only in a build.py that Roadie loads")
+    session.marks.setdefault(session.loading[-1], []).append(step)
+    return step
 
 
 # (spec) Including build files
@@ -119,6 +133,7 @@ def _load(session: _Session, directory: Path) -> Graph:
     results = {
         name: value for name, value in namespace.items() if isinstance(value, Step)
     }
+    default = _marked_default(session, directory, path, results)
     if not results:
         raise RoadieError(f"{path} defines no results")
 
@@ -131,7 +146,7 @@ def _load(session: _Session, directory: Path) -> Graph:
             result.build_variables = names
         if result.name is None:
             result.name = f"{prefix}{name}"
-    graph = Graph(path=path, results=results, root=session.project)
+    graph = Graph(path=path, results=results, root=session.project, default=default)
     session.graphs[directory] = graph
     return graph
 
@@ -143,6 +158,28 @@ def _loading(session: _Session, directory: Path) -> Iterator[None]:
         yield
     finally:
         session.loading.pop()
+
+
+def _marked_default(
+    session: _Session,
+    directory: Path,
+    path: Path,
+    results: Mapping[str, Step[Any]],
+) -> Step[Any] | None:
+    marked = session.marks.get(directory, [])
+    if not marked:
+        return None
+    bound: list[tuple[str, Step[Any]]] = []
+    for step in marked:
+        name = next((item for item, value in results.items() if value is step), None)
+        if name is None:
+            raise RoadieError(f"{path}: the default result is not bound to a variable")
+        if all(item is not step for _, item in bound):
+            bound.append((name, step))
+    if len(bound) > 1:
+        names = ", ".join(name for name, _ in bound)
+        raise RoadieError(f"{path} marks more than one default result: {names}")
+    return bound[0][1]
 
 
 def _prefix(root: Path, directory: Path) -> str:
