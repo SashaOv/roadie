@@ -1,4 +1,5 @@
 from roadie.build.binary import Binary
+from roadie.build.check import Check
 from roadie.build.file import File
 from roadie.build.files import Files
 from roadie.build.group import Group
@@ -21,6 +22,7 @@ from roadie.engine.step import Step
 __all__ = [
     "Binary",
     "CargoPackage",
+    "Check",
     "Deployment",
     "File",
     "Files",

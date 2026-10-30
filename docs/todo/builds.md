@@ -188,7 +188,7 @@ messages instead of a traceback or a silent skip.
   every distribution installed in its environment, so upgrading mypy reruns
   the checks that take it. It replaces the backlog's `PythonEnv` item, which
   assumed a tracked lockfile.
-- [ ] **R9.5: Add the `Check` step.** `Check(*command, inputs=(...))` is a
+- [x] **R9.5: Add the `Check` step.** `Check(*command, inputs=(...))` is a
   `Tests` step that runs `command` in its base directory. Exit status 0 is a
   pass; any other status is one failure named after the command, with the
   tail of its output. `inputs` are fingerprinted.
