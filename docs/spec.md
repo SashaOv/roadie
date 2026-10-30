@@ -66,8 +66,9 @@ held). Naming a result the file does not define is an error.
   and nothing is deleted.
 - `--env FILE`: an environment file for every step; may be repeated.
 - `--dry-run`, `--dry`: print the plan, marking the steps that will be reused,
-  and build nothing. A step is marked when its dependencies are all marked
-  and, if its kind keeps a record, its record matches. It takes no lock; see
+  and build nothing. A step is marked when its kind allows reuse, its
+  dependencies are all marked and, if its kind keeps a record, its record
+  matches. It takes no lock; see
   [One run at a time](#one-run-at-a-time).
 
 There is no version option. `roadie --help` prints usage.

@@ -64,6 +64,38 @@ def test_dry_run_marks_reuse_and_run(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert capsys.readouterr().out.splitlines() == ["api = Emitter(text='v2')  # run"]
 
 
+# (spec) Command line
+@pytest.mark.parametrize(
+    ("kind", "marker"),
+    [("reusable = True", "# reuse"), ("reusable = False", "# run")],
+)
+def test_dry_run_marks_a_step_without_a_record_by_whether_it_reuses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    kind: str,
+    marker: str,
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    write_build(
+        root,
+        EMITTER
+        + "\nclass After(Step[str]):\n"
+        + "    recorded = False\n"
+        + f"    {kind}\n"
+        + "    def __init__(self, source):\n"
+        + "        self.source = source\n"
+        + "    def build(self, run):\n"
+        + "        return 'done'\n"
+        + "\nafter = After(api)\n",
+    )
+    cli.run(root)
+    capsys.readouterr()
+    cli.run(root, dry_run=True)
+    assert capsys.readouterr().out.splitlines()[-1] == f"after = After(source=api)  {marker}"
+
+
 # (spec) Settings
 # (spec) Command line
 def test_cli_base_dir_applies_to_included_steps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

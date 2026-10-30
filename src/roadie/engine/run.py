@@ -221,7 +221,10 @@ def _reuse_markers(steps: Sequence[Step[Any]], *, env: Sequence[Path] = ()) -> l
             step_fingerprint = fingerprint(step, outputs=outputs)
             dependencies_reused = all(marks.get(id(item), False) for item in step.dependencies())
             record = _matching(step, step_fingerprint) if dependencies_reused else None
-            mark = dependencies_reused if not type(step).recorded else record is not None
+            if type(step).recorded:
+                mark = record is not None
+            else:
+                mark = dependencies_reused and type(step).reusable
             marks[id(step)] = mark
             ordered.append(mark)
             if not type(step).recorded:
