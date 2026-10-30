@@ -133,13 +133,14 @@ after the call, in the build file that makes it:
   default a step's base directory is its build file's directory, or the
   directory given to `--base_dir`; `config` overrides both for the steps
   after the call.
-- `env`: a list of environment files, relative to the build file's directory.
+- `env`: one environment file, or several, relative to the build file's
+  directory.
 
 Settings do not leak to other build files, and are released after the file
 loads. An unknown setting fails with `unknown config settings: <names>; known
 settings: base_dir, env`; a `base_dir` that is not a path fails with `base_dir
-must be a directory path`, and an `env` that is not a list of paths with `env
-must be a list of environment files`. `config` outside a loading build file
+must be a directory path`, and an `env` value of the wrong kind fails with
+`config env takes paths: got <type>`. `config` outside a loading build file
 fails with `config() works only in a build.py that Roadie loads`.
 
 ### Environment files

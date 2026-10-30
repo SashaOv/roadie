@@ -5,11 +5,13 @@ import os
 import re
 import subprocess
 import tomllib
+from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import Input
+from roadie.engine.many import one_or_many
 from roadie.engine.step import Step
 
 if TYPE_CHECKING:
@@ -236,7 +238,9 @@ class Release(Step[str]):
     The version is written to every source that differs. When any file
     changed, those files are committed as `v<X.Y.Z> release`. The step then
     tags `v<X.Y.Z>`, pushes the branch and the tag atomically to the upstream,
-    and prints `released v<X.Y.Z>`.
+    and prints `released v<X.Y.Z>`. `requires` is one step or any iterable of
+    them, stored as a tuple. A value of the wrong kind fails with `Release
+    requires takes steps: got <type>`.
     """
 
     reusable: ClassVar[bool] = False
@@ -246,11 +250,13 @@ class Release(Step[str]):
         self,
         primary: PyProject,
         *secondary: PyProject,
-        requires: tuple[Step[object], ...] = (),
+        requires: Step[Any] | Iterable[Step[Any]] = (),
     ) -> None:
         self.primary = primary
         self.secondary = secondary
-        self.requires = requires
+        self.requires = one_or_many(
+            requires, Step, owner="Release", parameter="requires", takes="steps"
+        )
 
     def call_arguments(self) -> tuple[list[object], dict[str, object]]:
         named: dict[str, object] = {}

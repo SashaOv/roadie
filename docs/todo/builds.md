@@ -318,7 +318,7 @@ not start is marked `# run`.
   calling it outside a loading build file fails with `default_step() works
   only in a build.py that Roadie loads`. `roadie.build` exports it, and the
   spec's Command line section names it.
-- [ ] **R10.2: Take one value or many wherever a step takes several.**
+- [x] **R10.2: Take one value or many wherever a step takes several.**
   `Release(requires=...)`, `Check(inputs=...)`, `Pytest(inputs=...)` and
   `config(env=...)` accept a single step, input or path, or any iterable of
   them, typed with `Step[Any]` so a `tuple[Check, Check, Pytest]` or a `Group`

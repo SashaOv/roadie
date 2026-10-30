@@ -1,12 +1,13 @@
 """Scope build-file settings to the file currently being loaded."""
 
 import os
-from collections.abc import Generator, Sequence
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
 from roadie.engine.errors import RoadieError
+from roadie.engine.many import one_or_many
 
 _file_directory: ContextVar[Path | None] = ContextVar(
     "roadie_file_directory", default=None
@@ -47,18 +48,14 @@ def config(**settings: object) -> None:
             raise RoadieError("base_dir must be a directory path")
         _base_directory.set((directory / os.fspath(value)).resolve())
     if "env" in settings:
-        _env_files.set(_env_paths(directory, settings["env"]))
-
-
-def _env_paths(directory: Path, value: object) -> tuple[Path, ...]:
-    if isinstance(value, (str, bytes, Path)) or not isinstance(value, Sequence):
-        raise RoadieError("env must be a list of environment files")
-    paths: list[Path] = []
-    for item in value:
-        if not isinstance(item, (str, os.PathLike)):
-            raise RoadieError("env must be a list of environment files")
-        paths.append((directory / os.fspath(item)).resolve())
-    return tuple(paths)
+        paths: tuple[str | os.PathLike[str], ...] = one_or_many(
+            settings["env"],
+            (str, os.PathLike),
+            owner="config",
+            parameter="env",
+            takes="paths",
+        )
+        _env_files.set(tuple((directory / os.fspath(item)).resolve() for item in paths))
 
 
 @contextmanager

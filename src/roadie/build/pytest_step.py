@@ -1,6 +1,7 @@
 """A test step that runs pytest and reads its JUnit report."""
 
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 from xml.etree import ElementTree
@@ -8,6 +9,7 @@ from xml.etree import ElementTree
 from roadie.build.tests import TestFailure, TestResults, Tests
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import Input
+from roadie.engine.many import one_or_many
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -44,13 +46,15 @@ class Pytest(Tests):
     `<classname>::<name>`; the message is that element's `message`. Exit
     status 0 and 1 are read from the report. Any other status fails the step
     with `pytest exited with status <n>: <last 2000 characters of standard
-    error>`, or without the colon when standard error is empty. `inputs` are
-    fingerprinted. Recording and reuse are those of a test step.
+    error>`, or without the colon when standard error is empty. `inputs` is
+    one input or any iterable of them, stored as a tuple and fingerprinted. A
+    value of the wrong kind fails with `Pytest inputs takes inputs: got
+    <type>`. Recording and reuse are those of a test step.
     """
 
-    def __init__(self, *args: str, inputs: tuple[Input, ...] = ()) -> None:
+    def __init__(self, *args: str, inputs: Input | Iterable[Input] = ()) -> None:
         self.args = args
-        self.inputs = inputs
+        self.inputs = one_or_many(inputs, Input, owner="Pytest", parameter="inputs", takes="inputs")
 
     def build(self, run: "Run") -> TestResults:
         report = run.artifact(self, ".xml")
