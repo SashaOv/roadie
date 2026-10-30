@@ -167,7 +167,7 @@ messages instead of a traceback or a silent skip.
 
 ### Patches
 
-- [ ] **R9.1: Fail with a message when the project root cannot be found.**
+- [x] **R9.1: Fail with a message when the project root cannot be found.**
   `find_project_root` fails with `directory does not exist: <path>` when the
   root build file's directory does not exist, and with `cannot run git to
   find the project root: <reason>` when git cannot be started. Both reach

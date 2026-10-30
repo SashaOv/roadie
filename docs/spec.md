@@ -127,9 +127,12 @@ exist: <path>` before any step builds, also under `--dry`.
 ### Project root
 
 The project root of a run is the git top level of the root build file's
-directory, or that directory when it is not in a git work tree. `load` and
-`execute` set the project root; code that asks for it outside them fails with
-`no project root: run steps through roadie's load and execute`.
+directory, or that directory when it is not in a git work tree. A directory
+that does not exist fails with `directory does not exist: <path>`. When git
+cannot be started, finding the root fails with `cannot run git to find the
+project root: <reason>`. `load` and `execute` set the project root; code that
+asks for it outside them fails with `no project root: run steps through
+roadie's load and execute`.
 
 ## Inputs
 

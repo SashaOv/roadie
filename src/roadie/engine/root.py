@@ -14,13 +14,18 @@ _project_root: ContextVar[Path | None] = ContextVar("roadie_project_root", defau
 # (spec) Project root
 def find_project_root(directory: Path) -> Path:
     """Git top level of `directory`, or `directory` when it is not a work tree."""
-    completed = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        cwd=directory,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    if not directory.exists():
+        raise RoadieError(f"directory does not exist: {directory}")
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=directory,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as error:
+        raise RoadieError(f"cannot run git to find the project root: {error}") from error
     if completed.returncode != 0:
         return directory.resolve()
     return Path(completed.stdout.strip()).resolve()

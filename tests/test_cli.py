@@ -1,9 +1,51 @@
+import subprocess
 from pathlib import Path
 
 import pytest
 from support import EMITTER, isolate_repo, plan_names, run_cli, write_build
 
 from roadie import cli
+
+
+def _git_start_failure(directory: Path) -> str:
+    try:
+        subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=directory,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as error:
+        return str(error)
+    raise AssertionError("git started")
+
+
+# (spec) Project root
+# (spec) Command line
+def test_missing_directory_and_missing_git_are_messages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    missing = (tmp_path / "absent").resolve()
+    message = f"directory does not exist: {missing}"
+    with pytest.raises(SystemExit) as missing_run:
+        cli.run(missing)
+    assert str(missing_run.value) == message
+    with pytest.raises(SystemExit) as missing_clean:
+        cli.run(missing, clean=True)
+    assert str(missing_clean.value) == message
+
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+    (tmp_path / "bin").mkdir()
+    git_message = f"cannot run git to find the project root: {_git_start_failure(project)}"
+    with pytest.raises(SystemExit) as git_run:
+        cli.run(project)
+    assert str(git_run.value) == git_message
+    with pytest.raises(SystemExit) as git_clean:
+        cli.run(project, clean=True)
+    assert str(git_clean.value) == git_message
 
 
 # (spec) Dry run output

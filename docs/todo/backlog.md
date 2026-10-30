@@ -41,8 +41,6 @@ Code that departs from the spec or from general engineering practice.
   field named `report` hides the hook.
 - `Files` skips a directory it cannot read without failing, so the
   directory's files silently drop out of the fingerprint.
-- Without `git` installed, finding the project root prints a Python traceback
-  instead of a message.
 - `Cannot check whether …` is capitalized; every other message is not.
 
 ## User manual
