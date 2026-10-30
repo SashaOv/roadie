@@ -127,7 +127,7 @@ the backlog item for a Windows CI job and `taskkill /T` covers it.
 
 ## R9: Roadie checks and releases itself with Roadie
 
-Status: executed, pending author verification
+Status: implemented 2026-10-30 (commits R9.*)
 
 **Improvement.** Roadie's own repository has a `build.py`. `roadie . checks`
 runs ruff, mypy and pytest as reusable steps, so an unchanged tree reuses
@@ -264,16 +264,88 @@ with no system or global git config, `uv run roadie . checks` exits 0, and
 **Live step, approved at the checkpoint.** After R9.8 is pushed and CI is
 green, release Roadie 0.1.2 with `uv run roadie . release`. It pushes a
 commit and a tag to `main` and publishes to PyPI, which cannot be undone.
-Not run.
+Run by the author on 2026-10-30 from `def1a79`, with the committed
+`build.py`: it created `7c20ba7 v0.1.2 release` (only `pyproject.toml`
+changed) and pushed it with the tag `v0.1.2`. CI and the Release workflow on
+`v0.1.2` passed, and PyPI lists 0.1.2. That discharges the live clause.
 
 **Author action required at completion.**
 
 - ~~Push `main` and confirm CI on `ubuntu-latest` and `macos-latest` runs
   `uv run roadie . checks` and passes.~~ Done: run 41090651785 on `65d3505`.
-- Then run, or authorize the executor to run, `uv run roadie . release` on
+- ~~Then run, or authorize the executor to run, `uv run roadie . release` on
   that clean, pushed `main` (pyproject still says 0.1.1), and confirm PyPI
-  lists 0.1.2. That discharges the live clause. The nested checkout
-  `roadie/` was already absent before execution.
+  lists 0.1.2.~~ Done by the author, 2026-10-30: `v0.1.2` is on PyPI.
+
+## R10: Build files say what they mean, and `--dry` is the run itself
+
+Status: planned, awaiting author checkpoint
+
+**Improvement.** A build file names its default result with
+`default_step(...)`, so `release` can be written last and a bare `roadie .`
+still only checks. Every parameter that takes several steps, inputs or
+files also takes one, so `requires=checks` works and type-checks; Roadie's
+own `build.py` is type-checked by its gate. `--dry` walks the plan through
+the same code as a run and differs only where a run would build a step, so
+what it marks is what a run does. The suite gives the same result on a
+developer machine as on CI.
+
+**Acceptance check.**
+
+- `uv run roadie . checks` passes, including mypy on `build.py`, and a second
+  run reuses ruff, mypy and pytest. CI passes on `ubuntu-latest` and
+  `macos-latest`.
+- With Roadie's `build.py` defining `release` last: `uv run roadie . --dry`
+  lists the checks and not `release`; `uv run roadie . release --dry` lists
+  the three checks, `checks`, and `release  # run`.
+- Each patch adds tests for its success and failure paths.
+
+**Decision confirmed at the checkpoint (2026-10-30).** `--dry` marks a step
+the way a run reports it: `# reuse` where a run prints `reused <name>` (a reused step,
+or a group whose members are all reused), `# not started` where it prints
+`not started <name>`, and `# run` otherwise. Today a deferred step that will
+not start is marked `# run`.
+
+### Patches
+
+- [ ] **R10.1: Mark the default result with `default_step`.**
+  `default_step(step)` returns `step` and makes it the result `roadie` runs
+  when no result is named; without a mark, the result constructed last runs,
+  as today. Only the root build file's mark counts; an included file's mark
+  is ignored. Marking twice in one file fails with `<path> marks more than
+  one default result: <a>, <b>`; marking a step that no variable of the file
+  holds fails with `<path>: the default result is not bound to a variable`;
+  calling it outside a loading build file fails with `default_step() works
+  only in a build.py that Roadie loads`. `roadie.build` exports it, and the
+  spec's Command line section names it.
+- [ ] **R10.2: Take one value or many wherever a step takes several.**
+  `Release(requires=...)`, `Check(inputs=...)`, `Pytest(inputs=...)` and
+  `config(env=...)` accept a single step, input or path, or any iterable of
+  them, typed with `Step[Any]` so a `tuple[Check, Check, Pytest]` or a `Group`
+  type-checks. One shared function stores them as a tuple, because a step's
+  attributes must not change after construction: they are fingerprinted. An
+  element of the wrong kind fails with `<Class> <parameter> takes <kind>:
+  got <type>`.
+- [ ] **R10.3: Type-check Roadie's `build.py`.** The mypy step runs
+  `mypy src build.py`. `build.py` imports `default_step` instead of defining
+  a stub, writes `checks = default_step(Group(ruff, mypy, pytest))` and then
+  `release = Release(PyProject("pyproject.toml"), requires=checks)`. This
+  builds on the author's uncommitted `build.py`.
+- [ ] **R10.4: Make `--dry` the run itself.** `--dry` goes through the run's
+  own loop: loading, environment files, fingerprints, record matching,
+  deferred steps. Where a run would build a step or start a deferred one, a
+  dry run marks it `# run` and gives it a placeholder output fingerprint
+  instead. It takes no lock, writes no records, publishes, serves and sweeps
+  nothing, and tears nothing down. It prints the marks as the checkpoint
+  decision says. `reuse_markers` goes, and the spec's `--dry` rule is
+  restated from the run's.
+- [ ] **R10.5: Run the suite without the machine's git config.** A session
+  fixture sets `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL` to an empty
+  file, so a test cannot pass only because of a system default such as
+  macOS's `init.defaultBranch=main`, as happened in R9.
+
+**Author action required at completion.** Push `main` and confirm CI passes
+on both platforms, or authorize the executor to push.
 
 ## Backlog
 
