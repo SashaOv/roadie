@@ -2,6 +2,7 @@ from roadie.build.binary import Binary
 from roadie.build.file import File
 from roadie.build.files import Files
 from roadie.build.group import Group
+from roadie.build.python_env import PythonEnv
 from roadie.build.rust import (
     CargoPackage,
     RustBinary,
@@ -26,6 +27,7 @@ __all__ = [
     "Group",
     "HttpService",
     "Input",
+    "PythonEnv",
     "RoadieError",
     "Run",
     "RustBinary",

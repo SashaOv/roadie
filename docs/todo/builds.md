@@ -183,7 +183,7 @@ messages instead of a traceback or a silent skip.
   <reason>`; under git, any warning `git ls-files` prints is that reason,
   because git skips an unreadable directory and exits 0. `CargoPackage`
   shares the listing. Both backlog items (the feature and the gap) go.
-- [ ] **R9.4: Add the `PythonEnv` input.** `PythonEnv()` fingerprints the
+- [x] **R9.4: Add the `PythonEnv` input.** `PythonEnv()` fingerprints the
   version of the interpreter running Roadie and the name and version of
   every distribution installed in its environment, so upgrading mypy reruns
   the checks that take it. It replaces the backlog's `PythonEnv` item, which

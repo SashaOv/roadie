@@ -171,6 +171,11 @@ A package the workspace does not contain fails with `cargo package '<name>'
 is not in the workspace`. Within one run, `cargo metadata` and
 `rustc --version` run once per workspace.
 
+### Python environment
+
+`PythonEnv()` fingerprints the version of the interpreter running Roadie and
+the name and version of every distribution installed in its environment.
+
 ### Cargo workspace queries
 
 `cargo_rust_packages(directory)` returns the workspace root and
