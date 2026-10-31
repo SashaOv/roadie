@@ -817,7 +817,7 @@ approve a run, such as a release, before it goes on. `--base_dir` becomes
   dependency, and its output fingerprint is part of the check's
   fingerprint. Another kind fails with `<Kind> inputs takes inputs or
   steps: got <type>`. The docstrings state it, and the backlog item goes.
-- [ ] **R13.6: Release with a message.** `Release(..., message=...)` takes a
+- [x] **R13.6: Release with a message.** `Release(..., message=...)` takes a
   string, a `Param` or `None` (the default); another kind fails with
   `Release message takes a string or a Param: got <type>`. A message that is
   not empty becomes the body of the release commit, under `v<X.Y.Z>

@@ -8,6 +8,7 @@ from support import execute, write_build
 from roadie.build import PyProject, Release
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.graph import load
+from roadie.engine.parameters import ParameterValues
 
 
 def _git(repository: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -228,3 +229,57 @@ def test_release_requires_run_before_it_and_a_failure_publishes_nothing(tmp_path
     _git(passing, "push", "-q", "origin", "HEAD")
     execute(load(passing).plan("release"), root=passing)
     assert _tags(passing_remote) == {"v0.1.0"}
+
+
+def _object_kind(repo: Path, name: str) -> str:
+    return _git(repo, "cat-file", "-t", name).stdout.strip()
+
+
+# (spec) Step kinds
+def test_release_message_is_a_string_or_a_param() -> None:
+    with pytest.raises(RoadieError, match="Release message takes a string or a Param: got int"):
+        Release(PyProject("pyproject.toml"), message=1)
+
+
+# (spec) Step kinds
+def test_a_release_message_is_the_commit_body_and_an_annotated_tag(tmp_path: Path) -> None:
+    repo, bare = _repository(tmp_path, "0.1.0")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    step = Release(PyProject("pyproject.toml"), message="ship it")
+    step.base_dir = repo
+    step.name = "release"
+    assert execute([step], root=repo) == "0.1.1"
+    assert _git(repo, "log", "-1", "--format=%B").stdout.strip() == "v0.1.1 release\n\nship it"
+    assert _object_kind(repo, "v0.1.1") == "tag"
+    assert _git(repo, "tag", "-l", "--format=%(contents)", "v0.1.1").stdout.strip() == "ship it"
+    assert "v0.1.1" in _tags(bare)
+
+    quiet, quiet_remote = _repository(tmp_path / "quiet", "0.1.0")
+    _git(quiet, "tag", "v0.1.0")
+    _advance(quiet)
+    plain = Release(PyProject("pyproject.toml"), message="")
+    plain.base_dir = quiet
+    plain.name = "release"
+    assert execute([plain], root=quiet) == "0.1.1"
+    assert _git(quiet, "log", "-1", "--format=%B").stdout.strip() == "v0.1.1 release"
+    assert _object_kind(quiet, "v0.1.1") == "commit"
+    assert "v0.1.1" in _tags(quiet_remote)
+
+
+# (spec) Step kinds
+def test_a_param_message_is_the_release_message(tmp_path: Path) -> None:
+    repo, _bare = _repository(tmp_path, "0.1.0")
+    write_build(
+        repo,
+        'release = Release(PyProject("pyproject.toml"), message=Param("message", default=None))\n',
+    )
+    _git(repo, "add", "build.py")
+    _git(repo, "commit", "-q", "-m", "build")
+    _git(repo, "push", "-q", "origin", "HEAD")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    plan = load(repo).plan("release")
+    execute(plan, root=repo, parameters=ParameterValues({"message": "from the run"}, {}))
+    assert _git(repo, "log", "-1", "--format=%B").stdout.strip() == "v0.1.1 release\n\nfrom the run"
+    assert _object_kind(repo, "v0.1.1") == "tag"

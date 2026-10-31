@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from roadie.build.param import Param
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import Input
 from roadie.engine.many import one_or_many
@@ -131,11 +132,15 @@ def _chosen_version(repository: Path, current: str) -> str:
     return current
 
 
-def _commit(repository: Path, paths: list[Path], version: str) -> None:
+def _commit(repository: Path, paths: list[Path], version: str, message: str | None) -> None:
     _git(repository, "add", "--", *[os.fspath(path) for path in paths])
     if not _git(repository, "diff", "--cached", "--name-only").stdout.strip():
         return
-    _git(repository, "commit", "-m", f"v{version} release")
+    subject = f"v{version} release"
+    if message:
+        _git(repository, "commit", "-m", subject, "-m", message)
+        return
+    _git(repository, "commit", "-m", subject)
 
 
 def _tracks(directory: Path, name: str) -> bool:
@@ -236,11 +241,15 @@ class Release(Step[str]):
     `Z`. A higher version is released as it is.
 
     The version is written to every source that differs. When any file
-    changed, those files are committed as `v<X.Y.Z> release`. The step then
-    tags `v<X.Y.Z>`, pushes the branch and the tag atomically to the upstream,
-    and prints `released v<X.Y.Z>`. `requires` is one step or any iterable of
-    them, stored as a tuple. A value of the wrong kind fails with `Release
-    requires takes steps: got <type>`.
+    changed, those files are committed as `v<X.Y.Z> release`. `message` is a
+    string, a `Param`, or `None` (the default). Another kind fails with
+    `Release message takes a string or a Param: got <type>`. A message that
+    is not empty is the body of that commit and the message of an annotated
+    tag `v<X.Y.Z>`; otherwise the tag is lightweight. The step then pushes
+    the branch and the tag atomically to the upstream, and prints
+    `released v<X.Y.Z>`. `requires` is one step or any iterable of them,
+    stored as a tuple. A value of the wrong kind fails with `Release requires
+    takes steps: got <type>`.
     """
 
     reusable: ClassVar[bool] = False
@@ -251,18 +260,32 @@ class Release(Step[str]):
         primary: PyProject,
         *secondary: PyProject,
         requires: Step[Any] | Iterable[Step[Any]] = (),
+        message: str | Param | None = None,
     ) -> None:
+        if message is not None and not isinstance(message, (str, Param)):
+            raise RoadieError(
+                f"Release message takes a string or a Param: got {type(message).__name__}"
+            )
         self.primary = primary
         self.secondary = secondary
         self.requires = one_or_many(
             requires, Step, owner="Release", parameter="requires", takes="steps"
         )
+        self.message = message
 
     def call_arguments(self) -> tuple[list[object], dict[str, object]]:
         named: dict[str, object] = {}
         if self.requires:
             named["requires"] = self.requires
+        if self.message is not None:
+            named["message"] = self.message
         return [self.primary, *self.secondary], named
+
+    def _release_message(self) -> str | None:
+        message = self.message.value if isinstance(self.message, Param) else self.message
+        if not message:
+            return None
+        return message
 
     def build(self, run: "Run") -> str:
         repository = _repository(self.base_dir)
@@ -274,9 +297,13 @@ class Release(Step[str]):
         for source in (self.primary, *self.secondary):
             if source.read_version(self.base_dir) != version:
                 paths.extend(source.write_version(self.base_dir, version))
+        message = self._release_message()
         if paths:
-            _commit(repository, paths, version)
-        _git(repository, "tag", f"v{version}")
+            _commit(repository, paths, version, message)
+        if message:
+            _git(repository, "tag", "-a", "-m", message, f"v{version}")
+        else:
+            _git(repository, "tag", f"v{version}")
         _git(repository, "push", "--atomic", remote, f"HEAD:{branch}", f"v{version}")
         print(f"released v{version}", flush=True)
         return version

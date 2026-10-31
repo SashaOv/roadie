@@ -9,7 +9,6 @@ bullet, except the input-enforcement design, which is moved whole.
   report the results.
 - `AuthorApproval`: an author task that continues the run or cancels it.
 - Release process can take Rust and JS manifests as sources
-- `Release` takes a custom commit message, once steps take parameters.
 - Enforce declared inputs (the design below).
 - A project-root override (`config(root=...)`) for a project whose root is not
   its git top level.
