@@ -46,6 +46,35 @@ builds, then the one planned build. Unplanned work is in
   exception in the calling thread, `KeyboardInterrupt` included (its bare
   `except:` in CPython 3.13.13), and Python never interrupts a worker thread.
 
+- 2026-10-31: cyclopts 4.25.3 matches an option spelled with underscores to
+  its hyphenated name: with only `--base-dir` declared, `--base_dir x` sets
+  it, and `--help` lists `--base-dir` alone.
+- 2026-10-31: in a scratch Cargo workspace (cargo 1.99.0), editing
+  `[workspace.package] version` and running `cargo update --workspace
+  --offline` rewrites only the members' `version` lines in `Cargo.lock`;
+  `cargo metadata --no-deps` leaves the lockfile alone, and `cargo build
+  --locked` fails on the stale lockfile. `cargo locate-project --workspace
+  --message-format plain` prints the workspace's root `Cargo.toml` from a
+  member's directory.
+- 2026-10-31: Niva's root `Cargo.toml` holds `[workspace.package] version =
+  "0.5.4"`, matching its latest tag `v0.5.4` (a lightweight tag), and its
+  build file has no `Release`. Its `package.json` files do not follow that
+  version (`desktop/package.json` is `0.5.0`, the root has none). Its
+  `pnpm-lock.yaml` importers list dependencies only, not the package's own
+  version, and it tracks no `package-lock.json`.
+- 2026-10-31: cyclopts 4.25.3 passes `name=value` words through unchanged:
+  with `directory`, `result` and `*parameters` positional, `. release
+  message=a=b` gives `'.'`, `'release'`, `('message=a=b',)`, and `message=x`
+  alone lands in `directory`, so Roadie sorts the words itself.
+- 2026-10-31: Niva's workflows run `roadie --locked . <result>` (nine
+  lines under `.github/workflows/`), and its docs `roadie --locked jammer
+  generated`, naming the build directory as a word. Niva installs Roadie
+  from PyPI, so they break when Niva upgrades past R13, not before.
+- 2026-10-31: none of Niva's included build files (`forge`, `notation`,
+  `desktop`, `jammer`) binds a result named like a public `Step` member
+  (`build`, `report`, `serve`, `teardown`, ...); its root file's `build`
+  result is never included.
+
 --- Implemented / Next ---
 
 ## R8: Roadie's state survives upgrades, concurrent runs and moves
@@ -526,7 +555,7 @@ current run of the command while planning.
 
 ## R12: Each step says how long it took, and reuse is never stale
 
-Status: planned, approved 2026-10-31
+Status: implemented 2026-10-31 (commits R12.*)
 
 **Improvement.** Each step that builds reports how long it took, and the
 run its total, so a slow step stands out. Editing a step class defined in a build file reruns its
@@ -603,6 +632,254 @@ test covers get tests.
   root `Cargo.toml` or `Cargo.lock` selects every package; `HttpService`
   waits on `/` unless it sets `health_path`. The section goes. A test that
   fails reveals a defect: stop and report it rather than change the rule.
+
+**Acceptance run (2026-10-31).** Commit `9b7c410b5411dbb64e8ec94f3e7b0c6dc73839e3`,
+tree `27ba30dd8d5e542b0254345086f00db059765359`. Host Darwin 25.6.0 arm64.
+uv 0.12.23 (Homebrew 2026-10-03 aarch64-apple-darwin). Python 3.13.13.
+`process_cpu_count` 10, so the `--jobs` default is 10. Worktree clean.
+Script `/Users/sasha/.local/share/roadie/r12-acceptance.py`, sha256
+`cd8ef22e85fe871adc0753f1ce94185b33978aa9911f5bf8cd356592a26c5aa8`. Log
+`/Users/sasha/.local/share/roadie/r12-acceptance.log`, sha256
+`10cae23aa3e1661631671d26046ee6d63542da2e029d9951d33eea9d341bdd00`.
+
+- `uv run ruff check`, `uv run mypy src`, and `uv run pytest -q --tb=line` on
+  that commit: 259 passed.
+- `uv run roadie . --clean` exited 0.
+- The first `uv run roadie . checks` exited 0 and printed `[ruff] built ruff
+  in 0:00`, `[mypy] built mypy in 0:00`, and `[pytest] built pytest in 0:18`,
+  then an unprefixed `finished in 0:18` as the last line.
+- The second `checks` exited 0 and printed `reused` for ruff, mypy, and
+  pytest, and no `built` line. It ended with `finished in 0:00`.
+- CI run [41179096531](https://github.com/SashaOv/roadie/actions/runs/41179096531)
+  on `9b7c410` passed on `ubuntu-latest` and `macos-latest`.
+
+**Author action required at completion.** ~~Push `main` and confirm CI passes
+on both platforms, or authorize the executor to push. Discharges the CI
+clause.~~ The author authorized the push. CI run 41179096531 on `9b7c410`
+passed on `ubuntu-latest` and `macos-latest`.
+
+**Review (2026-10-31).** R12.3's commit subject drops the backticks of its
+patch name (`Env(*names)`), as R11.3 did; the other four match. CI run
+41179096531 on `9b7c410` passed on both platforms (checked with `gh run
+view`). Rerun on `9b7c410`: after `--clean`, `checks` printed `[ruff] built
+ruff in 0:00`, `[mypy] built mypy in 0:00`, `[pytest] built pytest in 0:16`
+and last `finished in 0:16`; the second run printed only `reused` lines and
+`finished in 0:00`. No drift.
+
+## R13: Runs take several results and parameters, build files compose, the user checks and approves, and Rust and JS projects release
+
+Status: planned, approved 2026-10-31
+
+**Improvement.** The command line names results and their parameters, as in
+`roadie version=1.2.0 package release message="Fix the lock"`; the build
+file moves to `-f`. A build file declares a parameter, a mistyped or missing
+one fails before any step builds, and a step reruns when its value changes.
+One run builds several results. An included file stands for its default
+result, so `Group(lib, app)` runs both; a setup step builds first in every
+run; and a check can take another step's output. `Release` takes a message, so a release says
+what it ships, and Roadie's own `release` takes it from the command line.
+`Release` also writes the version of a Cargo workspace and its lockfile, and
+of a `package.json`, so a project such as Niva releases its Rust and JS
+packages with Roadie. A build file asks the user to check what no script
+can, such as how an app looks, and records the answer, so the user is asked
+again only when the step's inputs change; and it can ask the user to
+approve a run, such as a release, before it goes on. `--base_dir` becomes
+`--base-dir`, like every other option.
+
+**Decisions confirmed at the checkpoint (2026-10-31).**
+
+1. The command line is `roadie [options] [name=value]... [result
+   [name=value]...]...`, as make's `make -f FILE target VAR=value`. `-f
+   PATH`, `--file PATH` names the root build file, or a directory holding
+   `build.py`, and defaults to `.`; `--input` would clash with Roadie's
+   inputs. A word with `=` is a parameter, any other word a result.
+2. A parameter before every result is run-wide: each step in the plan that
+   takes a `Param` of that name gets the value. A parameter after a result
+   is that result step's own and overrides a run-wide value for it; it does
+   not reach the result's dependencies (passing it down may come later, at
+   a cost in clarity). A value belongs to the step, not to the `Param`
+   object, and each `Param` keeps its own default.
+3. A run builds several results, the union of their plans, each shared step
+   once. A kind that can be requested only once per run, today `Service`
+   because a served result keeps the terminal, says so on its class, as
+   `reusable` and `deferred` do.
+4. The message goes into the release commit's body, under the unchanged
+   subject `v<X.Y.Z> release`, and into an annotated tag `v<X.Y.Z>`, so a
+   release that changes no file still carries it. Without a message the tag
+   stays lightweight, as today.
+5. `--base_dir` stays accepted for good, not for one release: cyclopts
+   matches it to `--base-dir` by itself (Facts), and `--help` shows only
+   `--base-dir`.
+6. Both Cargo and `package.json` release now; Niva's diverging
+   `package.json` versions are an oversight to fix in Niva.
+7. A release names its version sources by path, and the file name says the
+   kind (`pyproject.toml`, `Cargo.toml`, `package.json`); `PyProject` goes.
+8. A user step asks alone: it waits until no other step is running, and
+   no step starts while it asks, so prompts never interleave with prefixed
+   output, at the cost of a serial stretch in the run. A service that is not
+   a requested result starts with standard input from the null device, so
+   it does not compete with the user's answers. The author accepts this
+   for now; its other implications are hard to predict.
+9. A step `include` returns has the file's results as attributes, so a
+   result named like a `Step` member (`build`, `report`, ...) would hide it;
+   including such a file fails rather than renaming anything (R13.3).
+10. `UserTask` takes steps through `inputs`, as `Check` does after R13.5,
+    rather than a separate `requires`; `UserApproval` takes only its
+    question, and a `Release` requires it.
+11. The interactive kinds are `UserTask` and `UserApproval`, the backlog's
+    `AuthorTask` and `AuthorApproval`, after common practice.
+
+**Acceptance check.**
+
+- `uv run roadie checks` passes, and CI, which runs it, passes on
+  `ubuntu-latest` and `macos-latest`.
+- `uv run roadie --help` lists `--file`, `-f` and `--base-dir`, and not
+  `--base_dir`; `uv run roadie --dry --base_dir .` still exits 0.
+- `uv run roadie . checks --dry` fails with the hint to pass `-f .`;
+  `uv run roadie -f build.py ruff mypy --dry` exits 0 and marks both.
+- `uv run roadie release message=x --dry` exits 0 and shows
+  `message=Param('message', default=None)` on `release`'s line;
+  `uv run roadie release mesage=x --dry` fails with `release takes no
+  parameter mesage; it takes: message`; `uv run roadie message=x --dry`
+  fails with `unknown parameter message; the plan takes no parameters`.
+- Each behaviour below is covered by a test that fails before its patch.
+  The `Release` tests release to a local bare upstream with real git and,
+  for `Cargo.toml`, real cargo, as the existing `Release` and Cargo tests do.
+  No real release is made: a pushed tag publishes to PyPI. The user-step
+  tests answer through a pseudo-terminal (`pty`), as a user at a
+  terminal would.
+
+### Patches
+
+- [ ] **R13.1: Name the build file with `-f` and run several results.**
+  `-f PATH`, `--file PATH` replaces the `directory` word: a file is the
+  root build file, a directory means its `build.py`, and the default is
+  `.`; a path that does not exist fails with `build file does not exist:
+  <path>`. Every word is a result; the run builds each, in the order given,
+  over the union of their plans, a step shared by two plans once, and with
+  no word it runs the default result as today. A word naming no result that
+  is an existing directory fails with `<path> has no result named '<word>';
+  to use the build file in <word>, pass -f <word>`. A step class sets
+  `once_per_run = True` when it may be requested once per run; `Service`
+  sets it, and requesting two such results fails with `<a> and <b> can each
+  be requested only once per run; request one of them`. `--base_dir`
+  becomes `--base-dir`; a test shows `--base_dir` still sets it. The spec's
+  Command line, Settings and Requested result sections, the README, CI's
+  `roadie . checks`, and the tests change with it. The backlog's rename item
+  goes.
+- [ ] **R13.2: Pass parameters to results.** `Param(name, default=...)` is
+  an input: `name` must be an identifier (`Param takes an identifier: got
+  <repr>`); `default`, when given, is a string or `None` (`Param default
+  takes a string or None: got <type>`), and without it the parameter is
+  required. A word containing `=` is a parameter: its name is the text
+  before the first `=`, its value the rest. A name that is not an
+  identifier fails with `parameter name must be an identifier: <word>`.
+  Before every result, a parameter is run-wide; after a result, it is that
+  result step's own and overrides a run-wide value for that step only. A
+  step's value of a `Param` is its own parameter, else the run-wide one,
+  else that `Param`'s default. Before any step builds, also under `--dry`:
+  a run-wide name no step in the plan takes fails with `unknown parameter
+  <name>; the plan takes: <names>`, or `the plan takes no parameters`; a
+  result's own name it does not take fails with `<result> takes no
+  parameter <name>; it takes: <names>`, or `<result> takes no parameters`;
+  one name given twice in the same place fails with `parameter <name> is
+  given twice`; a required parameter a step gets no value for fails with
+  `<step> needs parameter <name>`. Inside `build`, `self.<attr>.value` is
+  that step's value; it lasts for the run, and outside a run fails with
+  `parameter <name> has no value outside a run`. A step's fingerprint covers
+  its own values, an unset optional parameter differing from an empty one.
+  `roadie.build` exports `Param`; the spec's Command line shows the
+  parameters, and a Parameters section under Inputs describes `Param`. The
+  backlog item goes.
+- [ ] **R13.3: Return a step from `include`.** `include(directory)` returns
+  a step that stands for the included file's default result, as a `Group`
+  of that one step, and has the file's results as attributes (`lib.test`),
+  which are not its dependencies; so `Group(lib, app)` runs each file's
+  default, and `roadie lib` runs `lib`'s. A plan holding it fails, before
+  any step builds, with `<path> marks no default result` when the file has
+  no `default_step` mark. Including a file that binds a result named like a
+  `Step` member (R12.4) fails with `<path>: result <name> is reserved by
+  Roadie in an included file`. The spec's Including build files section
+  states it, and the backlog item goes.
+- [ ] **R13.4: Build a setup step first.** `setup(step)` returns `step` and
+  marks it, like `default_step`: every run builds it, after its own plan
+  and before any other step, whichever results it runs, also under `--dry`.
+  A build file marks at most one, bound to a variable (`<path>: the setup
+  step is not bound to a variable`); a second fails with `<path> marks more
+  than one setup step: <names>`; `setup` outside a loading build file fails
+  with `setup() works only in a build.py that Roadie loads`. A mark in an
+  included file counts, and a file's setup step builds after those of the
+  files it includes. A failed setup step stops the run before any other
+  step builds. Reuse is unchanged. `roadie.build` exports it; the spec
+  states it beside `default_step`, and the backlog item goes.
+- [ ] **R13.5: Let a check take a step in `inputs`.** `Check` and `Pytest`
+  take inputs and steps in `inputs`, in any mix: a step there is a
+  dependency, and its output fingerprint is part of the check's
+  fingerprint. Another kind fails with `<Kind> inputs takes inputs or
+  steps: got <type>`. The docstrings state it, and the backlog item goes.
+- [ ] **R13.6: Release with a message.** `Release(..., message=...)` takes a
+  string, a `Param` or `None` (the default); another kind fails with
+  `Release message takes a string or a Param: got <type>`. A message that is
+  not empty becomes the body of the release commit, under `v<X.Y.Z>
+  release`, and the message of an annotated tag `v<X.Y.Z>`; otherwise the
+  release is as today. Roadie's `build.py` passes `message=Param("message",
+  default=None)`. The `Release` docstring states it, and the backlog item
+  goes.
+- [ ] **R13.7: Name a release's version sources by their files.**
+  `Release(primary, *secondary, ...)` takes paths, relative to the step's
+  base directory, and the file name says the kind: `pyproject.toml` is a
+  Python project, read and written as `PyProject` is today. Any other name
+  fails with `Release takes pyproject.toml files: got <path>`, a list that
+  R13.8 and R13.9 extend; a value that is not a path fails with `Release
+  takes paths: got <type>`. `PyProject` leaves `roadie.build`; Roadie's
+  `build.py` becomes `Release("pyproject.toml", ...)`, and `--dry` shows
+  the paths.
+- [ ] **R13.8: Release a Cargo workspace's version.** A source named
+  `Cargo.toml` is a Cargo manifest. Its version is
+  `[workspace.package] version`, or, without that table, `[package]
+  version`; a manifest with neither as a string fails with `<path> has no
+  static Cargo version`. Writing replaces the version string on that table's
+  `version` line and leaves the rest of the file as it is. When git tracks
+  the workspace's `Cargo.lock` (from `cargo locate-project --workspace`),
+  writing then runs `cargo update --workspace --offline`, and the lockfile
+  joins the release commit; a failing cargo fails with `cannot release:
+  <cargo's message>`.
+- [ ] **R13.9: Release a `package.json` version.** A source named
+  `package.json` is a JS package. Its version is the top-level `version`
+  string; a file without one fails with `<path> has no version`. Writing
+  replaces that string and leaves the rest of the file as it is. pnpm's
+  lockfile does not record a package's own version (Facts), so no lockfile
+  is touched; when git tracks a `package-lock.json` beside the file, the
+  release fails before changing anything with `cannot release: <path> has a
+  package-lock.json, which Roadie does not update`. The backlog item goes.
+- [ ] **R13.10: Ask the user to run checks.** `UserTask(instructions,
+  *checks, inputs=())` is a `Tests` step: `instructions` is a
+  string, each check a string (`UserTask takes checks as strings: got
+  <type>`), at least one (`UserTask takes at least one check`); `inputs`
+  takes inputs and steps, as `Check`'s does after R13.5. Building
+  prints the instructions, then asks each check in turn, `<check>? [y/n] `;
+  `y`/`yes` passes it, and `n`/`no` asks `What failed? ` for a reason that
+  is not empty, which becomes the check's failure; any other answer asks
+  again. A failed check fails the step as any `Tests` failure does, so it
+  records nothing; when every check passes, the record keeps the step, and
+  it is reused, without asking, until its fingerprint changes. Standard
+  input that is not a terminal fails the step with `<name> needs the user
+  at a terminal`, and an end of input with `<name>: no answer from the
+  user`. A user step asks only while no other step is running, and no
+  step starts while it asks, so its questions are the terminal's last lines
+  and its answers reach it alone; for the same reason a service that is not
+  a requested result starts with standard input from the null device.
+  `--dry` asks nothing. `roadie.build` exports it, and the backlog item
+  goes.
+- [ ] **R13.11: Ask the user to approve a run.** `UserApproval(question)`
+  is a user step whose question is asked once,
+  `<question> [y/n] `, under R13.10's rules for answers and the terminal.
+  `y` continues the run; `n` fails the step with `cancelled by the user`,
+  so the run stops as on any failure. It is never reused and keeps no
+  record, so it asks on every run, and its output fingerprint is its own
+  fingerprint. Roadie's `build.py` makes `release` require
+  `UserApproval("Release main?")`. `roadie.build` exports it, and the
+  backlog item goes.
 
 **Author action required at completion.** Push `main` and confirm CI passes
 on both platforms, or authorize the executor to push. Discharges the CI

@@ -5,6 +5,20 @@ bullet, except the input-enforcement design, which is moved whole.
 
 ## Features
 
+- `setup(step)`, like `default_step()`, marks a step that every run builds
+  before any other step, whichever result it runs. A build file marks at most
+  one, bound to a variable; a second mark fails with `<path> marks more than
+  one setup step: <names>`. A mark in an included file counts, and follows the
+  include graph: a file's setup step builds after the setup steps of the files
+  it includes. A failed setup step stops the run before any other step builds.
+  Reuse rules are unchanged.
+- A `Check` or `Pytest` takes a step in `inputs`: the step is a dependency, and
+  its output fingerprint is part of the check's.
+- `include(directory)` returns a step as well as a namespace: building it builds
+  the included file's default step, so `Group(lib, app)` runs each file's
+  default. The file's results stay attributes (`lib.test`) and are not
+  dependencies of the returned step. Building it when the file marks no default
+  fails and names the file.
 - `AuthorTask`: a `Tests` step that waits for the author to run checks and
   report the results.
 - `AuthorApproval`: an author task that continues the run or cancels it.
