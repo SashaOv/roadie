@@ -23,6 +23,7 @@ from pydantic import TypeAdapter
 from roadie.engine.config import base_directory, configured_env, loading_directory
 from roadie.engine.errors import StepFailed
 from roadie.engine.inputs import digest
+from roadie.engine.lock import RUN_PID_VARIABLE
 from roadie.engine.process import RunningProcess
 
 if TYPE_CHECKING:
@@ -195,7 +196,8 @@ class Step[T](ABC):
         """Print `+ <command>` and run the command in the step's base directory.
 
         Its environment is the process environment, then `environment`, then
-        the step's environment files. It inherits standard input. Standard
+        the step's environment files, then `ROADIE_RUN_PID` set to this
+        process's PID. It inherits standard input. Standard
         output is shown, or returned when `capture_output` is set. Standard
         error is captured and shown only when the command fails: unless
         `check` is false, a non-zero exit fails the step with `<name> failed:
@@ -262,4 +264,7 @@ class Step[T](ABC):
 
     def _command_env(self, environment: Mapping[str, str] | None) -> dict[str, str]:
         # Process environment, then the step's settings, then env files.
-        return {**os.environ, **(environment or {}), **self.env_values}
+        # This run's PID is last, so a nested roadie can tell who started it.
+        merged = {**os.environ, **(environment or {}), **self.env_values}
+        merged[RUN_PID_VARIABLE] = str(os.getpid())
+        return merged

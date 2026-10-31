@@ -281,6 +281,10 @@ and writes its PID and start time into that file. A run, a dry run, or
 file cannot be read yet, and blocks until the holder releases it. The
 operating system releases the lock when the holder exits, including when it
 is killed. Releasing the lock unlocks the file and leaves it in place.
+A run sets `ROADIE_RUN_PID` to its PID in the environment of the programs
+its steps run. A run that finds the lock held by that PID fails at once
+with `<lock> is held by the roadie run that started this one (pid <n>)`
+instead of waiting.
 `--clean` deletes everything under `target/roadie/` except `run.lock`. The
 lock is released before a requested result is served, so a running dev server
 does not block builds.

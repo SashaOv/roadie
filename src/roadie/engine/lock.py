@@ -10,7 +10,10 @@ from typing import BinaryIO
 
 from pydantic import BaseModel, ValidationError
 
+from roadie.engine.errors import RoadieError
+
 _LOCK_BYTES = 1
+RUN_PID_VARIABLE = "ROADIE_RUN_PID"
 
 
 class _LockFile(BaseModel):
@@ -65,6 +68,7 @@ def acquire_run_lock(root: Path) -> HeldLock:
     file = path.open("a+b")
     try:
         if not _lock(file, blocking=False):
+            _refuse_parent(path)
             _announce(path)
             _lock(file, blocking=True)
         _write_token(file)
@@ -72,6 +76,26 @@ def acquire_run_lock(root: Path) -> HeldLock:
         file.close()
         raise
     return HeldLock(path, file)
+
+
+def _refuse_parent(path: Path) -> None:
+    holder = _read(path)
+    parent = _parent_run_pid()
+    if holder is None or parent is None or holder.pid != parent:
+        return
+    raise RoadieError(
+        f"{path} is held by the roadie run that started this one (pid {holder.pid})"
+    )
+
+
+def _parent_run_pid() -> int | None:
+    raw = os.environ.get(RUN_PID_VARIABLE)
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
 
 
 def _announce(path: Path) -> None:

@@ -1,3 +1,5 @@
+import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -292,5 +294,88 @@ def test_clean_waits_for_the_holder_before_deleting(tmp_path: Path) -> None:
     finally:
         if cleaner is not None and cleaner.poll() is None:
             cleaner.kill()
+        if holder.poll() is None:
+            holder.kill()
+
+
+# (spec) One run at a time
+def test_a_step_that_runs_roadie_in_the_same_project_fails(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+    lock = root / "target" / "roadie" / "run.lock"
+    script = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from roadie import cli\n"
+        "cli.run(Path(sys.argv[1]))\n"
+    )
+    write_build(
+        root,
+        "import sys\n"
+        "\n"
+        "class Again(Step[None]):\n"
+        "    def build(self, run):\n"
+        f"        self._cmd(sys.executable, '-c', {script!r}, {str(root)!r})\n"
+        "\n"
+        "again = Again()\n",
+    )
+    message = f"{lock} is held by the roadie run that started this one (pid {os.getpid()})"
+    with pytest.raises(SystemExit, match=re.escape(message)):
+        cli.run(root)
+
+
+# (spec) One run at a time
+# (spec) Step helpers
+def test_a_step_program_sees_this_run_pid_over_an_environment_file(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path.resolve()
+    env_file = root / "pid.env"
+    env_file.write_text("ROADIE_RUN_PID=1\n")
+
+    class Again(Step[str]):
+        def build(self, run: Run) -> str:
+            completed = self._cmd(
+                sys.executable,
+                "-c",
+                "import os; print(os.environ['ROADIE_RUN_PID'])",
+                environment={"ROADIE_RUN_PID": "2"},
+                capture_output=True,
+            )
+            return completed.stdout.strip()
+
+    again = Again()
+    again.name = "again"
+    assert execute([again], root=root, env=(env_file,)) == str(os.getpid())
+
+
+# (spec) One run at a time
+def test_a_run_started_by_an_unrelated_process_still_waits(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+    lock = root / "target" / "roadie" / "run.lock"
+    holder = _process(_HOLDER, root)
+    waiter = None
+    try:
+        assert holder.stdin is not None
+        assert _line(holder) == "held"
+        environment = os.environ.copy()
+        environment["ROADIE_RUN_PID"] = str(os.getpid())
+        waiter = subprocess.Popen(
+            [sys.executable, "-c", _WAITER, str(root)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=environment,
+        )
+        waiting = _line(waiter)
+        assert waiting.startswith(
+            f"waiting for another roadie run: {lock} (pid {holder.pid}, started "
+        )
+        holder.stdin.write("\n")
+        holder.stdin.flush()
+        assert _line(waiter) == "acquired"
+    finally:
+        if waiter is not None and waiter.poll() is None:
+            waiter.kill()
         if holder.poll() is None:
             holder.kill()

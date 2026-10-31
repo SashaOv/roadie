@@ -439,7 +439,7 @@ backlog item asked for, because `--jobs 1` helps troubleshooting.
   hold locks on different files. Tests start a holder process and wait for
   the waiting line, never for time: the waiter proceeds after the holder
   releases, and after the holder is killed.
-- [ ] **R11.2: Fail at once when the holder started this run.** A run puts
+- [x] **R11.2: Fail at once when the holder started this run.** A run puts
   its PID in the environment of the programs its steps run. A run that finds
   the lock held by that PID fails at once with `<lock> is held by the roadie
   run that started this one (pid <n>)` instead of waiting for itself. Tests:
