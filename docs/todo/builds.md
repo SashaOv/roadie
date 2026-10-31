@@ -384,7 +384,7 @@ with `from roadie.build import *`, as the spec says a build file usually does.
 
 ## R11: Independent steps run at once, and a second run waits its turn
 
-Status: executed, pending author verification
+Status: implemented 2026-10-31 (commits R11.*)
 
 **Improvement.** `roadie` runs the steps of a plan that do not depend on each
 other at the same time, up to `--jobs` of them, so `roadie . checks` runs
@@ -513,14 +513,100 @@ its `+` line either, and the acceptance clause quoting pytest's summary was
 never checked against a run. The executor's fix prints captured output only
 with `--jobs` above 1, so `--jobs 1`, kept for troubleshooting, shows less
 than a parallel run; the same already holds for standard error since R11.4.
-Open for the author: show programs' output the same way in both modes, the
-modes differing only in the prefix (recommended), keep the fix as is, or hide
-captured output in both. The spec's Plans and runs concept carried the
+The author chose to show programs' output the same way in both modes, the
+modes differing only in the prefix: `_cmd` now shows standard error, and
+captured standard output, live with `--jobs 1` too, and still returns them.
+The gate passes (232 tests), and `roadie . checks -j 1` after `--clean` shows
+pytest's output unprefixed. The spec's Plans and runs concept carried the
 `--jobs` default and output format; the review moves them to a new Parallel
 steps section under Running a plan and retargets ten test markers.
 
 **Reflection.** Acceptance clauses that quote output are checked against a
 current run of the command while planning.
+
+## R12: Each step says how long it took, and reuse is never stale
+
+Status: planned, approved 2026-10-31
+
+**Improvement.** Each step that builds reports how long it took, and the
+run its total, so a slow step stands out. Editing a step class defined in a build file reruns its
+steps; today they are reused with stale results. A new `Env(*names)` input
+reruns a step when a named environment variable changes, so a build file
+declares that dependency instead of reading `os.environ` into an attribute. A
+step attribute that would collide with Roadie's own (`name`, `base_dir`,
+`report`, ...) fails with a message instead of being silently overwritten,
+or hiding a hook, and going unfingerprinted. The rules the spec states but no
+test covers get tests.
+
+**Decisions confirmed at the checkpoint (2026-10-31).**
+
+1. A step whose class hierarchy includes a class defined in a build file has
+   that build file's bytes in its code hash, so any edit to that build file
+   reruns those steps (not steps of `roadie.build` classes). Hashing only
+   each class's source would miss module-level helpers the class calls, and a
+   stale reuse is worse than a rerun.
+2. Roadie keeps its bookkeeping names (`name`, `base_dir`, ...) public, since
+   step writers use `self.base_dir` and `self.name`, and reserves them instead
+   of moving them under a private attribute.
+
+**Acceptance check.**
+
+- `uv run roadie . checks` passes, and CI passes on `ubuntu-latest` and
+  `macos-latest`.
+- After `uv run roadie . --clean`, `uv run roadie . checks` prints `built ruff
+  in <m:ss>`, `built mypy in <m:ss>` and `built pytest in <m:ss>`, each
+  prefixed with its step's name, and ends with `finished in <m:ss>`; a second
+  run prints `reused` for each and no `built` line.
+- Each behaviour below is covered by a test that fails before its patch.
+  Nothing outside the repo is involved, so the suite is the whole check.
+
+### Patches
+
+- [ ] **R12.1: Print how long each step and the run took.** After a step
+  that printed a `build` line finishes building, Roadie prints `built <name> in <m:ss>`, or
+  `built <Class> in <m:ss>` when the step has no name: whole minutes, then
+  seconds as two digits, rounded down (`0:03`, `12:45`, `75:00`). It is
+  prefixed like any other line of the step with `--jobs` above 1. A
+  deferred step's duration is its start. A reused step, a step that keeps no
+  record and a failed step print no `built` line; the failure message is
+  unchanged. The spec's Reusing a step section states it next to the
+  `build` line. A run that succeeds prints `finished in <m:ss>`, unprefixed,
+  as its last line, or before it serves the requested result; a failed run
+  and a dry run print none. The backlog's Step durations item goes. Tests
+  set the clock Roadie reads; nothing sleeps.
+- [ ] **R12.2: Rerun a step when its build file's class changes.** The code
+  hash adds, for each class of the step's hierarchy defined in a build file,
+  that build file's content keyed by its `roadie:<relative path>` module name.
+  Editing the file reruns those steps; steps of imported classes are not
+  affected. The spec's Step fingerprints rule loses "A class defined in a
+  build file itself is not hashed", and the backlog item goes.
+- [ ] **R12.3: Add the `Env(*names)` input.** `Env("MODE", "TARGET")`
+  fingerprints each named process environment variable's value, an unset
+  variable differing from an empty one. No names fails with `Env takes at
+  least one variable name`; a name that is not a string fails with `Env
+  takes variable names: got <type>`. `roadie.build` exports it, the spec's
+  Inputs section describes it, and the user-manual note about reading
+  `os.environ` into a plain attribute points to it instead.
+- [ ] **R12.4: Reserve Roadie's names on a step.** An attribute a step sets
+  whose name is a member of `Step` (its bookkeeping, such as `name`,
+  `base_dir` and `env_values`, its hooks, such as `report`, and its class
+  attributes) fails with `<step> attribute <name> is reserved by Roadie`,
+  when the step is fingerprinted or shown by `--dry`. That covers an
+  attribute set before Roadie names the step, which today is overwritten.
+  The spec's Dependencies and attributes section states the rule, and the
+  Gaps item goes.
+- [ ] **R12.5: Test the rules the backlog lists as untested.** One test for
+  each item of the backlog's "Tests to add": an `Input` whose digest changes
+  changes the fingerprint; an unknown result names the file and its results;
+  `include` outside a loading build file fails; cargo reporting several
+  executables fails the step; a package the workspace lacks fails; a changed
+  root `Cargo.toml` or `Cargo.lock` selects every package; `HttpService`
+  waits on `/` unless it sets `health_path`. The section goes. A test that
+  fails reveals a defect: stop and report it rather than change the rule.
+
+**Author action required at completion.** Push `main` and confirm CI passes
+on both platforms, or authorize the executor to push. Discharges the CI
+clause.
 
 ## Backlog
 
