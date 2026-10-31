@@ -587,7 +587,7 @@ test covers get tests.
   takes variable names: got <type>`. `roadie.build` exports it, the spec's
   Inputs section describes it, and the user-manual note about reading
   `os.environ` into a plain attribute points to it instead.
-- [ ] **R12.4: Reserve Roadie's names on a step.** An attribute a step sets
+- [x] **R12.4: Reserve Roadie's names on a step.** An attribute a step sets
   whose name is a member of `Step` (its bookkeeping, such as `name`,
   `base_dir` and `env_values`, its hooks, such as `report`, and its class
   attributes) fails with `<step> attribute <name> is reserved by Roadie`,
@@ -595,7 +595,7 @@ test covers get tests.
   attribute set before Roadie names the step, which today is overwritten.
   The spec's Dependencies and attributes section states the rule, and the
   Gaps item goes.
-- [ ] **R12.5: Test the rules the backlog lists as untested.** One test for
+- [x] **R12.5: Test the rules the backlog lists as untested.** One test for
   each item of the backlog's "Tests to add": an `Input` whose digest changes
   changes the fingerprint; an unknown result names the file and its results;
   `include` outside a loading build file fails; cargo reporting several

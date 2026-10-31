@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from support import plan_names, write_build
 
-from roadie.build import CargoPackage, Group, RoadieError, Step, default_step
+from roadie.build import CargoPackage, Group, RoadieError, Step, default_step, include
 from roadie.engine.graph import Graph, load
 from roadie.engine.run import Run
 
@@ -86,6 +86,29 @@ def test_default_step_outside_a_build_file_fails() -> None:
         match=r"default_step\(\) works only in a build.py that Roadie loads",
     ):
         default_step(Group())
+
+
+# (spec) Results
+def test_an_unknown_result_names_the_file_and_its_results(tmp_path: Path) -> None:
+    write_build(tmp_path, "item = Check('true')\nother = Check('true')\n")
+    graph = load(tmp_path)
+
+    with pytest.raises(RoadieError, match="has no result named 'missing'") as error:
+        graph.result("missing")
+
+    message = str(error.value)
+    assert str(graph.path) in message
+    assert "item" in message
+    assert "other" in message
+
+
+# (spec) Including build files
+def test_include_outside_a_loading_build_file_fails() -> None:
+    with pytest.raises(
+        RoadieError,
+        match=r"include\(\) works only in a build.py that Roadie loads",
+    ):
+        include("other")
 
 
 # (spec) Including build files

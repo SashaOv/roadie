@@ -6,9 +6,10 @@ import pytest
 from support import Value, execute, isolate_repo, write_build
 
 import roadie.engine.fingerprint as fingerprints
-from roadie.build import Files, RoadieError, Step
+from roadie.build import Files, Input, RoadieError, Step
 from roadie.engine.fingerprint import fingerprint
 from roadie.engine.graph import load
+from roadie.engine.inputs import digest
 from roadie.engine.root import use_project_root
 from roadie.engine.run import Run
 
@@ -179,6 +180,26 @@ def test_a_reserved_name_fails_when_a_dry_run_shows_the_step(
     logged.name = logged.variable = "logged"
     with pytest.raises(RoadieError, match="logged attribute report is reserved by Roadie"):
         execute([logged], dry=True)
+
+
+# (spec) Dependencies and attributes
+# (spec) Input fingerprints
+def test_a_changed_input_digest_changes_the_step_fingerprint() -> None:
+    class Stamp(Input):
+        def __init__(self, value: str) -> None:
+            self.value = value
+
+        def fingerprint(self, base_dir: Path) -> str:
+            return digest(self.value)
+
+    class Noted(Step[None]):
+        def __init__(self, stamp: Stamp) -> None:
+            self.stamp = stamp
+
+        def build(self, run: Run) -> None:
+            return None
+
+    assert fingerprint(Noted(Stamp("one"))) != fingerprint(Noted(Stamp("two")))
 
 
 # (spec) Dependencies and attributes

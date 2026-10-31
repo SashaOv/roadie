@@ -77,6 +77,18 @@ def test_local_dependency_closure_ignores_unrelated_changes() -> None:
     assert cargo.select_rust_packages(packages, (Path("docs/dev.md"),)) == ()
 
 
+# (spec) Cargo workspace queries
+def test_a_changed_root_manifest_or_lockfile_selects_every_package() -> None:
+    packages = (
+        cargo.RustPackage("core", Path("core"), ()),
+        cargo.RustPackage("app", Path("app"), ("core",)),
+    )
+
+    assert cargo.select_rust_packages(packages, (Path("Cargo.toml"),)) == ("core", "app")
+    assert cargo.select_rust_packages(packages, (Path("Cargo.lock"),)) == ("core", "app")
+    assert cargo.select_rust_packages(packages, (Path("app/Cargo.toml"),)) == ("app",)
+
+
 def _installed_toolchain() -> str | None:
     try:
         listed = subprocess.run(
@@ -309,6 +321,42 @@ def test_rust_binary_rejects_missing_executable(
     )
     with pytest.raises(StepFailed, match="produced no executable"):
         execute([RustBinary(CargoPackage("missing"))])
+
+
+# (spec) Step kinds
+def test_rust_binary_rejects_several_executables(monkeypatch: pytest.MonkeyPatch) -> None:
+    message = (
+        '{"reason":"compiler-artifact","package_id":"path+file:///tmp/app#app@0.1.0",'
+        '"target":{"kind":["bin"]},"executable":"/tmp/one"}\n'
+        '{"reason":"compiler-artifact","package_id":"path+file:///tmp/app#app@0.1.0",'
+        '"target":{"kind":["bin"]},"executable":"/tmp/two"}\n'
+    )
+    monkeypatch.setattr(
+        "roadie.build.rust.CargoPackage.fingerprint",
+        lambda self, base_dir: f"package:{self.name}",
+    )
+    monkeypatch.setattr(
+        Step,
+        "_cmd",
+        lambda *args, **kwargs: subprocess.CompletedProcess([], 0, message, ""),
+    )
+    with pytest.raises(StepFailed, match="produced multiple executables"):
+        execute([RustBinary(CargoPackage("app"))])
+
+
+# (spec) Cargo packages
+def test_a_package_missing_from_the_workspace_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    root = Path("/tmp/workspace")
+    monkeypatch.setattr(
+        cargo,
+        "_snapshot",
+        lambda directory: cargo.CargoSnapshot(
+            cargo.CargoWorkspace(root, (cargo.RustPackage("core", Path("core"), ()),)),
+            "rustc 1.0.0",
+        ),
+    )
+    with pytest.raises(RoadieError, match="cargo package 'missing' is not in the workspace"):
+        CargoPackage("missing").fingerprint(root)
 
 
 # (spec) Step kinds

@@ -207,3 +207,40 @@ def test_cli_ctrl_c_on_a_requested_service_exits_0(tmp_path: Path, capsys: pytes
     )
     cli.run(tmp_path)
     assert "dev is up: http://127.0.0.1:9 (Ctrl-C to stop)" in capsys.readouterr().out
+
+
+# (spec) Step kinds
+def test_http_service_waits_on_root_unless_it_sets_health_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[str | None] = []
+
+    def start(
+        command: tuple[str, ...],
+        *,
+        port: int,
+        cwd: Path,
+        environment: dict[str, str] | None = None,
+        timeout: float = 120,
+        health_path: str | None = None,
+    ) -> RunningProcess:
+        seen.append(health_path)
+        raise RuntimeError("stopped")
+
+    monkeypatch.setattr(RunningProcess, "start", start)
+
+    class Plain(HttpService):
+        def build(self, run: Run) -> RunningProcess:
+            return self._start_cmd("serve", port=1)
+
+    class Checked(HttpService):
+        health_path = "/health"
+
+        def build(self, run: Run) -> RunningProcess:
+            return self._start_cmd("serve", port=1)
+
+    with pytest.raises(RuntimeError, match="stopped"):
+        Plain().build(Run())
+    with pytest.raises(RuntimeError, match="stopped"):
+        Checked().build(Run())
+    assert seen == ["/", "/health"]
