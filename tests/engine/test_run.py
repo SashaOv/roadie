@@ -429,11 +429,11 @@ def test_unreadable_record_does_not_fail_a_dry_run(
 ) -> None:
     root = tmp_path.resolve()
     write_build(root, "class Note(Step[str]):\n    def build(self, run):\n        return 'v'\nitem = Note()\n")
-    cli.run(root)
+    cli.run(file=root)
     record = root / "target" / "roadie" / "build.record.json"
     record.write_text("not json")
     capsys.readouterr()
-    cli.run(root, dry_run=True)
+    cli.run(file=root, dry_run=True)
     output = capsys.readouterr().out
     assert f"ignoring unreadable record {record}:" in output
     assert "item = Note()  # run" in output

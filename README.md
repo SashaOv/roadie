@@ -19,9 +19,9 @@ uvx roadie
 
 ## A two-step build file
 
-`roadie` runs the last step defined in `<directory>/build.py`, after the
-steps it depends on. The second run reuses a step whose inputs have not
-changed.
+`roadie` runs the last step defined in `build.py` in the working directory,
+after the steps it depends on. `-f` names another build file, or a directory
+that holds one. The second run reuses a step whose inputs have not changed.
 
 ```python
 from dataclasses import dataclass
@@ -55,7 +55,7 @@ copy = Copy(api)
 ```
 
 ```sh
-roadie .
+roadie
 ```
 
 The design is in [docs/spec.md](docs/spec.md).

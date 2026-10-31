@@ -31,11 +31,12 @@ class Service(Step[Deployment]):
     stop)` and waits on its process. Ctrl-C and SIGTERM end the wait. A process
     that exits with status 0 prints `<name> exited`; any other status fails the
     step with `exited with status <n>`. A deployment without a `process` is not
-    waited on.
+    waited on. A service may be requested only once per run.
     """
 
     reusable: ClassVar[bool] = False
     deferred: ClassVar[bool] = True
+    once_per_run: ClassVar[bool] = True
 
     def teardown(self, value: Deployment) -> None:
         value.stop()

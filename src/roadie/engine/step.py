@@ -100,6 +100,7 @@ class Step[T](ABC):
     reusable: ClassVar[bool] = True
     recorded: ClassVar[bool] = True
     deferred: ClassVar[bool] = False
+    once_per_run: ClassVar[bool] = False
     serial: int
     base_dir: Path
     build_dir: Path | None

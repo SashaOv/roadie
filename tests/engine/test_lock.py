@@ -213,7 +213,7 @@ def test_dry_run_takes_the_lock_like_a_run(tmp_path: Path, capsys: pytest.Captur
     root = tmp_path.resolve()
     write_build(root, "class Note(Step[str]):\n    def build(self, run):\n        return 'v'\nitem = Note()\n")
     lock = root / "target" / "roadie" / "run.lock"
-    cli.run(root, dry_run=True)
+    cli.run(file=root, dry_run=True)
     assert lock.is_file()
     assert "# run" in capsys.readouterr().out
 
@@ -230,7 +230,7 @@ def test_a_dry_run_waits_for_the_holder(tmp_path: Path) -> None:
         assert _line(holder) == "held"
         dry = _process(
             "import sys\nfrom pathlib import Path\nfrom roadie import cli\n"
-            "cli.run(Path(sys.argv[1]), dry_run=True)\nprint('dry-done', flush=True)\n",
+            "cli.run(file=Path(sys.argv[1]), dry_run=True)\nprint('dry-done', flush=True)\n",
             root,
         )
         assert _line(dry).startswith("waiting for another roadie run:")
@@ -259,11 +259,11 @@ def test_clean_deletes_roadie_state_without_building(
     state.mkdir(parents=True)
     (state / "build.record.json").write_text("{}")
     (state / "note.txt").write_text("artifact")
-    cli.run(root, clean=True, dry_run=True)
+    cli.run(file=root, clean=True, dry_run=True)
     assert sorted(path.name for path in state.iterdir()) == ["run.lock"]
     assert capsys.readouterr().out == ""
     (state / "note.txt").write_text("again")
-    cli.run(root, clean=True)
+    cli.run(file=root, clean=True)
     assert sorted(path.name for path in state.iterdir()) == ["run.lock"]
 
 
@@ -280,7 +280,7 @@ def test_clean_waits_for_the_holder_before_deleting(tmp_path: Path) -> None:
         (state / "note.txt").write_text("keep")
         cleaner = _process(
             "import sys\nfrom pathlib import Path\nfrom roadie import cli\n"
-            "cli.run(Path(sys.argv[1]), clean=True)\nprint('cleaned', flush=True)\n",
+            "cli.run(file=Path(sys.argv[1]), clean=True)\nprint('cleaned', flush=True)\n",
             root,
         )
         assert _line(cleaner).startswith("waiting for another roadie run:")
@@ -306,7 +306,7 @@ def test_a_step_that_runs_roadie_in_the_same_project_fails(tmp_path: Path) -> No
         "import sys\n"
         "from pathlib import Path\n"
         "from roadie import cli\n"
-        "cli.run(Path(sys.argv[1]))\n"
+        "cli.run(file=Path(sys.argv[1]))\n"
     )
     write_build(
         root,
@@ -320,7 +320,7 @@ def test_a_step_that_runs_roadie_in_the_same_project_fails(tmp_path: Path) -> No
     )
     message = f"{lock} is held by the roadie run that started this one (pid {os.getpid()})"
     with pytest.raises(SystemExit, match=re.escape(message)):
-        cli.run(root)
+        cli.run(file=root)
 
 
 # (spec) One run at a time

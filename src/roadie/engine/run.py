@@ -76,6 +76,7 @@ def execute(
     env: Sequence[Path] = (),
     dry: bool = False,
     jobs: int = 1,
+    targets: Sequence[Step[Any]] | None = None,
 ) -> object:
     if jobs < 1:
         raise RoadieError("--jobs must be at least 1")
@@ -83,7 +84,13 @@ def execute(
         held = acquire_run_lock(root)
         try:
             return _run_steps(
-                steps, locked=locked, env=env, run_lock=held, dry=dry, jobs=jobs
+                steps,
+                locked=locked,
+                env=env,
+                run_lock=held,
+                dry=dry,
+                jobs=jobs,
+                targets=targets,
             )
         finally:
             held.release()
@@ -97,12 +104,16 @@ def _run_steps(
     run_lock: HeldLock | None = None,
     dry: bool = False,
     jobs: int = 1,
+    targets: Sequence[Step[Any]] | None = None,
 ) -> object:
     _apply_env(steps, env)
     run = Run(locked=locked)
     run.started_at = time.monotonic()
     live: list[Step[Any]] = []
-    requested = id(steps[-1]) if steps else None
+    if targets is None:
+        requested = {id(steps[-1])} if steps else set()
+    else:
+        requested = {id(step) for step in targets}
     blockers = _blockers(steps, requested)
     outputs: dict[int, str] = {}
     started: set[int] = set()
@@ -151,7 +162,7 @@ def _run_steps(
                     print(f"{format_step(step)}  # {marks[id(step)]}", flush=True)
             else:
                 for step in steps:
-                    if step.deferred and id(step) != requested and id(step) not in started:
+                    if step.deferred and id(step) not in requested and id(step) not in started:
                         name = step.name or type(step).__name__
                         print(f"not started {name}: no step that takes it runs", flush=True)
             if dry:
@@ -184,7 +195,7 @@ def _schedule(
     blockers: dict[int, set[int]],
     guards: dict[int, threading.Lock],
     schedule: threading.Condition,
-    requested: int | None,
+    requested: set[int],
     run_lock: HeldLock | None,
     dry: bool,
     jobs: int,
@@ -205,7 +216,7 @@ def _schedule(
             with schedule:
                 if failures:
                     return
-                step = _next_ready(steps, finished, running, prerequisites)
+                step = _next_ready(steps, finished, running, prerequisites, requested)
                 if step is None:
                     if running:
                         schedule.wait()
@@ -270,11 +281,7 @@ def _schedule(
                     with schedule:
                         running.discard(id(step))
                         finished.add(id(step))
-                        if (
-                            requested is not None
-                            and id(step) == requested
-                            and id(step) in run._values
-                        ):
+                        if id(step) in requested and id(step) in run._values:
                             result.append(run._values[id(step)])
                         expired = [] if failures else _take_due(run, live, blockers, finished)
                         schedule.notify_all()
@@ -309,14 +316,43 @@ def _schedule(
         return result[-1] if result else None
 
 
+def _depends_on(
+    step_id: int,
+    target: int,
+    prerequisites: dict[int, set[int]],
+    seen: set[int],
+) -> bool:
+    if step_id in seen:
+        return False
+    seen.add(step_id)
+    dependencies = prerequisites.get(step_id, set())
+    if target in dependencies:
+        return True
+    return any(
+        _depends_on(dependency, target, prerequisites, seen) for dependency in dependencies
+    )
+
+
 def _next_ready(
     steps: Sequence[Step[Any]],
     finished: set[int],
     running: set[int],
     prerequisites: dict[int, set[int]],
+    requested: set[int],
 ) -> Step[Any] | None:
     for step in steps:
         if id(step) in finished or id(step) in running:
+            continue
+        if (
+            id(step) in requested
+            and type(step).once_per_run
+            and any(
+                id(other) not in finished
+                and other is not step
+                and not _depends_on(id(other), id(step), prerequisites, set())
+                for other in steps
+            )
+        ):
             continue
         if prerequisites[id(step)].issubset(finished):
             return step
@@ -333,7 +369,7 @@ def _execute_step(
     marks: dict[int, str],
     guards: dict[int, threading.Lock],
     schedule: threading.Condition,
-    requested: int | None,
+    requested: set[int],
     run_lock: HeldLock | None,
     dry: bool,
 ) -> None:
@@ -373,11 +409,11 @@ def _run_one(
     marks: dict[int, str],
     guards: dict[int, threading.Lock],
     schedule: threading.Condition,
-    requested: int | None,
+    requested: set[int],
     run_lock: HeldLock | None,
     dry: bool,
 ) -> None:
-    if step.deferred and id(step) != requested:
+    if step.deferred and id(step) not in requested:
         # A deferred step's output fingerprint is its step fingerprint, so a
         # consumer can be reused without it. The consumer builds it.
         step_fingerprint = fingerprint(step, outputs=outputs)
@@ -432,7 +468,7 @@ def _run_one(
             outputs[id(step)] = output
 
 
-def _blockers(steps: Sequence[Step[Any]], requested: int | None) -> dict[int, set[int]]:
+def _blockers(steps: Sequence[Step[Any]], requested: set[int]) -> dict[int, set[int]]:
     present = {id(step) for step in steps}
     blockers = {id(step): {id(step)} for step in steps}
     for step in steps:
@@ -449,7 +485,7 @@ def _blockers(steps: Sequence[Step[Any]], requested: int | None) -> dict[int, se
             extend(dependency, holders, seen)
 
     for step in steps:
-        if step.deferred and id(step) != requested:
+        if step.deferred and id(step) not in requested:
             extend(step, set(blockers[id(step)]), set())
     return blockers
 
@@ -496,7 +532,7 @@ def _kept(
     *,
     built: bool,
     step_fingerprint: str,
-    requested: int | None,
+    requested: set[int],
     run_lock: HeldLock | None,
     schedule: threading.Condition,
     elapsed: float | None = None,
@@ -513,13 +549,16 @@ def _kept(
     _remember(step, step_fingerprint, output, value)
     if elapsed is not None:
         report_built(step, elapsed)
-    if id(step) == requested:
+    if id(step) in requested and (
+        type(step).serve is not Step.serve or requested.issubset({id(step)})
+    ):
         # A served result, such as a dev server, outlives the run and must not
         # keep the lock. The total is printed first, so a server does not hide it.
+        # With several results, release when the one that serves is ready, or
+        # when the only requested result is kept.
         if run_lock is not None:
             sweep_stale_state(project_root())
             run_lock.release()
-        # A kind that serves, such as a service, would hide the total until it returns.
         if type(step).serve is not Step.serve:
             _report_run(run)
         step.serve(value)

@@ -34,9 +34,6 @@ bullet, except the input-enforcement design, which is moved whole.
   `TestResults`.
 - A Windows CI job, then stop a Windows process tree (`taskkill /T`) and
   replace the `SIGKILL` that Windows lacks.
-- Rename `--base_dir` to `--base-dir`, keeping `--base_dir` as a hidden alias
-  for one release.
-
 ## User manual
 
 Guidance taken out of the spec because it follows from the rules.

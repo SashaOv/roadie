@@ -205,7 +205,7 @@ def test_cli_ctrl_c_on_a_requested_service_exits_0(tmp_path: Path, capsys: pytes
         "        return Proc()\n"
         "dev = Up()\n",
     )
-    cli.run(tmp_path)
+    cli.run(file=tmp_path)
     assert "dev is up: http://127.0.0.1:9 (Ctrl-C to stop)" in capsys.readouterr().out
 
 

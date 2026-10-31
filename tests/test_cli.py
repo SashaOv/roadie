@@ -27,12 +27,12 @@ def test_missing_directory_and_missing_git_are_messages(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     missing = (tmp_path / "absent").resolve()
-    message = f"directory does not exist: {missing}"
+    message = f"build file does not exist: {missing}"
     with pytest.raises(SystemExit) as missing_run:
-        cli.run(missing)
+        cli.run(file=missing)
     assert str(missing_run.value) == message
     with pytest.raises(SystemExit) as missing_clean:
-        cli.run(missing, clean=True)
+        cli.run(file=missing, clean=True)
     assert str(missing_clean.value) == message
 
     project = tmp_path / "project"
@@ -41,10 +41,10 @@ def test_missing_directory_and_missing_git_are_messages(
     (tmp_path / "bin").mkdir()
     git_message = f"cannot run git to find the project root: {_git_start_failure(project)}"
     with pytest.raises(SystemExit) as git_run:
-        cli.run(project)
+        cli.run(file=project)
     assert str(git_run.value) == git_message
     with pytest.raises(SystemExit) as git_clean:
-        cli.run(project, clean=True)
+        cli.run(file=project, clean=True)
     assert str(git_clean.value) == git_message
 
 
@@ -55,12 +55,12 @@ def test_dry_run_marks_reuse_and_run(tmp_path: Path, monkeypatch: pytest.MonkeyP
     isolate_repo(monkeypatch, root)
     project = root / "project"
     write_build(project, EMITTER.replace("api = Emitter()", 'api = Emitter("v1")\n'))
-    cli.run(project)
+    cli.run(file=project)
     capsys.readouterr()
-    cli.run(project, dry_run=True)
+    cli.run(file=project, dry_run=True)
     assert capsys.readouterr().out.splitlines() == ["api = Emitter(text='v1')  # reuse"]
     write_build(project, EMITTER.replace("api = Emitter()", 'api = Emitter("v2")\n'))
-    cli.run(project, dry_run=True)
+    cli.run(file=project, dry_run=True)
     assert capsys.readouterr().out.splitlines() == ["api = Emitter(text='v2')  # run"]
 
 
@@ -90,9 +90,9 @@ def test_dry_run_marks_a_step_without_a_record_by_whether_it_reuses(
         + "        return 'done'\n"
         + "\nafter = After(api)\n",
     )
-    cli.run(root)
+    cli.run(file=root)
     capsys.readouterr()
-    cli.run(root, dry_run=True)
+    cli.run(file=root, dry_run=True)
     assert capsys.readouterr().out.splitlines()[-1] == f"after = After(source=api)  {marker}"
 
 
@@ -104,7 +104,7 @@ def test_cli_base_dir_applies_to_included_steps(tmp_path: Path, monkeypatch: pyt
     write_build(tmp_path / "project", 'module = include("module")\napi = Group(module.server)\n')
     observed: list[Path] = []
     monkeypatch.setattr(cli, "execute", lambda steps, **kwargs: observed.extend(step.base_dir for step in steps))
-    run_cli(["--base_dir", "work", "project", "api"])
+    run_cli(["--base_dir", "work", "-f", "project", "api"])
     assert observed == [tmp_path / "work", tmp_path / "work"]
 
 
@@ -115,7 +115,7 @@ def test_cli_passes_env_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     write_build(tmp_path, 'item = RustBinary(CargoPackage("server"))\n')
     seen: dict[str, object] = {}
     monkeypatch.setattr(cli, "execute", lambda steps, **kwargs: seen.update(kwargs))
-    run_cli(["--env", "dev.env", "--env", "extra.env", str(tmp_path)])
+    run_cli(["--env", "dev.env", "--env", "extra.env", "-f", str(tmp_path)])
     assert seen["env"] == [Path("dev.env"), Path("extra.env")] or seen["env"] == (
         Path("dev.env"),
         Path("extra.env"),
@@ -141,7 +141,7 @@ second = RustBinary(CargoPackage("second"))
 combined = Combined((first, second))
 ''')
     assert plan_names(tmp_path) == ["first", "second", "combined"]
-    run_cli(["--dry", str(tmp_path)])
+    run_cli(["--dry", "-f", str(tmp_path)])
     assert capsys.readouterr().out.splitlines()[-1] == "combined = Combined(inputs=(first, second))  # run"
 
 
@@ -158,15 +158,17 @@ def test_cli_passes_locked_and_prints_keyword_output(tmp_path: Path, monkeypatch
         "        return self.output\n"
         "api = Note(output='api.yaml')\n",
     )
-    run_cli(["--dry", str(tmp_path)])
+    run_cli(["--dry", "-f", str(tmp_path)])
     assert capsys.readouterr().out.splitlines()[-1] == "api = Note(output='api.yaml')  # run"
     observed: list[tuple[bool, object]] = []
     monkeypatch.setattr(
         cli,
         "execute",
-        lambda steps, *, root, locked, env=(), dry=False, jobs=1: observed.append((locked, env)),
+        lambda steps, *, root, locked, env=(), dry=False, jobs=1, targets=None: observed.append(
+            (locked, env)
+        ),
     )
-    run_cli(["--locked", str(tmp_path)])
+    run_cli(["--locked", "-f", str(tmp_path)])
     assert observed == [(True, ())]
 
 
@@ -185,7 +187,7 @@ def test_dry_run_omits_attributes_whose_value_is_none(tmp_path: Path, capsys: py
         "        pass\n\n"
         "item = Setting(None)\n",
     )
-    run_cli(["--dry", str(tmp_path)])
+    run_cli(["--dry", "-f", str(tmp_path)])
     assert capsys.readouterr().out.splitlines()[-1] == "item = Setting()  # run"
 
 
@@ -202,7 +204,7 @@ def test_dry_run_prints_attributes_of_a_plain_class_as_keywords(
         "        return None\n"
         "item = Plain('v')\n",
     )
-    run_cli(["--dry", str(tmp_path)])
+    run_cli(["--dry", "-f", str(tmp_path)])
     assert capsys.readouterr().out.splitlines()[-1] == "item = Plain(label='v')  # run"
 
 
@@ -230,11 +232,11 @@ def test_dry_run_marks_a_deferred_step_not_started_unless_a_consumer_runs(
         "server = Server()\n"
         "job = Job(server)\n",
     )
-    cli.run(tmp_path)
+    cli.run(file=tmp_path)
     capsys.readouterr()
     (tmp_path / "server.txt").unlink()
     (tmp_path / "stopped.txt").unlink()
-    cli.run(tmp_path, dry_run=True)
+    cli.run(file=tmp_path, dry_run=True)
     lines = capsys.readouterr().out.splitlines()
     assert lines[-2].endswith("# not started")
     assert lines[-1].endswith("# reuse")
@@ -260,9 +262,85 @@ def test_dry_run_marks_a_deferred_step_not_started_unless_a_consumer_runs(
         "server = Server()\n"
         "job = Job(server)\n",
     )
-    cli.run(tmp_path, dry_run=True)
+    cli.run(file=tmp_path, dry_run=True)
     lines = capsys.readouterr().out.splitlines()
     assert lines[-2].endswith("# run")
     assert lines[-1].endswith("# run")
     assert not (tmp_path / "server.txt").exists()
     assert not (tmp_path / "stopped.txt").exists()
+
+
+# (spec) Command line
+def test_help_names_the_build_file_and_base_dir(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exit:
+        cli.app(["--help"])
+    assert exit.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "--file" in help_text
+    assert "-f " in help_text or "-f," in help_text or " -f" in help_text
+    assert "--base-dir" in help_text
+    assert "--base_dir" not in help_text
+
+
+# (spec) Command line
+def test_a_directory_word_hints_to_pass_the_build_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    write_build(tmp_path, "item = Check('true')\n")
+    with pytest.raises(SystemExit, match=r"has no result named '\.'; to use the build file in \., pass -f \."):
+        run_cli([".", "item", "--dry"])
+
+
+# (spec) Command line
+def test_several_results_run_once_over_their_shared_steps(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_build(
+        tmp_path,
+        "class Note(Step[str]):\n"
+        "    def build(self, run):\n"
+        "        return 'n'\n"
+        "class Job(Step[str]):\n"
+        "    def __init__(self, source):\n"
+        "        self.source = source\n"
+        "    def build(self, run):\n"
+        "        return 'j'\n"
+        "shared = Note()\n"
+        "one = Job(shared)\n"
+        "two = Job(shared)\n",
+    )
+    run_cli(["-f", str(tmp_path / "build.py"), "one", "two", "--dry"])
+    lines = capsys.readouterr().out.splitlines()
+    assert [line.split(" = ")[0] for line in lines] == ["shared", "one", "two"]
+    assert all(line.endswith("# run") for line in lines)
+
+
+# (spec) Command line
+def test_two_services_cannot_both_be_requested(tmp_path: Path) -> None:
+    write_build(
+        tmp_path,
+        "class Up:\n"
+        "    def stop(self):\n"
+        "        pass\n"
+        "class Api(Service):\n"
+        "    def build(self, run):\n"
+        "        return Up()\n"
+        "class Web(Service):\n"
+        "    def build(self, run):\n"
+        "        return Up()\n"
+        "api = Api()\n"
+        "web = Web()\n",
+    )
+    with pytest.raises(
+        SystemExit,
+        match="api and web can each be requested only once per run; request one of them",
+    ):
+        run_cli(["-f", str(tmp_path), "api", "web", "--dry"])
+
+
+# (spec) Command line
+def test_a_missing_build_file_names_the_path(tmp_path: Path) -> None:
+    missing = tmp_path / "absent"
+    with pytest.raises(SystemExit, match=f"build file does not exist: {missing}"):
+        run_cli(["-f", str(missing), "--dry"])

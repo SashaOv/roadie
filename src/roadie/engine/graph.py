@@ -6,7 +6,7 @@ the module's variables, so reassigning a name does not move its result.
 """
 
 import runpy
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -63,6 +63,18 @@ class Graph:
             ordered.append(result)
 
         visit(self.result(name))
+        return ordered
+
+    # (spec) Command line
+    def plan_results(self, names: Sequence[str]) -> list[Step[Any]]:
+        """The union of each named result's plan, in the order the names are given."""
+        ordered: list[Step[Any]] = []
+        seen: set[int] = set()
+        for name in names:
+            for step in self.plan(name):
+                if id(step) not in seen:
+                    seen.add(id(step))
+                    ordered.append(step)
         return ordered
 
 

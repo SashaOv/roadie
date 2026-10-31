@@ -751,7 +751,7 @@ approve a run, such as a release, before it goes on. `--base_dir` becomes
 
 ### Patches
 
-- [ ] **R13.1: Name the build file with `-f` and run several results.**
+- [x] **R13.1: Name the build file with `-f` and run several results.**
   `-f PATH`, `--file PATH` replaces the `directory` word: a file is the
   root build file, a directory means its `build.py`, and the default is
   `.`; a path that does not exist fails with `build file does not exist:

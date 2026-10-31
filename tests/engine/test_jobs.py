@@ -181,10 +181,10 @@ def test_jobs_defaults_to_the_cpu_count(tmp_path: Path, monkeypatch: pytest.Monk
     seen: dict[str, object] = {}
     monkeypatch.setattr(cli, "execute", lambda steps, **kwargs: seen.update(kwargs))
     monkeypatch.setattr(os, "process_cpu_count", lambda: 3)
-    cli.run(tmp_path)
+    cli.run(file=tmp_path)
     assert seen["jobs"] == 3
     monkeypatch.setattr(os, "process_cpu_count", lambda: None)
-    cli.run(tmp_path)
+    cli.run(file=tmp_path)
     assert seen["jobs"] == 1
 
 
@@ -197,7 +197,7 @@ def test_jobs_below_one_fails(tmp_path: Path) -> None:
     with pytest.raises(RoadieError, match="--jobs must be at least 1"):
         execute([_named(Note(), "note")], root=tmp_path, jobs=0)
     with pytest.raises(SystemExit, match="--jobs must be at least 1"):
-        cli.run(tmp_path, jobs=0)
+        cli.run(file=tmp_path, jobs=0)
 
 
 # (spec) Parallel steps

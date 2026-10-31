@@ -68,24 +68,37 @@ started, the run fails with `cannot run git to find the project root:
 ## Command line
 
 ```
-roadie [--dry-run | --dry] [--locked] [--clean] [--jobs N] [--base_dir DIR] [--env FILE]... [directory] [result]
+roadie [--dry-run | --dry] [--locked] [--clean] [--jobs N] [--base-dir DIR] [--env FILE]... [-f PATH] [result]...
 ```
 
-`directory` (default `.`) holds the root build file; a directory that does
-not exist fails with `directory does not exist: <path>`. `result` names the
-result to run. `default_step(step)` returns `step` and marks it as that
-result; only the root build file's mark counts, and an included file's mark
-is ignored. Marking two results fails with `<path> marks more than one
-default result: <a>, <b>`. Marking a step that no variable of the file holds
-fails with `<path>: the default result is not bound to a variable`. Calling
-it outside a loading build file fails with `default_step() works only in a
-build.py that Roadie loads`. Without a mark, `roadie` runs the result
-constructed last. (Note: that is not the last name assigned: reassigning a
-name does not move the step it held). Naming a result the file does not
-define is an error.
+`-f PATH`, `--file PATH` names the root build file. A file is that build
+file; a directory means the `build.py` inside it. The default is `.`. A path
+that does not exist fails with `build file does not exist: <path>`.
 
-- `--base_dir DIR`: the base directory of every step whose build file's
-  settings do not set one.
+Each other word names a result. The run builds each, in the order given,
+over the union of their plans, and a step shared by two plans is built once.
+A requested result whose class sets `once_per_run` waits until every step
+that does not depend on it has finished, so a result that keeps the terminal
+is last. With no word, `roadie` runs the default result. `default_step(step)`
+returns `step` and marks it as that result; only the root build file's mark
+counts, and an included file's mark is ignored. Marking two results fails
+with `<path> marks more than one default result: <a>, <b>`. Marking a step
+that no variable of the file holds fails with `<path>: the default result is
+not bound to a variable`. Calling it outside a loading build file fails with
+`default_step() works only in a build.py that Roadie loads`. Without a mark,
+`roadie` runs the result constructed last. (Note: that is not the last name
+assigned: reassigning a name does not move the step it held). A word that
+names no result and is an existing directory fails with `<path> has no result
+named '<word>'; to use the build file in <word>, pass -f <word>`. Naming any
+other missing result is an error that lists the file's results.
+
+A step class sets `once_per_run = True` when it may be requested once per
+run. `Service` sets it. Requesting two such results fails with `<a> and <b>
+can each be requested only once per run; request one of them`.
+
+- `--base-dir DIR`: the base directory of every step whose build file's
+  settings do not set one. `--base_dir` is the same option and is omitted
+  from `--help`.
 - `--locked`: fail instead of changing a generated file that git tracks.
 - `--clean`: take the lock, delete everything under `<root>/target/roadie/`
   except `run.lock`, and exit without building. It exits before a dry run.
@@ -139,7 +152,7 @@ after the call, in the build file that makes it:
 
 - `base_dir`: the base directory, relative to the build file's directory. By
   default a step's base directory is its build file's directory, or the
-  directory given to `--base_dir`; `config` overrides both for the steps
+  directory given to `--base-dir`; `config` overrides both for the steps
   after the call.
 - `env`: one environment file, or several, relative to the build file's
   directory.
@@ -320,7 +333,10 @@ does not block builds.
 
 The requested result is built in plan order, even when deferred. After it
 builds or is reused, its kind may serve it before the run tears it down; a
-service, for one, waits on its process.
+service, for one, waits on its process. A run may request several results.
+It builds the union of their plans, each shared step once, and serves each
+requested result whose kind serves. A class that sets `once_per_run`, as
+`Service` does, may be requested once in that run.
 
 ### Reusing a step
 

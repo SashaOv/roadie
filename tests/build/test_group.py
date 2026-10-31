@@ -29,5 +29,5 @@ def test_group_plans_and_prints_steps_as_variadic_arguments(tmp_path: Path, monk
     monkeypatch.setattr("roadie.build.rust.CargoPackage.fingerprint", lambda self, base_dir: f"package:{self.name}")
     write_build(tmp_path, 'first = RustBinary(CargoPackage("first"))\nsecond = RustBinary(CargoPackage("second"))\nall_steps = Group(first, second)\n')
     assert plan_names(tmp_path) == ["first", "second", "all_steps"]
-    run_cli(["--dry", str(tmp_path)])
+    run_cli(["--dry", "-f", str(tmp_path)])
     assert capsys.readouterr().out.splitlines()[-1] == "all_steps = Group(first, second)  # run"

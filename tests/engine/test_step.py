@@ -132,7 +132,7 @@ def test_requested_service_reads_the_terminal_input(
     # A dev server's keyboard shortcuts (Vite's b and q) need its stdin.
     write_build(tmp_path, _STDIN_SERVER)
     finished = subprocess.run(
-        (sys.executable, "-c", "from roadie.cli import main; main()", str(tmp_path)),
+        (sys.executable, "-c", "from roadie.cli import main; main()", "-f", str(tmp_path)),
         cwd=Path(roadie.__file__).resolve().parent.parent,
         check=False,
         input=typed,
