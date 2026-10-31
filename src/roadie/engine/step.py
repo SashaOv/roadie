@@ -22,7 +22,7 @@ from typing import (
 from pydantic import TypeAdapter
 
 from roadie.engine.config import base_directory, configured_env, loading_directory
-from roadie.engine.errors import StepFailed
+from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.inputs import digest
 from roadie.engine.lock import RUN_PID_VARIABLE
 from roadie.engine.prefix import current_prefix, output_streams, read_lines
@@ -189,6 +189,7 @@ class Step[T](ABC):
 
     def call_arguments(self) -> tuple[list[object], dict[str, object]]:
         """Positional and keyword arguments that `--dry` shows."""
+        reject_reserved(self)
         named = {key: value for key, value in self.attributes().items() if value is not None}
         return [], named
 
@@ -311,3 +312,41 @@ class Step[T](ABC):
         merged = {**os.environ, **(environment or {}), **self.env_values}
         merged[RUN_PID_VARIABLE] = str(os.getpid())
         return merged
+
+
+def _reserved_names() -> frozenset[str]:
+    names = set(Step.__annotations__)
+    names.update(name for name in vars(Step) if not name.startswith("_"))
+    return frozenset(names)
+
+
+_RESERVED = _reserved_names()
+_HOOKS = frozenset(name for name in _RESERVED if callable(getattr(Step, name, None)))
+
+
+# (spec) Dependencies and attributes
+def reject_reserved(step: Step[Any]) -> None:
+    """Fail when a step attribute uses a name Roadie keeps for itself."""
+    for cls in type(step).mro():
+        if cls is Step:
+            break
+        fields = getattr(cls, "__dataclass_fields__", None)
+        if fields is not None:
+            declared = fields
+        else:
+            declared = [
+                name
+                for name, hint in getattr(cls, "__annotations__", {}).items()
+                if get_origin(hint) is not ClassVar
+            ]
+        for name in declared:
+            if name in _RESERVED:
+                _raise_reserved(step, name)
+    for name in vars(step):
+        if name in _HOOKS:
+            _raise_reserved(step, name)
+
+
+def _raise_reserved(step: Step[Any], name: str) -> None:
+    label = step.name or type(step).__name__
+    raise RoadieError(f"{label} attribute {name} is reserved by Roadie")

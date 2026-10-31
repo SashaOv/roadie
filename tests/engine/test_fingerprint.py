@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from support import Value, write_build
+from support import Value, execute, isolate_repo, write_build
 
 import roadie.engine.fingerprint as fingerprints
 from roadie.build import Files, RoadieError, Step
@@ -134,6 +134,62 @@ def test_code_hash_keys_sources_by_module_name(monkeypatch: pytest.MonkeyPatch) 
     assert b"roadie.engine.step\0" in joined
     step_file = Path(fingerprints.__file__).resolve().parent / "step.py"
     assert str(step_file).encode() not in joined
+
+
+# (spec) Dependencies and attributes
+def test_a_reserved_name_fails_when_the_step_is_fingerprinted() -> None:
+    @dataclass(eq=False)
+    class Named(Step[str]):
+        name: str
+
+        def build(self, run: Run) -> str:
+            return self.name
+
+    named = Named("given")
+    with pytest.raises(RoadieError, match="given attribute name is reserved by Roadie"):
+        fingerprint(named)
+
+    @dataclass(eq=False)
+    class Logged(Step[str]):
+        report: str
+
+        def build(self, run: Run) -> str:
+            return self.report
+
+    logged = Logged("out")
+    logged.name = "logged"
+    with pytest.raises(RoadieError, match="logged attribute report is reserved by Roadie"):
+        fingerprint(logged)
+
+
+# (spec) Dependencies and attributes
+def test_a_reserved_name_fails_when_a_dry_run_shows_the_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    isolate_repo(monkeypatch, tmp_path)
+
+    @dataclass(eq=False)
+    class Logged(Step[str]):
+        report: str
+
+        def build(self, run: Run) -> str:
+            return self.report
+
+    logged = Logged("out")
+    logged.name = logged.variable = "logged"
+    with pytest.raises(RoadieError, match="logged attribute report is reserved by Roadie"):
+        execute([logged], dry=True)
+
+
+# (spec) Dependencies and attributes
+def test_overriding_a_class_attribute_is_not_a_reserved_name() -> None:
+    class Once(Step[str]):
+        reusable = False
+
+        def build(self, run: Run) -> str:
+            return "v"
+
+    fingerprint(Once())
 
 
 # (spec) Step fingerprints

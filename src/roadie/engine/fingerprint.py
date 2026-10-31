@@ -10,7 +10,7 @@ import roadie
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import Input, digest
 from roadie.engine.root import project_root
-from roadie.engine.step import Step
+from roadie.engine.step import Step, reject_reserved
 
 
 # (spec) Step fingerprints
@@ -20,6 +20,7 @@ def fingerprint(
     outputs: Mapping[Any, str] | None = None,
     env: Mapping[str, str] | None = None,
 ) -> str:
+    reject_reserved(step)
     attributes: dict[str, str] = {}
     inputs: dict[str, Input] = {}
     dependencies: dict[str, Step[Any]] = {}

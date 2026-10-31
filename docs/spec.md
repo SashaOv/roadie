@@ -359,7 +359,12 @@ dependencies. An attribute that is an input, or a tuple holding inputs, is
 fingerprinted. The remaining attributes must be plain values: `None`, `str`,
 `int`, `float`, `bool`, a `Path`, or a tuple of them. Any other attribute
 fails with `<step> attribute <name> must be a plain value, an input, or a
-step`, when the step is fingerprinted or shown by `--dry`.
+step`, when the step is fingerprinted or shown by `--dry`. An attribute
+whose name Roadie keeps for itself — its bookkeeping, such as `name`,
+`base_dir` and `env_values`, its hooks, such as `report`, and its class
+attributes `reusable`, `recorded` and `deferred` — fails with `<step>
+attribute <name> is reserved by Roadie`, at the same point. A subclass may
+still override those class attributes and hooks.
 
 ### Step values
 

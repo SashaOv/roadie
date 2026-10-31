@@ -23,19 +23,6 @@ bullet, except the input-enforcement design, which is moved whole.
 - Rename `--base_dir` to `--base-dir`, keeping `--base_dir` as a hidden alias
   for one release.
 
-## Gaps
-
-Code that departs from the spec or from general engineering practice.
-
-- Roadie's bookkeeping shares the step's attributes: it stores `name`,
-  `variable`, `serial`, `base_dir`, `build_dir`, `build_variables`,
-  `env_files` and `env_values` on the step and leaves them out of the
-  fingerprint and `--dry`. A step attribute with one of those names overwrites
-  Roadie's value and is not fingerprinted. The spec reserves no names. The
-  step hooks (`publish`, `report`, `serve`, `encode`, `matches`, `decode`,
-  `output_fingerprint`, `call_arguments`) and the class attributes
-  `reusable`, `recorded` and `deferred` share the same namespace: a dataclass
-  field named `report` hides the hook.
 ## User manual
 
 Guidance taken out of the spec because it follows from the rules.
