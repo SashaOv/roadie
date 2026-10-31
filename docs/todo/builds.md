@@ -384,7 +384,7 @@ with `from roadie.build import *`, as the spec says a build file usually does.
 
 ## R11: Independent steps run at once, and a second run waits its turn
 
-Status: planned, approved 2026-10-31
+Status: executed, pending author verification
 
 **Improvement.** `roadie` runs the steps of a plan that do not depend on each
 other at the same time, up to `--jobs` of them, so `roadie . checks` runs
@@ -466,9 +466,61 @@ backlog item asked for, because `--jobs 1` helps troubleshooting.
   line at a time, so lines of different steps never mix. The `--jobs`
   default follows decision 1.
 
-**Author action required at completion.** Push `main` and confirm CI passes
-on both platforms, or authorize the executor to push. Discharges the CI
-clause.
+**Acceptance run (2026-10-31).** Commit `6b01434d07f30d284bfa327279c4cdad1595c934`,
+tree `a5e14253189775580dbbfb308dce09c50d19ac9d`. Host Darwin 25.6.0 arm64.
+uv 0.12.23 (Homebrew 2026-10-03 aarch64-apple-darwin). Python 3.13.13.
+`process_cpu_count` 10, so the `--jobs` default is 10. On that commit,
+`uv run roadie . --clean` then `uv run roadie . checks` exited 0 and printed
+the prefixed `build` lines, but pytest's own output was missing: `Pytest`
+captures standard output, and a parallel run did not print captured output.
+The second `checks` reused ruff, mypy, and pytest. A second terminal's
+`--dry` did not wait, because a timestamp touch does not change a
+fingerprint. That log is outside the repo at
+`/Users/sasha/.local/share/roadie/r11-acceptance-commit.log`, sha256
+`4cdb7fcfad355efb28fb143643cad75d19a72384f8e571574eadcf42d1f59a8c`.
+
+The fix is uncommitted, in `src/roadie/engine/step.py` and
+`tests/engine/test_jobs.py`: with `--jobs` above 1, captured standard output
+is printed live with the prefix and still returned unprefixed; with `--jobs`
+1 it stays hidden. `uv run pytest -q --tb=line` is 232 passed on that tree.
+Re-ran on the dirty tree: `uv run roadie . --clean`, `uv run roadie . checks`
+twice, then a one-line addition to `prefix.py` (restored afterward) so a
+third `checks` rebuilt while `uv run roadie . --dry` waited. Script
+`/Users/sasha/.local/share/roadie/r11-acceptance.py`, sha256
+`fe87a07bab7ae8ba9305e55a80c15ca80fa2d427a0214b71717e2892802b9c3b`. Log
+`/Users/sasha/.local/share/roadie/r11-acceptance.log`, sha256
+`6d8fef7968a80d7c5a4b001fff4eb7b695016d8cec91298f6eff7040d7ec2913`.
+
+- Clean exited 0.
+- First `checks` exited 0. The `build` lines of ruff, mypy, and pytest
+  preceded `[pytest] ============================= 232 passed in 15.80s =============================`.
+  Pytest's lines, including that summary, start with `[pytest] `.
+- Second `checks` exited 0 and printed `reused` for ruff, mypy, and pytest.
+- The dry run printed `waiting for another roadie run: .../run.lock (pid 61192, started 2026-10-31T03:05:00Z)` once, then the four `# reuse` marks, and exited 0.
+
+**Author action required at completion.** The capture-output fix above was
+committed on the author's approval (2026-10-31); CI runs on it when `main`
+is pushed. ~~Push `main` and confirm CI passes on both platforms, or authorize
+the executor to push. Discharges the CI clause.~~ The author pushed `main`;
+CI run 41163106520 on `6b01434` passed on `ubuntu-latest` and
+`macos-latest`.
+
+**Review (2026-10-31).** R11.3's commit subject drops the backticks of its
+patch name (`--jobs` for `` `--jobs` ``); the other three match. The
+missing pytest output is a planning error, not an R11 defect: `Pytest` has
+captured standard output since R9, so before R11 pytest printed nothing but
+its `+` line either, and the acceptance clause quoting pytest's summary was
+never checked against a run. The executor's fix prints captured output only
+with `--jobs` above 1, so `--jobs 1`, kept for troubleshooting, shows less
+than a parallel run; the same already holds for standard error since R11.4.
+Open for the author: show programs' output the same way in both modes, the
+modes differing only in the prefix (recommended), keep the fix as is, or hide
+captured output in both. The spec's Plans and runs concept carried the
+`--jobs` default and output format; the review moves them to a new Parallel
+steps section under Running a plan and retargets ten test markers.
+
+**Reflection.** Acceptance clauses that quote output are checked against a
+current run of the command while planning.
 
 ## Backlog
 

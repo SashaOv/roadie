@@ -207,8 +207,8 @@ class Step[T](ABC):
         process's PID. It inherits standard input. Standard
         output is shown, or returned when `capture_output` is set. When the
         run uses more than one job, each line of standard output and standard
-        error is printed as it arrives, prefixed with `[<name>] `; captured
-        standard output is returned unprefixed and not printed. Otherwise
+        error is printed as it arrives, prefixed with `[<name>] `, and
+        captured standard output is still returned unprefixed. Otherwise
         standard error is captured and shown only when the command fails.
         Unless `check` is false, a non-zero exit fails the step with
         `<name> failed: <command> exited with status <n>: <last 2000
@@ -232,12 +232,7 @@ class Step[T](ABC):
         try:
             if prefix and sink is not None and process.stdout is not None and process.stderr is not None:
                 readers = [
-                    read_lines(
-                        process.stdout.readline,
-                        None if capture_output else sink.stdout,
-                        prefix,
-                        stdout_parts,
-                    ),
+                    read_lines(process.stdout.readline, sink.stdout, prefix, stdout_parts),
                     read_lines(process.stderr.readline, sink.stderr, prefix, stderr_parts),
                 ]
             try:

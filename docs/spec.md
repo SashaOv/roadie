@@ -50,16 +50,9 @@ fingerprint**, a digest of what that dependency built. A step's build reads noth
 
 The **plan** of a result is the result and the steps it depends on, directly
 or indirectly. A **run** builds or reuses a step once every step it takes is
-done, up to `--jobs` steps at once, and tears each step down after every
-step that takes it has finished. `--jobs` defaults to the number of CPUs
-Roadie may use (`os.process_cpu_count()`), or 1 when that count is
-unavailable. With `--jobs` above 1, each line a step prints, and each line
-of output from the programs its `_cmd` and `_start_cmd` run, is printed as
-it arrives, prefixed with `[<name>] `, where `<name>` is the step's name or
-its class name when it has none, and lines of different steps are not mixed.
-With `--jobs` 1, output is unprefixed. The `roadie`
-command loads the **root build file** and runs the plan of one of its
-results.
+done, several steps at once, and tears each step down after every step that
+takes it has finished. The `roadie` command loads the **root build file** and
+runs the plan of one of its results.
 
 ### Project root
 
@@ -102,7 +95,7 @@ define is an error.
 - `--env FILE`: an environment file for every step; may be repeated.
 - `--jobs N`, `-j N`: run up to N steps at once. The default is the number
   of CPUs Roadie may use, or 1 when that count is unavailable; see
-  [Plans and runs](#plans-and-runs). A value below 1 fails with `--jobs must
+  [Parallel steps](#parallel-steps). A value below 1 fails with `--jobs must
   be at least 1`. Output is prefixed when N is above 1, as described there.
 - `--dry-run`, `--dry`: walk the plan through the same scheduler as a run:
   environment files, fingerprints, record matching, and deferred steps. It
@@ -260,6 +253,16 @@ A plan holds each step once, each after the steps it depends on, in the order
 of the attributes that name them, and ends with the requested result. Steps
 that depend on each other fail with `steps depend on each other: <a> -> <b>
 -> <a>`.
+
+### Parallel steps
+
+A run builds up to `--jobs` steps at once. `--jobs` defaults to the number of
+CPUs Roadie may use (`os.process_cpu_count()`), or 1 when that count is
+unavailable. With `--jobs` above 1, each line a step prints, and each line of
+output from the programs its `_cmd` and `_start_cmd` run, is printed as it
+arrives, prefixed with `[<name>] `, where `<name>` is the step's name or its
+class name when it has none, and lines of different steps are not mixed. With
+`--jobs` 1, output is unprefixed.
 
 ### Teardown
 

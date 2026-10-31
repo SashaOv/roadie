@@ -22,7 +22,7 @@ def _named(step: Step[object], name: str) -> Step[object]:
     return step
 
 
-# (spec) Plans and runs
+# (spec) Parallel steps
 def test_one_job_leaves_output_unprefixed(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     class Note(Step[str]):
         def build(self, run: Run) -> str:
@@ -37,7 +37,7 @@ def test_one_job_leaves_output_unprefixed(tmp_path: Path, capfd: pytest.CaptureF
     assert not any(line.startswith("[note] ") for line in lines)
 
 
-# (spec) Plans and runs
+# (spec) Parallel steps
 def test_a_step_without_a_name_is_prefixed_with_its_class(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -50,7 +50,7 @@ def test_a_step_without_a_name_is_prefixed_with_its_class(
     assert "[Note] partial" in capsys.readouterr().out.splitlines()
 
 
-# (spec) Plans and runs
+# (spec) Parallel steps
 def test_parallel_output_prefixes_each_line(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     started = {"a": threading.Event(), "b": threading.Event()}
 
@@ -82,7 +82,41 @@ def test_parallel_output_prefixes_each_line(tmp_path: Path, capsys: pytest.Captu
         assert got == [f"[{label}] {label}-{i}" for i in range(10)]
 
 
-# (spec) Plans and runs
+# (spec) Parallel steps
+def test_captured_output_is_prefixed_and_returned(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class Note(Step[str]):
+        def build(self, run: Run) -> str:
+            completed = self._cmd(
+                sys.executable,
+                "-c",
+                "print('from-prog', flush=True)",
+                capture_output=True,
+            )
+            return completed.stdout or ""
+
+    assert execute([_named(Note(), "note")], root=tmp_path, jobs=2) == "from-prog\n"
+    assert "[note] from-prog" in capsys.readouterr().out.splitlines()
+
+
+# (spec) Parallel steps
+def test_one_job_hides_captured_output(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
+    class Note(Step[str]):
+        def build(self, run: Run) -> str:
+            completed = self._cmd(
+                sys.executable,
+                "-c",
+                "print('from-prog', flush=True)",
+                capture_output=True,
+            )
+            return completed.stdout or ""
+
+    assert execute([_named(Note(), "note")], root=tmp_path, jobs=1) == "from-prog\n"
+    assert "from-prog" not in capfd.readouterr().out.splitlines()
+
+
+# (spec) Parallel steps
 # (spec) Failures
 def test_a_failing_program_shows_prefixed_stderr(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -96,7 +130,7 @@ def test_a_failing_program_shows_prefixed_stderr(
     assert "[bad] boom" in capsys.readouterr().err.splitlines()
 
 
-# (spec) Plans and runs
+# (spec) Parallel steps
 def test_a_servers_output_is_prefixed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     class Up(Step[str]):
         def build(self, run: Run) -> str:
@@ -117,7 +151,7 @@ def test_a_servers_output_is_prefixed(tmp_path: Path, capsys: pytest.CaptureFixt
     assert "[up] booting" in capsys.readouterr().out.splitlines()
 
 
-# (spec) Plans and runs
+# (spec) Parallel steps
 # (spec) Failures
 def test_a_server_that_exits_shows_prefixed_output(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -162,7 +196,7 @@ def test_jobs_below_one_fails(tmp_path: Path) -> None:
         cli.run(tmp_path, jobs=0)
 
 
-# (spec) Plans and runs
+# (spec) Parallel steps
 def test_independent_steps_run_at_once(tmp_path: Path) -> None:
     started = {"a": threading.Event(), "b": threading.Event()}
 
@@ -181,7 +215,7 @@ def test_independent_steps_run_at_once(tmp_path: Path) -> None:
     assert execute([left, right], root=tmp_path, jobs=2) == "b"
 
 
-# (spec) Plans and runs
+# (spec) Parallel steps
 def test_one_job_runs_steps_one_at_a_time(tmp_path: Path) -> None:
     gate = threading.Lock()
 
