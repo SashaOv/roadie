@@ -426,7 +426,7 @@ backlog item asked for, because `--jobs 1` helps troubleshooting.
 
 ### Patches
 
-- [ ] **R11.1: Wait for the run lock instead of failing.** The run lock is an
+- [x] **R11.1: Wait for the run lock instead of failing.** The run lock is an
   OS lock on `run.lock` (`fcntl.flock` on POSIX, `msvcrt.locking` on
   Windows, unverified until the Windows CI job), and the holder still writes
   its PID and start time into the file. A run, a dry run or `--clean` that

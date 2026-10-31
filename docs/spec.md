@@ -87,10 +87,11 @@ define is an error.
 - `--base_dir DIR`: the base directory of every step whose build file's
   settings do not set one.
 - `--locked`: fail instead of changing a generated file that git tracks.
-- `--clean`: take the lock, delete `<root>/target/roadie/` (records, artifacts,
-  and the lock), and exit without building. It exits before a dry run. Another
-  run's lock fails it with the message in [One run at a time](#one-run-at-a-time),
-  and nothing is deleted.
+- `--clean`: take the lock, delete everything under `<root>/target/roadie/`
+  except `run.lock`, and exit without building. It exits before a dry run.
+  When another run holds the lock, it waits as in
+  [One run at a time](#one-run-at-a-time), and nothing is deleted until this
+  run holds the lock.
 - `--env FILE`: an environment file for every step; may be repeated.
 - `--dry-run`, `--dry`: walk the plan through the same loop as a run:
   environment files, fingerprints, record matching, and deferred steps. It
@@ -273,10 +274,14 @@ standard error and exits with status 1.
 
 ### One run at a time
 
-A run takes `<root>/target/roadie/run.lock`, created exclusively, and writes
-its PID and start time. Another run fails with `another roadie run holds
-<lock> (pid <n>, started <time>)`. A lock whose process is gone, which is
-older than 24 hours, or which cannot be read, is stale and taken over. The
+A run takes an operating-system lock on `<root>/target/roadie/run.lock`
+and writes its PID and start time into that file. A run, a dry run, or
+`--clean` that finds the lock held prints `waiting for another roadie run:
+<lock> (pid <n>, started <time>)` once, without the parenthesis when the
+file cannot be read yet, and blocks until the holder releases it. The
+operating system releases the lock when the holder exits, including when it
+is killed. Releasing the lock unlocks the file and leaves it in place.
+`--clean` deletes everything under `target/roadie/` except `run.lock`. The
 lock is released before a requested result is served, so a running dev server
 does not block builds.
 

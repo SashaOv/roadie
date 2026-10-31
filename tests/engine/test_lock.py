@@ -1,8 +1,5 @@
-import json
-import os
 import subprocess
 import sys
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -10,27 +7,57 @@ from support import Stopped, execute, isolate_repo, write_build
 
 from roadie import cli
 from roadie.build import Service, Step
-from roadie.engine.errors import RoadieError, StepFailed
+from roadie.engine.errors import StepFailed
 from roadie.engine.run import Run
 
+_HOLDER = """
+import sys
+from pathlib import Path
+from roadie.engine.lock import acquire_run_lock
+held = acquire_run_lock(Path(sys.argv[1]))
+print("held", flush=True)
+sys.stdin.readline()
+held.release()
+"""
 
-def _stamp(moment: datetime) -> str:
-    return moment.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+_WAITER = """
+import sys
+from pathlib import Path
+from roadie.engine.lock import acquire_run_lock
+held = acquire_run_lock(Path(sys.argv[1]))
+print("acquired", flush=True)
+held.release()
+"""
+
+_EMPTY_HOLDER = """
+import fcntl
+import os
+import sys
+from pathlib import Path
+path = Path(sys.argv[1]) / "target" / "roadie" / "run.lock"
+path.parent.mkdir(parents=True, exist_ok=True)
+fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o644)
+fcntl.flock(fd, fcntl.LOCK_EX)
+print("held", flush=True)
+sys.stdin.readline()
+fcntl.flock(fd, fcntl.LOCK_UN)
+os.close(fd)
+"""
 
 
-def _plant(path: Path, pid: int, started: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"pid": pid, "started": started}, sort_keys=True))
+def _process(code: str, root: Path) -> subprocess.Popen[str]:
+    return subprocess.Popen(
+        [sys.executable, "-c", code, str(root)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
 
 
-def _dead_pid() -> int:
-    process = subprocess.Popen([sys.executable, "-c", "pass"])
-    process.wait()
-    try:
-        os.kill(process.pid, 0)
-    except ProcessLookupError:
-        return process.pid
-    pytest.fail(f"pid {process.pid} was reused")
+def _line(process: subprocess.Popen[str]) -> str:
+    assert process.stdout is not None
+    return process.stdout.readline().rstrip("\n")
 
 
 def _note() -> Step[str]:
@@ -59,61 +86,73 @@ def test_a_run_takes_the_lock_and_releases_it(tmp_path: Path, monkeypatch: pytes
     note.name = note.variable = "note"
     execute([note])
     assert seen == [True]
-    assert not lock.exists()
-
-
-# (spec) One run at a time
-def test_a_live_lock_fails_the_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root = tmp_path.resolve()
-    isolate_repo(monkeypatch, root)
-    lock = root / "target" / "roadie" / "run.lock"
-    started = _stamp(datetime.now(UTC))
-    _plant(lock, os.getpid(), started)
-    with pytest.raises(
-        RoadieError,
-        match=f"another roadie run holds {lock} \\(pid {os.getpid()}, started {started}\\)",
-    ):
-        execute([_note()])
     assert lock.is_file()
+    assert execute([_note()]) == "v"
 
 
 # (spec) One run at a time
-def test_a_lock_whose_process_is_gone_is_taken_over(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_run_waits_for_the_holder_and_proceeds_when_it_releases(tmp_path: Path) -> None:
     root = tmp_path.resolve()
-    isolate_repo(monkeypatch, root)
     lock = root / "target" / "roadie" / "run.lock"
-    _plant(lock, _dead_pid(), _stamp(datetime.now(UTC)))
-    assert execute([_note()]) == "v"
-    assert not lock.exists()
+    holder = _process(_HOLDER, root)
+    waiter = None
+    try:
+        assert holder.stdin is not None
+        assert _line(holder) == "held"
+        waiter = _process(_WAITER, root)
+        waiting = _line(waiter)
+        assert waiting.startswith(f"waiting for another roadie run: {lock} (pid {holder.pid}, started ")
+        assert waiting.endswith(")")
+        holder.stdin.write("\n")
+        holder.stdin.flush()
+        assert _line(waiter) == "acquired"
+        assert waiter.wait() == 0
+        assert lock.is_file()
+    finally:
+        if waiter is not None and waiter.poll() is None:
+            waiter.kill()
+        if holder.poll() is None:
+            holder.kill()
 
 
 # (spec) One run at a time
-def test_a_lock_older_than_a_day_is_taken_over_and_a_younger_one_holds(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_run_waits_without_a_pid_when_the_lock_file_cannot_be_read(tmp_path: Path) -> None:
     root = tmp_path.resolve()
-    isolate_repo(monkeypatch, root)
     lock = root / "target" / "roadie" / "run.lock"
-    _plant(lock, os.getpid(), _stamp(datetime.now(UTC) - timedelta(hours=24, minutes=1)))
-    assert execute([_note()]) == "v"
-    assert not lock.exists()
-
-    _plant(lock, os.getpid(), _stamp(datetime.now(UTC) - timedelta(hours=23, minutes=59)))
-    with pytest.raises(RoadieError, match="another roadie run holds"):
-        execute([_note()])
+    holder = _process(_EMPTY_HOLDER, root)
+    waiter = None
+    try:
+        assert holder.stdin is not None
+        assert _line(holder) == "held"
+        waiter = _process(_WAITER, root)
+        assert _line(waiter) == f"waiting for another roadie run: {lock}"
+        holder.stdin.write("\n")
+        holder.stdin.flush()
+        assert _line(waiter) == "acquired"
+    finally:
+        if waiter is not None and waiter.poll() is None:
+            waiter.kill()
+        if holder.poll() is None:
+            holder.kill()
 
 
 # (spec) One run at a time
-def test_an_unreadable_lock_is_taken_over(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_run_proceeds_after_the_holder_is_killed(tmp_path: Path) -> None:
     root = tmp_path.resolve()
-    isolate_repo(monkeypatch, root)
-    lock = root / "target" / "roadie" / "run.lock"
-    lock.parent.mkdir(parents=True)
-    lock.write_text("not json")
-    assert execute([_note()]) == "v"
-    assert not lock.exists()
+    holder = _process(_HOLDER, root)
+    waiter = None
+    try:
+        assert _line(holder) == "held"
+        waiter = _process(_WAITER, root)
+        assert _line(waiter).startswith("waiting for another roadie run:")
+        holder.kill()
+        holder.wait()
+        assert _line(waiter) == "acquired"
+    finally:
+        if waiter is not None and waiter.poll() is None:
+            waiter.kill()
+        if holder.poll() is None:
+            holder.kill()
 
 
 # (spec) One run at a time
@@ -134,7 +173,8 @@ def test_a_failed_run_releases_the_lock(tmp_path: Path, monkeypatch: pytest.Monk
     with pytest.raises(StepFailed, match="nope"):
         execute([boom])
     assert seen == [True]
-    assert not lock.exists()
+    assert lock.is_file()
+    assert execute([_note()]) == "v"
 
 
 # (spec) One run at a time
@@ -153,12 +193,16 @@ def test_the_lock_is_released_before_the_result_is_served(
             return Stopped()
 
         def serve(self, value: Stopped) -> None:
-            seen.append(("serve", lock.is_file()))
-            lock.write_text("held by a later run")
+            probe = _process(_WAITER, root)
+            try:
+                seen.append(("serve", _line(probe) == "acquired"))
+            finally:
+                if probe.poll() is None:
+                    probe.kill()
 
     execute([Server()])
-    assert seen == [("build", True), ("serve", False)]
-    assert lock.read_text() == "held by a later run"
+    assert seen == [("build", True), ("serve", True)]
+    assert lock.is_file()
 
 
 # (spec) One run at a time
@@ -168,17 +212,39 @@ def test_dry_run_takes_the_lock_like_a_run(tmp_path: Path, capsys: pytest.Captur
     write_build(root, "class Note(Step[str]):\n    def build(self, run):\n        return 'v'\nitem = Note()\n")
     lock = root / "target" / "roadie" / "run.lock"
     cli.run(root, dry_run=True)
-    assert not lock.exists()
+    assert lock.is_file()
     assert "# run" in capsys.readouterr().out
 
-    started = _stamp(datetime.now(UTC))
-    _plant(lock, os.getpid(), started)
-    with pytest.raises(
-        SystemExit,
-        match=f"another roadie run holds {lock} \\(pid {os.getpid()}, started {started}\\)",
-    ):
-        cli.run(root, dry_run=True)
-    assert capsys.readouterr().out == ""
+
+# (spec) One run at a time
+# (spec) Command line
+def test_a_dry_run_waits_for_the_holder(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+    write_build(root, "class Note(Step[str]):\n    def build(self, run):\n        return 'v'\nitem = Note()\n")
+    holder = _process(_HOLDER, root)
+    dry = None
+    try:
+        assert holder.stdin is not None
+        assert _line(holder) == "held"
+        dry = _process(
+            "import sys\nfrom pathlib import Path\nfrom roadie import cli\n"
+            "cli.run(Path(sys.argv[1]), dry_run=True)\nprint('dry-done', flush=True)\n",
+            root,
+        )
+        assert _line(dry).startswith("waiting for another roadie run:")
+        holder.stdin.write("\n")
+        holder.stdin.flush()
+        lines = []
+        while (line := _line(dry)) != "":
+            lines.append(line)
+        assert any("# run" in line for line in lines)
+        assert lines[-1] == "dry-done"
+        assert dry.wait() == 0
+    finally:
+        if dry is not None and dry.poll() is None:
+            dry.kill()
+        if holder.poll() is None:
+            holder.kill()
 
 
 # (spec) Command line
@@ -192,38 +258,39 @@ def test_clean_deletes_roadie_state_without_building(
     (state / "build.record.json").write_text("{}")
     (state / "note.txt").write_text("artifact")
     cli.run(root, clean=True, dry_run=True)
-    assert not state.exists()
+    assert sorted(path.name for path in state.iterdir()) == ["run.lock"]
     assert capsys.readouterr().out == ""
+    (state / "note.txt").write_text("again")
     cli.run(root, clean=True)
-    assert not state.exists()
+    assert sorted(path.name for path in state.iterdir()) == ["run.lock"]
 
 
 # (spec) Command line
 # (spec) One run at a time
-def test_clean_fails_while_another_run_holds_the_lock(tmp_path: Path) -> None:
+def test_clean_waits_for_the_holder_before_deleting(tmp_path: Path) -> None:
     root = tmp_path.resolve()
     state = root / "target" / "roadie"
-    state.mkdir(parents=True)
-    (state / "note.txt").write_text("keep")
-    lock = state / "run.lock"
-    started = _stamp(datetime.now(UTC))
-    _plant(lock, os.getpid(), started)
-    with pytest.raises(
-        SystemExit,
-        match=(
-            f"another roadie run holds {lock} \\(pid {os.getpid()}, started {started}\\)"
-        ),
-    ):
-        cli.run(root, clean=True)
-    assert (state / "note.txt").read_text() == "keep"
-
-
-# (spec) Command line
-def test_clean_takes_over_a_stale_lock(tmp_path: Path) -> None:
-    root = tmp_path.resolve()
-    state = root / "target" / "roadie"
-    state.mkdir(parents=True)
-    (state / "note.txt").write_text("artifact")
-    _plant(state / "run.lock", _dead_pid(), _stamp(datetime.now(UTC)))
-    cli.run(root, clean=True)
-    assert not state.exists()
+    holder = _process(_HOLDER, root)
+    cleaner = None
+    try:
+        assert holder.stdin is not None
+        assert _line(holder) == "held"
+        (state / "note.txt").write_text("keep")
+        cleaner = _process(
+            "import sys\nfrom pathlib import Path\nfrom roadie import cli\n"
+            "cli.run(Path(sys.argv[1]), clean=True)\nprint('cleaned', flush=True)\n",
+            root,
+        )
+        assert _line(cleaner).startswith("waiting for another roadie run:")
+        assert (state / "note.txt").read_text() == "keep"
+        holder.stdin.write("\n")
+        holder.stdin.flush()
+        assert _line(cleaner) == "cleaned"
+        assert cleaner.wait() == 0
+        assert not (state / "note.txt").exists()
+        assert (state / "run.lock").is_file()
+    finally:
+        if cleaner is not None and cleaner.poll() is None:
+            cleaner.kill()
+        if holder.poll() is None:
+            holder.kill()
