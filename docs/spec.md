@@ -203,6 +203,13 @@ is not in the workspace`. Within one run, `cargo metadata` and
 `PythonEnv()` fingerprints the version of the interpreter running Roadie and
 the name and version of every distribution installed in its environment.
 
+### Environment variables
+
+`Env(*names)` fingerprints the value of each named process environment
+variable, in the order given. An unset variable differs from an empty one.
+No names fails with `Env takes at least one variable name`. A name that is
+not a string fails with `Env takes variable names: got <type>`.
+
 ### Cargo workspace queries
 
 `cargo_rust_packages(directory)` returns the workspace root and

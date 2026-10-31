@@ -13,7 +13,6 @@ bullet, except the input-enforcement design, which is moved whole.
 - Enforce declared inputs (the design below).
 - A project-root override (`config(root=...)`) for a project whose root is not
   its git top level.
-- `Env(*names)` input: the values of the named process environment variables.
 - Add the ability to specify step parameters on the command line  
 - Reuse unnamed steps: an inline or loop-built step takes a derived identity,
   its consumer's variable and the path to it (`copy.source`, `checks[2]`).
@@ -41,9 +40,9 @@ Code that departs from the spec or from general engineering practice.
 
 Guidance taken out of the spec because it follows from the rules.
 
-- For a step to rerun when an environment variable changes, the build file
-  reads it and passes it as a plain attribute, as in
-  `Bundle(mode=os.environ.get("MODE", "dev"))`.
+- For a step to rerun when an environment variable changes, take an `Env`
+  input, as in `Bundle(mode=Env("MODE"))`. An unset variable differs from
+  an empty one.
 - A rebuilt `File` whose content is unchanged leaves its consumers reusable.
 - A Python upgrade reruns every step: the code hash covers `abc` and `typing`.
 - An inline step, as in `Copy(Emitter())`, is never reused; bind it to a

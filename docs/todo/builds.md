@@ -574,13 +574,13 @@ test covers get tests.
   as its last line, or before it serves the requested result; a failed run
   and a dry run print none. The backlog's Step durations item goes. Tests
   set the clock Roadie reads; nothing sleeps.
-- [ ] **R12.2: Rerun a step when its build file's class changes.** The code
+- [x] **R12.2: Rerun a step when its build file's class changes.** The code
   hash adds, for each class of the step's hierarchy defined in a build file,
   that build file's content keyed by its `roadie:<relative path>` module name.
   Editing the file reruns those steps; steps of imported classes are not
   affected. The spec's Step fingerprints rule loses "A class defined in a
   build file itself is not hashed", and the backlog item goes.
-- [ ] **R12.3: Add the `Env(*names)` input.** `Env("MODE", "TARGET")`
+- [x] **R12.3: Add the `Env(*names)` input.** `Env("MODE", "TARGET")`
   fingerprints each named process environment variable's value, an unset
   variable differing from an empty one. No names fails with `Env takes at
   least one variable name`; a name that is not a string fails with `Env
