@@ -322,6 +322,11 @@ def _reserved_names() -> frozenset[str]:
 
 
 _RESERVED = _reserved_names()
+
+
+def is_reserved(name: str) -> bool:
+    """True when `name` is one Roadie keeps for itself on a step."""
+    return name in _RESERVED
 _HOOKS = frozenset(name for name in _RESERVED if callable(getattr(Step, name, None)))
 
 

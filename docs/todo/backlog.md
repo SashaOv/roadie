@@ -14,11 +14,6 @@ bullet, except the input-enforcement design, which is moved whole.
   Reuse rules are unchanged.
 - A `Check` or `Pytest` takes a step in `inputs`: the step is a dependency, and
   its output fingerprint is part of the check's.
-- `include(directory)` returns a step as well as a namespace: building it builds
-  the included file's default step, so `Group(lib, app)` runs each file's
-  default. The file's results stay attributes (`lib.test`) and are not
-  dependencies of the returned step. Building it when the file marks no default
-  fails and names the file.
 - `AuthorTask`: a `Tests` step that waits for the author to run checks and
   report the results.
 - `AuthorApproval`: an author task that continues the run or cancels it.

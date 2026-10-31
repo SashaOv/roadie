@@ -791,7 +791,7 @@ approve a run, such as a release, before it goes on. `--base_dir` becomes
   `roadie.build` exports `Param`; the spec's Command line shows the
   parameters, and a Parameters section under Inputs describes `Param`. The
   backlog item goes.
-- [ ] **R13.3: Return a step from `include`.** `include(directory)` returns
+- [x] **R13.3: Return a step from `include`.** `include(directory)` returns
   a step that stands for the included file's default result, as a `Group`
   of that one step, and has the file's results as attributes (`lib.test`),
   which are not its dependencies; so `Group(lib, app)` runs each file's

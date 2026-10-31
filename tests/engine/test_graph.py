@@ -131,6 +131,49 @@ def test_include_names_results_by_directory_and_loads_each_file_once(
     assert plan_names(tmp_path) == ["module:server", "module:api", None, "fuzzed"]
 
 
+# (spec) Including build files
+def test_include_stands_for_the_default_result_and_keeps_the_others(tmp_path: Path) -> None:
+    write_build(
+        tmp_path / "lib",
+        "extra = Check('true')\nitem = default_step(Check('true'))\n",
+    )
+    write_build(
+        tmp_path / "app",
+        "item = default_step(Check('true'))\n",
+    )
+    write_build(
+        tmp_path,
+        'lib = include("lib")\napp = include("app")\nboth = Group(lib, app)\n',
+    )
+    graph = load(tmp_path)
+    assert graph.results["lib"].extra.name == "lib:extra"
+    assert plan_names(tmp_path, "both") == ["lib:item", "lib", "app:item", "app", "both"]
+    assert plan_names(tmp_path, "lib") == ["lib:item", "lib"]
+    assert "lib:extra" not in plan_names(tmp_path, "lib")
+
+
+# (spec) Including build files
+def test_an_included_file_without_a_default_fails_when_a_plan_holds_it(tmp_path: Path) -> None:
+    write_build(tmp_path / "lib", "item = Check('true')\n")
+    write_build(tmp_path, 'lib = include("lib")\nkeep = Check("true")\n')
+    path = (tmp_path / "lib" / "build.py").resolve()
+    assert plan_names(tmp_path, "keep") == ["keep"]
+    with pytest.raises(RoadieError, match=re.escape(f"{path} marks no default result")):
+        plan_names(tmp_path, "lib")
+
+
+# (spec) Including build files
+def test_an_included_result_named_like_a_step_member_fails(tmp_path: Path) -> None:
+    write_build(tmp_path / "lib", "build = Check('true')\n")
+    write_build(tmp_path, 'lib = include("lib")\n')
+    path = (tmp_path / "lib" / "build.py").resolve()
+    with pytest.raises(
+        RoadieError,
+        match=re.escape(f"{path}: result build is reserved by Roadie in an included file"),
+    ):
+        load(tmp_path)
+
+
 # (spec) Loading a build file
 def test_missing_build_file_names_the_directory(tmp_path: Path) -> None:
     with pytest.raises(RoadieError, match=f"{tmp_path} has no build.py"):

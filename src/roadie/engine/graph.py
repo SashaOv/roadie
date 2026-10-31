@@ -11,13 +11,12 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 from roadie.engine.config import file_settings
 from roadie.engine.errors import RoadieError
 from roadie.engine.root import find_project_root, use_project_root
-from roadie.engine.step import Step
+from roadie.engine.step import Step, is_reserved
 
 BUILD_FILE = "build.py"
 
@@ -118,13 +117,25 @@ def default_step(step: Step[Any]) -> Step[Any]:
 
 
 # (spec) Including build files
-def include(directory: str) -> SimpleNamespace:
-    """Load `<directory>/build.py`, relative to the including file, and return its results."""
+def include(directory: str) -> Step[Any]:
+    """Load `<directory>/build.py` and return a step for its default result.
+
+    The file's results are attributes (`lib.test`) and are not dependencies.
+    A result named like a `Step` member fails with `<path>: result <name> is
+    reserved by Roadie in an included file`. A plan that holds the returned
+    step fails with `<path> marks no default result` when the file has no
+    `default_step` mark.
+    """
     session = _session.get()
     if session is None:
         raise RoadieError("include() works only in a build.py that Roadie loads")
     graph = _load(session, (session.loading[-1] / directory).resolve())
-    return SimpleNamespace(**graph.results)
+    for name in graph.results:
+        if is_reserved(name):
+            raise RoadieError(
+                f"{graph.path}: result {name} is reserved by Roadie in an included file"
+            )
+    return _Included(graph.path, graph.default, graph.results)
 
 
 # (spec) Loading a build file
@@ -192,6 +203,47 @@ def _marked_default(
         names = ", ".join(name for name, _ in bound)
         raise RoadieError(f"{path} marks more than one default result: {names}")
     return bound[0][1]
+
+
+class _Included(Step[tuple[object, ...]]):
+    """A group of the included file's default result, with its results as attributes."""
+
+    recorded = False
+
+    def __init__(
+        self,
+        path: Path,
+        default: Step[Any] | None,
+        results: Mapping[str, Step[Any]],
+    ) -> None:
+        self._path = path
+        self._results = dict(results)
+        self.steps = () if default is None else (default,)
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self._results[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+    def attributes(self) -> dict[str, object]:
+        return {"steps": self.steps}
+
+    def dependencies(self) -> Iterator[Step[Any]]:
+        if not self.steps:
+            raise RoadieError(f"{self._path} marks no default result")
+        yield self.steps[0]
+
+    def build(self, run: Any) -> tuple[object, ...]:
+        if not self.steps:
+            raise RoadieError(f"{self._path} marks no default result")
+        values = tuple(run[step] for step in self.steps)
+        if all(id(step) in run.reused for step in self.steps):
+            print(f"reused {self.name or type(self).__name__}", flush=True)
+        return values
+
+    def call_arguments(self) -> tuple[list[object], dict[str, object]]:
+        return list(self.steps), {}
 
 
 def _prefix(root: Path, directory: Path) -> str:

@@ -155,7 +155,15 @@ A result's name is the name of the **variable** the result is assigned to. When 
 
 ### Including build files
 
-`include(directory)` loads `<directory>/build.py`, and returns its results as attributes of a namespace. A file is loaded once per load, however many files include it.
+`include(directory)` loads `<directory>/build.py` and returns a step that
+stands for that file's default result, as a group of that one step. The
+file's results are attributes of the step (`lib.test`) and are not its
+dependencies, so `Group(lib, app)` runs each file's default, and `roadie lib`
+runs `lib`'s. A file is loaded once per load, however many files include it.
+A plan that holds the step fails, before any step builds, with `<path> marks
+no default result` when the file has no `default_step` mark. A result named
+like a member of `Step` fails at include with `<path>: result <name> is
+reserved by Roadie in an included file`.
 
 Circular includes of build files are an error. `include` outside a build file that Roadie loads is an error.
 
