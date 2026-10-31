@@ -13,3 +13,4 @@ uv.lock
 .annotations.json
 # Worktree directory
 /wt/
+/cache/
