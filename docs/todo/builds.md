@@ -35,6 +35,16 @@ builds, then the one planned build. Unplanned work is in
 - 2026-10-29: pytest's `--junitxml` report has one `testcase` element per
   test, with `classname` and `name`, and a `failure` or `error` child whose
   `message` holds the reason.
+- 2026-10-31: on macOS 25.6 with Python 3.13.13, `fcntl.flock(LOCK_EX)` on
+  a lock file blocks while another process holds it and returns once that
+  process is killed; the descriptor is not inheritable, so a child process
+  started while the lock is held does not keep it after the parent unlocks.
+  `os.process_cpu_count()` returns 10 on that host.
+- 2026-10-31: `Step._cmd` runs its program in Roadie's process group with
+  inherited standard output, so a terminal's Ctrl-C reaches it directly;
+  SIGTERM reaches only Roadie. `subprocess.run` kills the child on any
+  exception in the calling thread, `KeyboardInterrupt` included (its bare
+  `except:` in CPython 3.13.13), and Python never interrupts a worker thread.
 
 --- Implemented / Next ---
 
@@ -279,7 +289,7 @@ changed) and pushed it with the tag `v0.1.2`. CI and the Release workflow on
 
 ## R10: Build files say what they mean, and `--dry` is the run itself
 
-Status: planned, approved 2026-10-30
+Status: implemented 2026-10-30 (commits R10.*)
 
 **Improvement.** A build file names its default result with
 `default_step(...)`, so `release` can be written last and a bare `roadie .`
@@ -344,8 +354,121 @@ not start is marked `# run`.
   file, so a test cannot pass only because of a system default such as
   macOS's `init.defaultBranch=main`, as happened in R9.
 
+**Acceptance run (2026-10-30).** Commit `21f7ac42990f1621570f7831c50ce22df14c6559`,
+tree `8ff8296dd83ffa34044e490228cb0e76e6b8cb44`. Host Darwin 25.6.0 arm64.
+uv 0.12.23 (Homebrew 2026-10-03 aarch64-apple-darwin). Python 3.13.13.
+`uv run roadie . --clean`, then `uv run roadie . checks` twice, then
+`uv run roadie . --dry` and `uv run roadie . release --dry`. The raw log is
+outside the repo at `/Users/sasha/.local/share/roadie/r10-acceptance.log`,
+sha256 `16d632aed3de8f8a06b2135b1d7dda55990bb29d4d45994a86a9154d8f8f353d`.
+
+The first `checks` exited 0 and built ruff, mypy (`mypy src build.py`), and
+pytest. The second exited 0 and printed `reused` for ruff, mypy, and pytest.
+`roadie . --dry` listed ruff, mypy, pytest, and checks, and not release.
+`roadie . release --dry` listed those four and `release  # run`.
+
+**CI (2026-10-30).** Run 41120109921 on `21f7ac4` passed on `ubuntu-latest`
+and `macos-latest`. That discharges the CI clause.
+
 **Author action required at completion.** Push `main` and confirm CI passes
-on both platforms, or authorize the executor to push.
+on both platforms, or authorize the executor to push. Authorized with this
+build: `main` was pushed at `21f7ac4`, and run 41120109921 passed.
+
+**Review (2026-10-31).** Commit subjects match the patch names. The R10
+acceptance passes again on the reviewed tree: `roadie . checks` passes and a
+second run reuses ruff, mypy and pytest; `roadie . --dry` omits `release` and
+`roadie . release --dry` marks it `# run`. Two changes the author asked for
+after review: `--dry` takes the run lock like a run, so `execute` no longer
+branches on it (this reverses R10.4's "takes no lock"); and `build.py` starts
+with `from roadie.build import *`, as the spec says a build file usually does.
+
+## R11: Independent steps run at once, and a second run waits its turn
+
+Status: planned, approved 2026-10-31
+
+**Improvement.** `roadie` runs the steps of a plan that do not depend on each
+other at the same time, up to `--jobs` of them, so `roadie . checks` runs
+ruff, mypy and pytest together. While several steps run, each step's output is
+printed as one block, so it stays readable. A run that finds another run
+holding the lock waits for it, naming the holder once, instead of failing,
+and a run that a step of the holding run started fails at once instead of
+waiting for itself.
+
+**Decisions confirmed at the checkpoint (2026-10-31).** Keep `--jobs`,
+which no backlog item asked for, because `--jobs 1` helps troubleshooting;
+the first choice of each decision below holds.
+
+1. `--jobs` defaults to the CPUs Roadie may use (`os.process_cpu_count()`),
+   like ninja and cargo. The alternative is 1, with parallel runs opt-in.
+2. With `--jobs` above 1, a step's `build` line prints when it starts, and
+   everything else it prints, its programs' output included, prints as one
+   block when it finishes. With `--jobs 1`, output is live, as today. The
+   alternative is live output with each line prefixed `<name> | `.
+3. When a step fails, no new step starts; Roadie prints `waiting for <names>`
+   once and lets the running steps finish, then tears down and fails with
+   the first failure, printing later failures to standard error. Cargo does
+   the same (`build failed, waiting for other jobs to finish...`). The
+   alternative is to stop the running steps.
+
+**Acceptance check.**
+
+- `uv run roadie . checks` passes and CI passes on `ubuntu-latest` and
+  `macos-latest`.
+- After `uv run roadie . --clean`, `uv run roadie . checks` prints the
+  `build` lines of ruff, mypy and pytest before any of their output, and a
+  second run reuses all three.
+- With `uv run roadie . checks` running after a source change, a second
+  `uv run roadie . --dry` in another terminal prints the waiting line once,
+  then its marks after the first run ends.
+- Each patch adds tests for its success and failure paths. Concurrency is
+  shown by steps that each wait, with a timeout, for the other to start;
+  nothing in a test sleeps.
+
+### Patches
+
+- [ ] **R11.1: Wait for the run lock instead of failing.** The run lock is an
+  OS lock on `run.lock` (`fcntl.flock` on POSIX, `msvcrt.locking` on
+  Windows, unverified until the Windows CI job), and the holder still writes
+  its PID and start time into the file. A run, a dry run or `--clean` that
+  finds it held prints `waiting for another roadie run: <lock> (pid <n>,
+  started <time>)` once, without the parenthesis when the file cannot be
+  read yet, and blocks until it is released. The OS releases a dead run's
+  lock, so the stale-lock rules (process gone, 24 hours, unreadable) go.
+  Releasing unlocks without deleting the file, and `--clean` deletes
+  everything under `target/roadie/` except `run.lock`, so two runs can never
+  hold locks on different files. Tests start a holder process and wait for
+  the waiting line, never for time: the waiter proceeds after the holder
+  releases, and after the holder is killed.
+- [ ] **R11.2: Fail at once when the holder started this run.** A run puts
+  its PID in the environment of the programs its steps run. A run that finds
+  the lock held by that PID fails at once with `<lock> is held by the roadie
+  run that started this one (pid <n>)` instead of waiting for itself. Tests:
+  a step that runs `roadie` in the same project root fails with that message;
+  a run started by an unrelated process holding the variable still waits.
+- [ ] **R11.3: Run up to `--jobs` steps at once.** `--jobs N` (`-j N`) runs a
+  step as soon as every step it takes is done, up to N at a time; a value
+  below 1 fails with `--jobs must be at least 1`. The default stays 1 in this
+  patch. Fingerprints, records, `run[...]` and teardown stay correct when
+  steps finish in any order: records are written by one thread, `run_state`
+  makes each state once, and worker threads see the run's project root. A
+  deferred step starts once, before the first consumer that must build; a
+  consumer that needs it while it starts waits for it. A step is torn down
+  after every step that takes it has finished. Failure follows decision 3.
+  On Ctrl-C or SIGTERM, Roadie stops the programs its steps are running,
+  waits for those steps, and tears down. `--dry` uses the same scheduler and
+  prints its marks in plan order. The spec's Plans and runs concept and
+  Teardown section say "after every step that takes it" instead of "after the
+  last".
+- [ ] **R11.4: Print each step's output as one block, and run on all CPUs by
+  default.** With `--jobs` above 1, a step's output follows decision 2: what
+  the step prints and the output of the programs `_cmd` runs are collected
+  per step and printed when it finishes, failed or not. The `--jobs` default
+  follows decision 1. Programs a service starts keep printing live, since
+  they outlive their step's build.
+
+**Author action required at completion.** Push `main` and confirm CI passes
+on both platforms, or authorize the executor to push. Discharges the CI
+clause.
 
 ## Backlog
 
