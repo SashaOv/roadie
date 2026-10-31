@@ -5,8 +5,6 @@ bullet, except the input-enforcement design, which is moved whole.
 
 ## Features
 
-- A `Check` or `Pytest` takes a step in `inputs`: the step is a dependency, and
-  its output fingerprint is part of the check's.
 - `AuthorTask`: a `Tests` step that waits for the author to run checks and
   report the results.
 - `AuthorApproval`: an author task that continues the run or cancels it.

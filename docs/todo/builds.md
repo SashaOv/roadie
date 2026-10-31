@@ -812,7 +812,7 @@ approve a run, such as a release, before it goes on. `--base_dir` becomes
   files it includes. A failed setup step stops the run before any other
   step builds. Reuse is unchanged. `roadie.build` exports it; the spec
   states it beside `default_step`, and the backlog item goes.
-- [ ] **R13.5: Let a check take a step in `inputs`.** `Check` and `Pytest`
+- [x] **R13.5: Let a check take a step in `inputs`.** `Check` and `Pytest`
   take inputs and steps in `inputs`, in any mix: a step there is a
   dependency, and its output fingerprint is part of the check's
   fingerprint. Another kind fails with `<Kind> inputs takes inputs or

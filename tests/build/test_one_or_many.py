@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from support import plan_names, write_build
+from support import Value, plan_names, write_build
 
 from roadie.build import (
     Check,
@@ -15,6 +15,7 @@ from roadie.build import (
     Release,
     RoadieError,
 )
+from roadie.engine.fingerprint import fingerprint
 from roadie.engine.graph import load
 
 
@@ -45,12 +46,29 @@ def test_requires_one_group_plans_the_group(tmp_path: Path) -> None:
 
 
 # (spec) Step kinds
+def test_a_check_takes_a_step_in_inputs(tmp_path: Path) -> None:
+    write_build(
+        tmp_path,
+        "item = Group()\n"
+        "check = Check('true', inputs=(Files('src'), item))\n"
+        "suite = Pytest(inputs=item)\n",
+    )
+
+    assert plan_names(tmp_path, "check") == ["item", "check"]
+    assert plan_names(tmp_path, "suite") == ["item", "suite"]
+    source = Value("built")
+    gate = Check("true", inputs=source)
+    original = fingerprint(gate, outputs={source: "a" * 64})
+    assert fingerprint(gate, outputs={source: "b" * 64}) != original
+
+
+# (spec) Step kinds
 @pytest.mark.parametrize(
     ("call", "message"),
     [
-        ("Check('true', inputs=1)", "Check inputs takes inputs: got int"),
-        ("Check('true', inputs=(Files('src'), 1))", "Check inputs takes inputs: got int"),
-        ("Pytest(inputs=Group())", "Pytest inputs takes inputs: got Group"),
+        ("Check('true', inputs=1)", "Check inputs takes inputs or steps: got int"),
+        ("Check('true', inputs=(Files('src'), 1))", "Check inputs takes inputs or steps: got int"),
+        ("Pytest(inputs=1)", "Pytest inputs takes inputs or steps: got int"),
         ('Release(PyProject("pyproject.toml"), requires=1)', "Release requires takes steps: got int"),
         (
             'Release(PyProject("pyproject.toml"), requires=(Check("true"), 1))',
