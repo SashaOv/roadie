@@ -51,7 +51,13 @@ fingerprint**, a digest of what that dependency built. A step's build reads noth
 The **plan** of a result is the result and the steps it depends on, directly
 or indirectly. A **run** builds or reuses a step once every step it takes is
 done, up to `--jobs` steps at once, and tears each step down after every
-step that takes it has finished. `--jobs` defaults to 1. The `roadie`
+step that takes it has finished. `--jobs` defaults to the number of CPUs
+Roadie may use (`os.process_cpu_count()`), or 1 when that count is
+unavailable. With `--jobs` above 1, each line a step prints, and each line
+of output from the programs its `_cmd` and `_start_cmd` run, is printed as
+it arrives, prefixed with `[<name>] `, where `<name>` is the step's name or
+its class name when it has none, and lines of different steps are not mixed.
+With `--jobs` 1, output is unprefixed. The `roadie`
 command loads the **root build file** and runs the plan of one of its
 results.
 
@@ -94,8 +100,10 @@ define is an error.
   [One run at a time](#one-run-at-a-time), and nothing is deleted until this
   run holds the lock.
 - `--env FILE`: an environment file for every step; may be repeated.
-- `--jobs N`, `-j N`: run up to N steps at once. The default is 1. A value
-  below 1 fails with `--jobs must be at least 1`.
+- `--jobs N`, `-j N`: run up to N steps at once. The default is the number
+  of CPUs Roadie may use, or 1 when that count is unavailable; see
+  [Plans and runs](#plans-and-runs). A value below 1 fails with `--jobs must
+  be at least 1`. Output is prefixed when N is above 1, as described there.
 - `--dry-run`, `--dry`: walk the plan through the same scheduler as a run:
   environment files, fingerprints, record matching, and deferred steps. It
   marks each step the way that run reports it: `# reuse` where the run

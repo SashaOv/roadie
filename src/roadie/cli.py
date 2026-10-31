@@ -1,5 +1,6 @@
 """Run a result of a Roadie build file and the steps it depends on."""
 
+import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated
@@ -40,12 +41,17 @@ def run(
         Parameter(negative=False, help="Delete target/roadie and exit"),
     ] = False,
     jobs: Annotated[
-        int,
-        Parameter(name=["--jobs", "-j"], help="Run up to N independent steps at once"),
-    ] = 1,
+        int | None,
+        Parameter(
+            name=["--jobs", "-j"],
+            help="Run up to N independent steps at once. The default is the number of CPUs Roadie may use",
+        ),
+    ] = None,
 ) -> None:
     """Run `result` of `<directory>/build.py`, by default the last one defined."""
     try:
+        if jobs is None:
+            jobs = os.process_cpu_count() or 1
         if jobs < 1:
             raise RoadieError("--jobs must be at least 1")
         if clean:

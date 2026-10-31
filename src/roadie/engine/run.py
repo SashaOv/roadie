@@ -4,6 +4,7 @@ import contextvars
 import sys
 import threading
 from collections.abc import Sequence
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, cast
 
@@ -14,6 +15,7 @@ from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.fingerprint import fingerprint
 from roadie.engine.inputs import run_scope
 from roadie.engine.lock import HeldLock, acquire_run_lock
+from roadie.engine.prefix import parallel_output, reset_prefix, set_prefix
 from roadie.engine.process import (
     interrupt_on_terminate,
     interrupt_requested,
@@ -174,6 +176,15 @@ def _schedule(
     result: list[object] = []
 
     def loop(*, propagate: bool) -> None:
+        token = None
+
+        def end_prefix() -> None:
+            nonlocal token
+            if token is not None:
+                sys.stdout.flush()
+                reset_prefix(token)
+                token = None
+
         while True:
             with schedule:
                 if failures:
@@ -187,92 +198,99 @@ def _schedule(
                         raise RoadieError("cannot schedule the plan")
                     return
                 running.add(id(step))
+            token = set_prefix(step.name or type(step).__name__) if jobs > 1 else None
             try:
-                _execute_step(
-                    step,
-                    run=run,
-                    live=live,
-                    outputs=outputs,
-                    started=started,
-                    marks=marks,
-                    guards=guards,
-                    schedule=schedule,
-                    requested=requested,
-                    run_lock=run_lock,
-                    dry=dry,
-                )
-            except KeyboardInterrupt:
-                request_stop()
-                with schedule:
-                    running.discard(id(step))
-                    finished.add(id(step))
-                    interrupted.append(True)
-                    schedule.notify_all()
-                if propagate:
-                    raise
-                return
-            except BaseException as error:  # noqa: BLE001 — SystemExit is a step failure
-                failure = (
-                    error
-                    if isinstance(error, StepFailed)
-                    else StepFailed(step.name or type(step).__name__, _reason(error))
-                )
-                with schedule:
-                    names = [
-                        item.name or type(item).__name__
-                        for item in steps
-                        if id(item) in running and item is not step
-                    ]
-                    running.discard(id(step))
-                    finished.add(id(step))
-                    if not failures:
-                        if names:
-                            print(f"waiting for {', '.join(names)}", flush=True)
-                        failures.append(failure)
-                    else:
-                        print(failure, file=sys.stderr)
-                    schedule.notify_all()
-                if propagate:
-                    raise failure
-                return
-            else:
-                with schedule:
-                    running.discard(id(step))
-                    finished.add(id(step))
-                    if (
-                        requested is not None
-                        and id(step) == requested
-                        and id(step) in run._values
-                    ):
-                        result.append(run._values[id(step)])
-                    expired = [] if failures else _take_due(run, live, blockers, finished)
-                    schedule.notify_all()
-                _teardown(expired)
+                try:
+                    _execute_step(
+                        step,
+                        run=run,
+                        live=live,
+                        outputs=outputs,
+                        started=started,
+                        marks=marks,
+                        guards=guards,
+                        schedule=schedule,
+                        requested=requested,
+                        run_lock=run_lock,
+                        dry=dry,
+                    )
+                except KeyboardInterrupt:
+                    end_prefix()
+                    request_stop()
+                    with schedule:
+                        running.discard(id(step))
+                        finished.add(id(step))
+                        interrupted.append(True)
+                        schedule.notify_all()
+                    if propagate:
+                        raise
+                    return
+                except BaseException as error:  # noqa: BLE001 — SystemExit is a step failure
+                    end_prefix()
+                    failure = (
+                        error
+                        if isinstance(error, StepFailed)
+                        else StepFailed(step.name or type(step).__name__, _reason(error))
+                    )
+                    with schedule:
+                        names = [
+                            item.name or type(item).__name__
+                            for item in steps
+                            if id(item) in running and item is not step
+                        ]
+                        running.discard(id(step))
+                        finished.add(id(step))
+                        if not failures:
+                            if names:
+                                print(f"waiting for {', '.join(names)}", flush=True)
+                            failures.append(failure)
+                        else:
+                            print(failure, file=sys.stderr)
+                        schedule.notify_all()
+                    if propagate:
+                        raise failure
+                    return
+                else:
+                    with schedule:
+                        running.discard(id(step))
+                        finished.add(id(step))
+                        if (
+                            requested is not None
+                            and id(step) == requested
+                            and id(step) in run._values
+                        ):
+                            result.append(run._values[id(step)])
+                        expired = [] if failures else _take_due(run, live, blockers, finished)
+                        schedule.notify_all()
+                    _teardown(expired)
+            finally:
+                end_prefix()
 
-    if jobs == 1:
-        loop(propagate=True)
+    with parallel_output() if jobs > 1 else nullcontext():
+        if jobs == 1:
+            loop(propagate=True)
+            return result[-1] if result else None
+        threads = [
+            threading.Thread(
+                target=contextvars.copy_context().run,
+                args=(loop,),
+                kwargs={"propagate": False},
+            )
+            for _ in range(jobs)
+        ]
+        try:
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        except KeyboardInterrupt:
+            request_stop()
+            for thread in threads:
+                thread.join()
+            raise
+        if interrupted:
+            raise KeyboardInterrupt
         return result[-1] if result else None
-    threads = [
-        threading.Thread(
-            target=contextvars.copy_context().run,
-            args=(loop,),
-            kwargs={"propagate": False},
-        )
-        for _ in range(jobs)
-    ]
-    try:
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join()
-    except KeyboardInterrupt:
-        request_stop()
-        for thread in threads:
-            thread.join()
-        raise
-    if interrupted:
-        raise KeyboardInterrupt
-    return result[-1] if result else None
 
 
 def _next_ready(

@@ -13,11 +13,14 @@ from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import IO, Any, BinaryIO, TextIO
+
+from roadie.engine.prefix import current_prefix, current_sink, read_lines
 
 _tracked: dict[int, tuple[subprocess.Popen[Any], bool]] = {}
 _tracked_lock = threading.Lock()
 _interrupt = threading.Event()
+_pumps: dict[int, list[threading.Thread]] = {}
 
 _COMMAND_NAME_WORDS = 3
 
@@ -39,7 +42,20 @@ class RunningProcess:
         timeout: float = 120,
         health_path: str | None = None,
     ) -> "RunningProcess":
-        process = spawn_server(command, environment=environment, cwd=cwd)
+        prefix = current_prefix()
+        sink = current_sink()
+        piped = bool(prefix) and sink is not None
+        process = spawn_server(
+            command,
+            environment=environment,
+            cwd=cwd,
+            stdout=subprocess.PIPE if piped else None,
+            stderr=subprocess.PIPE if piped else None,
+        )
+        if piped and sink is not None:
+            _pumps[process.pid] = _pump_server(
+                process, sink_stdout=sink.stdout, sink_stderr=sink.stderr, prefix=prefix
+            )
         track_process(process, session=os.name != "nt")
         url = f"http://127.0.0.1:{port}"
         try:
@@ -51,6 +67,7 @@ class RunningProcess:
         except BaseException:
             untrack_process(process)
             stop_process_tree(process)
+            _join_pumps(process)
             if interrupt_requested():
                 raise KeyboardInterrupt
             raise
@@ -60,6 +77,7 @@ class RunningProcess:
         send SIGKILL, and kill any descendant that outlives its parent."""
         untrack_process(self.process)
         stop_process_tree(self.process)
+        _join_pumps(self.process)
 
 
 def port_is_busy(port: int) -> bool:
@@ -149,12 +167,40 @@ def _process_name(process: subprocess.Popen[bytes]) -> str:
     return shlex.join(words)
 
 
+def _decode_line(pipe: IO[bytes]) -> str:
+    raw = pipe.readline()
+    return "" if raw == b"" else raw.decode(errors="replace")
+
+
+def _pump_server(
+    process: subprocess.Popen[bytes],
+    *,
+    sink_stdout: TextIO,
+    sink_stderr: TextIO,
+    prefix: str,
+) -> list[threading.Thread]:
+    stdout = process.stdout
+    stderr = process.stderr
+    if stdout is None or stderr is None:
+        return []
+    return [
+        read_lines(lambda: _decode_line(stdout), sink_stdout, prefix, [], daemon=True),
+        read_lines(lambda: _decode_line(stderr), sink_stderr, prefix, [], daemon=True),
+    ]
+
+
+def _join_pumps(process: subprocess.Popen[bytes]) -> None:
+    for thread in _pumps.pop(process.pid, []):
+        thread.join()
+
+
 def spawn_server(
     command: Sequence[str],
     *,
     cwd: Path,
     environment: Mapping[str, str] | None = None,
-    stdout: BinaryIO | None = None,
+    stdout: BinaryIO | int | None = None,
+    stderr: BinaryIO | int | None = None,
 ) -> subprocess.Popen[bytes]:
     """Start a server in its own process group.
 
@@ -167,6 +213,7 @@ def spawn_server(
         cwd=cwd,
         env=None if environment is None else dict(environment),
         stdout=stdout,
+        stderr=stderr,
         start_new_session=os.name == "posix",
     )
 

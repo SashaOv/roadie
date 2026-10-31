@@ -5,12 +5,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from support import execute
+from support import execute, write_build
 
 from roadie import cli
 from roadie.build import Step
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.inputs import run_state
+from roadie.engine.process import available_port
 from roadie.engine.run import Run
 
 _WAIT = 2
@@ -19,6 +20,134 @@ _WAIT = 2
 def _named(step: Step[object], name: str) -> Step[object]:
     step.name = step.variable = name
     return step
+
+
+# (spec) Plans and runs
+def test_one_job_leaves_output_unprefixed(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
+    class Note(Step[str]):
+        def build(self, run: Run) -> str:
+            print("from-step", flush=True)
+            self._cmd(sys.executable, "-c", "print('from-prog', flush=True)")
+            return "v"
+
+    execute([_named(Note(), "note")], root=tmp_path, jobs=1)
+    lines = capfd.readouterr().out.splitlines()
+    assert "from-step" in lines
+    assert "from-prog" in lines
+    assert not any(line.startswith("[note] ") for line in lines)
+
+
+# (spec) Plans and runs
+def test_a_step_without_a_name_is_prefixed_with_its_class(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class Note(Step[str]):
+        def build(self, run: Run) -> str:
+            print("partial", end="")
+            return "v"
+
+    execute([Note()], root=tmp_path, jobs=2)
+    assert "[Note] partial" in capsys.readouterr().out.splitlines()
+
+
+# (spec) Plans and runs
+def test_parallel_output_prefixes_each_line(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    started = {"a": threading.Event(), "b": threading.Event()}
+
+    @dataclass(eq=False)
+    class Side(Step[str]):
+        label: str
+
+        def build(self, run: Run) -> str:
+            print(f"step-{self.label}", flush=True)
+            started[self.label].set()
+            other = "b" if self.label == "a" else "a"
+            assert started[other].wait(_WAIT)
+            self._cmd(
+                sys.executable,
+                "-c",
+                "import sys\n"
+                f"label = {self.label!r}\n"
+                "for i in range(10):\n"
+                "    print(f'{label}-{i}', flush=True)\n",
+            )
+            return self.label
+
+    execute([_named(Side("a"), "a"), _named(Side("b"), "b")], root=tmp_path, jobs=2)
+    lines = capsys.readouterr().out.splitlines()
+    assert "[a] step-a" in lines
+    assert "[b] step-b" in lines
+    for label in ("a", "b"):
+        got = [line for line in lines if line.startswith(f"[{label}] {label}-")]
+        assert got == [f"[{label}] {label}-{i}" for i in range(10)]
+
+
+# (spec) Plans and runs
+# (spec) Failures
+def test_a_failing_program_shows_prefixed_stderr(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class Bad(Step[None]):
+        def build(self, run: Run) -> None:
+            self._cmd(sys.executable, "-c", "import sys; sys.stderr.write('boom\\n'); sys.exit(1)")
+
+    with pytest.raises(StepFailed, match="boom"):
+        execute([_named(Bad(), "bad")], root=tmp_path, jobs=2)
+    assert "[bad] boom" in capsys.readouterr().err.splitlines()
+
+
+# (spec) Plans and runs
+def test_a_servers_output_is_prefixed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    class Up(Step[str]):
+        def build(self, run: Run) -> str:
+            port = available_port()
+            server = self._start_cmd(
+                sys.executable,
+                "-c",
+                "import socket\n"
+                "print('booting', flush=True)\n"
+                f"s = socket.create_server(('127.0.0.1', {port}))\n"
+                "s.accept()\n",
+                port=port,
+            )
+            server.stop()
+            return "up"
+
+    execute([_named(Up(), "up")], root=tmp_path, jobs=2)
+    assert "[up] booting" in capsys.readouterr().out.splitlines()
+
+
+# (spec) Plans and runs
+# (spec) Failures
+def test_a_server_that_exits_shows_prefixed_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class Up(Step[str]):
+        def build(self, run: Run) -> str:
+            self._start_cmd(
+                sys.executable,
+                "-c",
+                "print('booting', flush=True)",
+                port=available_port(),
+            )
+            return "up"
+
+    with pytest.raises(StepFailed, match="before becoming ready"):
+        execute([_named(Up(), "up")], root=tmp_path, jobs=2)
+    assert "[up] booting" in capsys.readouterr().out.splitlines()
+
+
+# (spec) Command line
+def test_jobs_defaults_to_the_cpu_count(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    write_build(tmp_path, "class Note(Step[str]):\n    def build(self, run):\n        return 'v'\nitem = Note()\n")
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(cli, "execute", lambda steps, **kwargs: seen.update(kwargs))
+    monkeypatch.setattr(os, "process_cpu_count", lambda: 3)
+    cli.run(tmp_path)
+    assert seen["jobs"] == 3
+    monkeypatch.setattr(os, "process_cpu_count", lambda: None)
+    cli.run(tmp_path)
+    assert seen["jobs"] == 1
 
 
 # (spec) Command line

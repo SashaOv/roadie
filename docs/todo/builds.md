@@ -459,7 +459,7 @@ backlog item asked for, because `--jobs 1` helps troubleshooting.
   prints its marks in plan order. The spec's Plans and runs concept and
   Teardown section say "after every step that takes it" instead of "after the
   last".
-- [ ] **R11.4: Prefix each line of a step's output with its name, and run on
+- [x] **R11.4: Prefix each line of a step's output with its name, and run on
   all CPUs by default.** With `--jobs` above 1, a step's output follows
   decision 2: what the step prints and the output of the programs `_cmd` and
   `_start_cmd` run are read line by line and printed live with the prefix, a
