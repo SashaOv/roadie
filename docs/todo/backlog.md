@@ -27,7 +27,6 @@ bullet, except the input-enforcement design, which is moved whole.
 - Enforce declared inputs (the design below).
 - A project-root override (`config(root=...)`) for a project whose root is not
   its git top level.
-- Add the ability to specify step parameters on the command line  
 - Reuse unnamed steps: an inline or loop-built step takes a derived identity,
   its consumer's variable and the path to it (`copy.source`, `checks[2]`).
 - A cargo-nextest test step that reads the runner's JUnit report into

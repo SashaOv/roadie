@@ -16,6 +16,12 @@ from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.fingerprint import fingerprint
 from roadie.engine.inputs import run_scope
 from roadie.engine.lock import HeldLock, acquire_run_lock
+from roadie.engine.parameters import (
+    ParameterValues,
+    bind_parameters,
+    current_step,
+    reset_parameters,
+)
 from roadie.engine.prefix import parallel_output, reset_prefix, set_prefix, unprefixed
 from roadie.engine.process import (
     interrupt_on_terminate,
@@ -77,6 +83,7 @@ def execute(
     dry: bool = False,
     jobs: int = 1,
     targets: Sequence[Step[Any]] | None = None,
+    parameters: ParameterValues | None = None,
 ) -> object:
     if jobs < 1:
         raise RoadieError("--jobs must be at least 1")
@@ -91,6 +98,7 @@ def execute(
                 dry=dry,
                 jobs=jobs,
                 targets=targets,
+                parameters=parameters,
             )
         finally:
             held.release()
@@ -105,6 +113,7 @@ def _run_steps(
     dry: bool = False,
     jobs: int = 1,
     targets: Sequence[Step[Any]] | None = None,
+    parameters: ParameterValues | None = None,
 ) -> object:
     _apply_env(steps, env)
     run = Run(locked=locked)
@@ -132,7 +141,12 @@ def _run_steps(
     reset_interrupt()
     succeeded = False
     with run_scope(), interrupt_on_terminate():
+        bound = None
         try:
+            bound = bind_parameters(
+                steps,
+                parameters if parameters is not None else ParameterValues({}, {}),
+            )
             value = _schedule(
                 steps,
                 run=run,
@@ -173,6 +187,8 @@ def _run_steps(
                 with schedule:
                     expired = _take_live(run, live)
                 _teardown(expired)
+            if bound is not None:
+                reset_parameters(bound)
             reset_interrupt()
     if succeeded:
         _report_run(run)
@@ -455,7 +471,8 @@ def _run_one(
         _start_deferred(step, run, live, started, guards, schedule)
         announce(step)
         began = time.monotonic() if type(step).recorded else None
-        value = step.build(run)
+        with current_step(step):
+            value = step.build(run)
         elapsed = None if began is None else time.monotonic() - began
         _value, output = _kept(
             step, run, live, value, built=True,
@@ -599,7 +616,8 @@ def _start_one(
         try:
             announce(dependency)
             began = time.monotonic() if type(dependency).recorded else None
-            value = dependency.build(run)
+            with current_step(dependency):
+                value = dependency.build(run)
             elapsed = None if began is None else time.monotonic() - began
         except (KeyboardInterrupt, StepFailed):
             raise

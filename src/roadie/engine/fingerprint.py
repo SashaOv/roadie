@@ -9,12 +9,23 @@ from typing import Any
 import roadie
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import Input, digest
+from roadie.engine.parameters import current_step
 from roadie.engine.root import project_root
 from roadie.engine.step import Step, reject_reserved
 
 
 # (spec) Step fingerprints
 def fingerprint(
+    step: Step[Any],
+    *,
+    outputs: Mapping[Any, str] | None = None,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    with current_step(step):
+        return _fingerprint(step, outputs=outputs, env=env)
+
+
+def _fingerprint(
     step: Step[Any],
     *,
     outputs: Mapping[Any, str] | None = None,

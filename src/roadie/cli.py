@@ -10,6 +10,7 @@ from cyclopts import App, Parameter
 from roadie.engine.errors import RoadieError
 from roadie.engine.graph import Graph, load
 from roadie.engine.lock import clean_project
+from roadie.engine.parameters import ParameterValues
 from roadie.engine.root import find_project_root
 from roadie.engine.run import execute
 from roadie.engine.step import Step
@@ -67,10 +68,17 @@ def run(
         if clean:
             clean_project(find_project_root(directory.resolve()))
             return
+        run_wide, ordered = _assignments(results)
+        names = tuple(name for name, _own in ordered)
         graph = load(directory, base_dir=base_dir)
-        targets = _targets(graph, results)
+        targets = _targets(graph, names)
         _one_requested(targets)
-        steps = graph.plan_results(results) if results else graph.plan()
+        steps = graph.plan_results(names) if names else graph.plan()
+        own = (
+            {id(step): params for step, (_name, params) in zip(targets, ordered, strict=True)}
+            if names
+            else {}
+        )
     except RoadieError as error:
         raise SystemExit(str(error)) from error
     try:
@@ -82,6 +90,7 @@ def run(
             dry=dry_run,
             jobs=jobs,
             targets=targets,
+            parameters=ParameterValues(run_wide, own),
         )
     except RoadieError as error:
         raise SystemExit(str(error)) from error
@@ -91,6 +100,28 @@ def _build_directory(file: Path) -> Path:
     if not file.exists():
         raise RoadieError(f"build file does not exist: {file}")
     return file.parent if file.is_file() else file
+
+
+def _assignments(
+    words: tuple[str, ...],
+) -> tuple[dict[str, str], list[tuple[str, dict[str, str]]]]:
+    """Split words into a run-wide map and `(result, its parameters)` pairs."""
+    run_wide: dict[str, str] = {}
+    ordered: list[tuple[str, dict[str, str]]] = []
+    current: dict[str, str] | None = None
+    for word in words:
+        if "=" in word:
+            name, value = word.split("=", 1)
+            if not name.isidentifier():
+                raise RoadieError(f"parameter name must be an identifier: {word}")
+            place = run_wide if current is None else current
+            if name in place:
+                raise RoadieError(f"parameter {name} is given twice")
+            place[name] = value
+            continue
+        current = {}
+        ordered.append((word, current))
+    return run_wide, ordered
 
 
 def _targets(graph: Graph, results: tuple[str, ...]) -> list[Step[Any]]:

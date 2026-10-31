@@ -68,12 +68,26 @@ started, the run fails with `cannot run git to find the project root:
 ## Command line
 
 ```
-roadie [--dry-run | --dry] [--locked] [--clean] [--jobs N] [--base-dir DIR] [--env FILE]... [-f PATH] [result]...
+roadie [--dry-run | --dry] [--locked] [--clean] [--jobs N] [--base-dir DIR] [--env FILE]... [-f PATH] [name=value]... [result [name=value]...]...
 ```
 
 `-f PATH`, `--file PATH` names the root build file. A file is that build
 file; a directory means the `build.py` inside it. The default is `.`. A path
 that does not exist fails with `build file does not exist: <path>`.
+
+A word containing `=` is a parameter: the name is the text before the first
+`=`, and the value is the rest, which may be empty. A name that is not an
+identifier fails with `parameter name must be an identifier: <word>`. The
+same name given twice in one place fails with `parameter <name> is given
+twice`. A parameter before every result is run-wide. A parameter after a
+result belongs to that result, overrides a run-wide value for that step
+only, and does not reach the result's dependencies. Before any step builds,
+including under `--dry`, a run-wide name no step takes fails with `unknown
+parameter <name>; the plan takes: <names>`, or `the plan takes no parameters`
+when nothing in the plan takes one. A result's own name that result does not
+take fails with `<result> takes no parameter <name>; it takes: <names>`, or
+`<result> takes no parameters`. A required parameter a step does not receive
+fails with `<step> needs parameter <name>`. See [Parameters](#parameters).
 
 Each other word names a result. The run builds each, in the order given,
 over the union of their plans, and a step shared by two plans is built once.
@@ -222,6 +236,22 @@ the name and version of every distribution installed in its environment.
 variable, in the order given. An unset variable differs from an empty one.
 No names fails with `Env takes at least one variable name`. A name that is
 not a string fails with `Env takes variable names: got <type>`.
+
+### Parameters
+
+`Param(name, default=...)` is an input. `name` must be an identifier;
+otherwise construction fails with `Param takes an identifier: got <repr>`.
+`default`, when given, is a string or `None`; another kind fails with
+`Param default takes a string or None: got <type>`. Without `default` the
+parameter is required.
+
+A step's value of a `Param` is its own parameter, when the command gave that
+result one, else the run-wide value, else that `Param`'s default. Each
+`Param` keeps its own default. Inside `build`, `self.<attr>.value` is that
+string, or `None` when an optional parameter was not set. The value lasts
+for the run. Outside a run, reading it fails with `parameter <name> has no
+value outside a run`. The step's fingerprint covers each of its parameters'
+values. An unset optional parameter differs from an empty one.
 
 ### Cargo workspace queries
 

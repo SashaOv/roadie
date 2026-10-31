@@ -767,7 +767,7 @@ approve a run, such as a release, before it goes on. `--base_dir` becomes
   Command line, Settings and Requested result sections, the README, CI's
   `roadie . checks`, and the tests change with it. The backlog's rename item
   goes.
-- [ ] **R13.2: Pass parameters to results.** `Param(name, default=...)` is
+- [x] **R13.2: Pass parameters to results.** `Param(name, default=...)` is
   an input: `name` must be an identifier (`Param takes an identifier: got
   <repr>`); `default`, when given, is a string or `None` (`Param default
   takes a string or None: got <type>`), and without it the parameter is
