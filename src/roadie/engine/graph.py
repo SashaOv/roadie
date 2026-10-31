@@ -101,7 +101,7 @@ def load(directory: Path, *, base_dir: Path | None = None) -> Graph:
     token = _session.set(session)
     try:
         with use_project_root(project):
-            return _load(session, session.root)
+            return _load(session, session.root / BUILD_FILE)
     finally:
         _session.reset(token)
 
@@ -117,9 +117,10 @@ def default_step(step: Step[Any]) -> Step[Any]:
 
 
 # (spec) Including build files
-def include(directory: str) -> Step[Any]:
-    """Load `<directory>/build.py` and return a step for its default result.
+def include(path: str) -> Step[Any]:
+    """Load a build file, or `build.py` in a directory, and return its default step.
 
+    A file is that build file; a directory means the `build.py` inside it.
     The file's results are attributes (`lib.test`) and are not dependencies.
     A result named like a `Step` member fails with `<path>: result <name> is
     reserved by Roadie in an included file`. A plan that holds the returned
@@ -129,7 +130,8 @@ def include(directory: str) -> Step[Any]:
     session = _session.get()
     if session is None:
         raise RoadieError("include() works only in a build.py that Roadie loads")
-    graph = _load(session, (session.loading[-1] / directory).resolve())
+    base = session.loading[-1].parent
+    graph = _load(session, _build_file((base / path).resolve()))
     for name in graph.results:
         if is_reserved(name):
             raise RoadieError(
@@ -139,26 +141,35 @@ def include(directory: str) -> Step[Any]:
 
 
 # (spec) Loading a build file
-def _load(session: _Session, directory: Path) -> Graph:
-    if directory in session.graphs:
-        return session.graphs[directory]
-    path = directory / BUILD_FILE
-    if directory in session.loading:
-        cycle = " -> ".join(
-            str(step / BUILD_FILE) for step in (*session.loading, directory)
-        )
+def _build_file(candidate: Path) -> Path:
+    """The build file `candidate` names: itself when it is a file, else `build.py` inside it."""
+    if candidate.is_file():
+        return candidate
+    build_file = candidate / BUILD_FILE
+    if not build_file.is_file():
+        raise RoadieError(f"{candidate} has no {BUILD_FILE}")
+    return build_file
+
+
+def _load(session: _Session, build_file: Path) -> Graph:
+    build_file = build_file.resolve()
+    directory = build_file.parent
+    if build_file in session.graphs:
+        return session.graphs[build_file]
+    if build_file in session.loading:
+        cycle = " -> ".join(str(item) for item in (*session.loading, build_file))
         raise RoadieError(f"build files include each other: {cycle}")
-    if not path.is_file():
+    if not build_file.is_file():
         raise RoadieError(f"{directory} has no {BUILD_FILE}")
 
-    with _loading(session, directory), file_settings(directory, session.base_dir):
-        namespace = runpy.run_path(str(path), run_name=f"roadie:{path}")
+    with _loading(session, build_file), file_settings(directory, session.base_dir):
+        namespace = runpy.run_path(str(build_file), run_name=f"roadie:{build_file}")
     results = {
         name: value for name, value in namespace.items() if isinstance(value, Step)
     }
-    default = _marked_default(session, directory, path, results)
+    default = _marked_default(session, build_file, build_file, results)
     if not results:
-        raise RoadieError(f"{path} defines no results")
+        raise RoadieError(f"{build_file} defines no results")
 
     prefix = _prefix(session.root, directory)
     names = frozenset(results)
@@ -169,8 +180,8 @@ def _load(session: _Session, directory: Path) -> Graph:
             result.build_variables = names
         if result.name is None:
             result.name = f"{prefix}{name}"
-    graph = Graph(path=path, results=results, root=session.project, default=default)
-    session.graphs[directory] = graph
+    graph = Graph(path=build_file, results=results, root=session.project, default=default)
+    session.graphs[build_file] = graph
     return graph
 
 

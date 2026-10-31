@@ -155,11 +155,13 @@ A result's name is the name of the **variable** the result is assigned to. When 
 
 ### Including build files
 
-`include(directory)` loads `<directory>/build.py` and returns a step that
-stands for that file's default result, as a group of that one step. The
-file's results are attributes of the step (`lib.test`) and are not its
-dependencies, so `Group(lib, app)` runs each file's default, and `roadie lib`
-runs `lib`'s. A file is loaded once per load, however many files include it.
+`include(path)` loads a build file and returns a step that stands for that
+file's default result, as a group of that one step. A file is that build
+file; a directory means the `build.py` inside it. The file's results are
+attributes of the step (`lib.test`) and are not its dependencies, so
+`Group(lib, app)` runs each file's default, and `roadie lib` runs `lib`'s.
+A file is loaded once per load, however many files include it, and naming
+the file or its directory loads it once.
 A plan that holds the step fails, before any step builds, with `<path> marks
 no default result` when the file has no `default_step` mark. A result named
 like a member of `Step` fails at include with `<path>: result <name> is

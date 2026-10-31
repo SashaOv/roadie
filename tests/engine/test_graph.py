@@ -174,6 +174,25 @@ def test_an_included_result_named_like_a_step_member_fails(tmp_path: Path) -> No
         load(tmp_path)
 
 
+# (spec) Including build files
+def test_include_takes_a_build_file_or_its_directory(tmp_path: Path) -> None:
+    write_build(tmp_path / "lib", "item = default_step(Check('true'))\n")
+    checks = tmp_path / "pkg" / "checks.py"
+    checks.parent.mkdir()
+    checks.write_text("from roadie.build import *\n\nitem = default_step(Check('true'))\n")
+    write_build(
+        tmp_path,
+        'by_dir = include("lib")\nby_file = include("lib/build.py")\nchecks = include("pkg/checks.py")\n',
+    )
+
+    graph = load(tmp_path)
+
+    assert graph.results["by_dir"].item is graph.results["by_file"].item
+    assert graph.results["by_dir"]._path == (tmp_path / "lib" / "build.py").resolve()
+    assert graph.results["checks"].item.name == "pkg:item"
+    assert graph.results["checks"]._path == checks.resolve()
+
+
 # (spec) Loading a build file
 def test_missing_build_file_names_the_directory(tmp_path: Path) -> None:
     with pytest.raises(RoadieError, match=f"{tmp_path} has no build.py"):
