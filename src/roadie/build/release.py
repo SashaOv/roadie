@@ -221,9 +221,24 @@ class PyProject(Input):
         return (file,)
 
 
+def _pyproject(path: object) -> PyProject:
+    if isinstance(path, (str, os.PathLike)):
+        shown = os.fspath(path)
+        if Path(shown).name == "pyproject.toml":
+            return PyProject(shown)
+        raise RoadieError(f"Release takes pyproject.toml files: got {shown}")
+    raise RoadieError(f"Release takes paths: got {type(path).__name__}")
+
+
 # (spec) Step kinds
 class Release(Step[str]):
     """Release the primary version; the value is that version.
+
+    `primary` and each further source are paths, relative to the step's base
+    directory. The file name says the kind: `pyproject.toml` is a Python
+    project, read and written as `PyProject` does. Any other name fails with
+    `Release takes pyproject.toml files: got <path>`. A value that is not a
+    path fails with `Release takes paths: got <type>`.
 
     Never reused and keeps no record, so the output fingerprint is the step's
     own fingerprint. It fails, before changing anything, with `cannot release:
@@ -257,8 +272,8 @@ class Release(Step[str]):
 
     def __init__(
         self,
-        primary: PyProject,
-        *secondary: PyProject,
+        primary: str | os.PathLike[str],
+        *secondary: str | os.PathLike[str],
         requires: Step[Any] | Iterable[Step[Any]] = (),
         message: str | Param | None = None,
     ) -> None:
@@ -266,8 +281,8 @@ class Release(Step[str]):
             raise RoadieError(
                 f"Release message takes a string or a Param: got {type(message).__name__}"
             )
-        self.primary = primary
-        self.secondary = secondary
+        self.primary = _pyproject(primary)
+        self.secondary = tuple(_pyproject(path) for path in secondary)
         self.requires = one_or_many(
             requires, Step, owner="Release", parameter="requires", takes="steps"
         )
@@ -279,7 +294,7 @@ class Release(Step[str]):
             named["requires"] = self.requires
         if self.message is not None:
             named["message"] = self.message
-        return [self.primary, *self.secondary], named
+        return [self.primary.path, *(source.path for source in self.secondary)], named
 
     def _release_message(self) -> str | None:
         message = self.message.value if isinstance(self.message, Param) else self.message

@@ -9,7 +9,6 @@ from roadie.build import (
     Check,
     Files,
     Group,
-    PyProject,
     Pytest,
     PythonEnv,
     Release,
@@ -29,8 +28,8 @@ def test_requires_and_inputs_take_one_value_or_many() -> None:
 
     assert gate.inputs == (sources,)
     assert suite.inputs == (sources, environment)
-    assert Release(PyProject("pyproject.toml"), requires=checks).requires == (checks,)
-    assert Release(PyProject("pyproject.toml"), requires=(gate, suite)).requires == (gate, suite)
+    assert Release("pyproject.toml", requires=checks).requires == (checks,)
+    assert Release("pyproject.toml", requires=(gate, suite)).requires == (gate, suite)
 
 
 # (spec) Step kinds
@@ -39,7 +38,7 @@ def test_requires_one_group_plans_the_group(tmp_path: Path) -> None:
         tmp_path,
         'gate = Check("true")\n'
         "checks = Group(gate)\n"
-        'release = Release(PyProject("pyproject.toml"), requires=checks)\n',
+        'release = Release("pyproject.toml", requires=checks)\n',
     )
 
     assert plan_names(tmp_path, "release") == ["gate", "checks", "release"]
@@ -69,9 +68,9 @@ def test_a_check_takes_a_step_in_inputs(tmp_path: Path) -> None:
         ("Check('true', inputs=1)", "Check inputs takes inputs or steps: got int"),
         ("Check('true', inputs=(Files('src'), 1))", "Check inputs takes inputs or steps: got int"),
         ("Pytest(inputs=1)", "Pytest inputs takes inputs or steps: got int"),
-        ('Release(PyProject("pyproject.toml"), requires=1)', "Release requires takes steps: got int"),
+        ('Release("pyproject.toml", requires=1)', "Release requires takes steps: got int"),
         (
-            'Release(PyProject("pyproject.toml"), requires=(Check("true"), 1))',
+            'Release("pyproject.toml", requires=(Check("true"), 1))',
             "Release requires takes steps: got int",
         ),
     ],
@@ -116,7 +115,7 @@ def test_config_env_rejects_a_non_path(source: str, message: str, tmp_path: Path
 def test_one_step_or_a_tuple_of_different_steps_type_checks(tmp_path: Path) -> None:
     sample = tmp_path / "sample.py"
     sample.write_text(
-        "from roadie.build import Check, Files, Group, PyProject, Pytest, PythonEnv, Release\n"
+        "from roadie.build import Check, Files, Group, Pytest, PythonEnv, Release\n"
         "\n"
         "sources = Files('src')\n"
         "environment = PythonEnv()\n"
@@ -124,8 +123,8 @@ def test_one_step_or_a_tuple_of_different_steps_type_checks(tmp_path: Path) -> N
         "mypy = Check('mypy', inputs=(sources, environment))\n"
         "pytest = Pytest(inputs=(sources, environment))\n"
         "checks = Group(ruff, mypy, pytest)\n"
-        "Release(PyProject('pyproject.toml'), requires=checks)\n"
-        "Release(PyProject('pyproject.toml'), requires=(ruff, mypy, pytest))\n"
+        "Release('pyproject.toml', requires=checks)\n"
+        "Release('pyproject.toml', requires=(ruff, mypy, pytest))\n"
     )
     completed = subprocess.run(
         [sys.executable, "-m", "mypy", str(sample)],

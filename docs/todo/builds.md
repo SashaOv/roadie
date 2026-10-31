@@ -825,7 +825,7 @@ approve a run, such as a release, before it goes on. `--base_dir` becomes
   release is as today. Roadie's `build.py` passes `message=Param("message",
   default=None)`. The `Release` docstring states it, and the backlog item
   goes.
-- [ ] **R13.7: Name a release's version sources by their files.**
+- [x] **R13.7: Name a release's version sources by their files.**
   `Release(primary, *secondary, ...)` takes paths, relative to the step's
   base directory, and the file name says the kind: `pyproject.toml` is a
   Python project, read and written as `PyProject` is today. Any other name

@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 from support import execute, write_build
 
-from roadie.build import PyProject, Release
+from roadie.build import Release
+from roadie.build.release import PyProject
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.graph import load
 from roadie.engine.parameters import ParameterValues
@@ -57,13 +58,28 @@ def _tags(bare: Path) -> set[str]:
     return set(listed.stdout.split())
 
 
-def _release(repo: Path, *secondary: PyProject) -> str:
-    step = Release(PyProject("pyproject.toml"), *secondary)
+def _release(repo: Path, *secondary: str) -> str:
+    step = Release("pyproject.toml", *secondary)
     step.base_dir = repo
     step.name = "release"
     value = execute([step], root=repo)
     assert isinstance(value, str)
     return value
+
+
+# (spec) Step kinds
+def test_release_names_version_sources_by_their_files() -> None:
+    with pytest.raises(RoadieError, match="Release takes paths: got int"):
+        Release(1)
+    with pytest.raises(
+        RoadieError, match=re.escape("Release takes pyproject.toml files: got Cargo.toml")
+    ):
+        Release("Cargo.toml")
+    step = Release("pyproject.toml", "other/pyproject.toml", message="ship it")
+    assert step.call_arguments()[0] == ["pyproject.toml", "other/pyproject.toml"]
+    import roadie.build as api
+
+    assert "PyProject" not in api.__all__
 
 
 # (spec) Step kinds
@@ -113,7 +129,7 @@ def test_release_bumps_the_build_part_and_skips_suffixed_tags(
     _git(repo, "tag", "v0.2.0-rc1")
     _advance(repo)
 
-    assert _release(repo, PyProject("other/pyproject.toml")) == "0.1.10"
+    assert _release(repo, "other/pyproject.toml") == "0.1.10"
     assert "released v0.1.10" in capsys.readouterr().out
     assert _git(repo, "log", "-1", "--format=%s").stdout.strip() == "v0.1.10 release"
     committed = _git(repo, "show", "--name-only", "--format=", "HEAD").stdout.split()
@@ -211,7 +227,7 @@ def test_release_requires_run_before_it_and_a_failure_publishes_nothing(tmp_path
     repo, bare = _repository(tmp_path, "0.1.0")
     write_build(
         repo,
-        'gate = Check("false")\nrelease = Release(PyProject("pyproject.toml"), requires=(gate,))\n',
+        'gate = Check("false")\nrelease = Release("pyproject.toml", requires=(gate,))\n',
     )
     plan = load(repo).plan("release")
     assert [step.name for step in plan] == ["gate", "release"]
@@ -222,7 +238,7 @@ def test_release_requires_run_before_it_and_a_failure_publishes_nothing(tmp_path
     passing, passing_remote = _repository(tmp_path / "passing", "0.1.0")
     write_build(
         passing,
-        'gate = Check("true")\nrelease = Release(PyProject("pyproject.toml"), requires=(gate,))\n',
+        'gate = Check("true")\nrelease = Release("pyproject.toml", requires=(gate,))\n',
     )
     _git(passing, "add", "build.py")
     _git(passing, "commit", "-q", "-m", "build")
@@ -238,7 +254,7 @@ def _object_kind(repo: Path, name: str) -> str:
 # (spec) Step kinds
 def test_release_message_is_a_string_or_a_param() -> None:
     with pytest.raises(RoadieError, match="Release message takes a string or a Param: got int"):
-        Release(PyProject("pyproject.toml"), message=1)
+        Release("pyproject.toml", message=1)
 
 
 # (spec) Step kinds
@@ -246,7 +262,7 @@ def test_a_release_message_is_the_commit_body_and_an_annotated_tag(tmp_path: Pat
     repo, bare = _repository(tmp_path, "0.1.0")
     _git(repo, "tag", "v0.1.0")
     _advance(repo)
-    step = Release(PyProject("pyproject.toml"), message="ship it")
+    step = Release("pyproject.toml", message="ship it")
     step.base_dir = repo
     step.name = "release"
     assert execute([step], root=repo) == "0.1.1"
@@ -258,7 +274,7 @@ def test_a_release_message_is_the_commit_body_and_an_annotated_tag(tmp_path: Pat
     quiet, quiet_remote = _repository(tmp_path / "quiet", "0.1.0")
     _git(quiet, "tag", "v0.1.0")
     _advance(quiet)
-    plain = Release(PyProject("pyproject.toml"), message="")
+    plain = Release("pyproject.toml", message="")
     plain.base_dir = quiet
     plain.name = "release"
     assert execute([plain], root=quiet) == "0.1.1"
@@ -272,7 +288,7 @@ def test_a_param_message_is_the_release_message(tmp_path: Path) -> None:
     repo, _bare = _repository(tmp_path, "0.1.0")
     write_build(
         repo,
-        'release = Release(PyProject("pyproject.toml"), message=Param("message", default=None))\n',
+        'release = Release("pyproject.toml", message=Param("message", default=None))\n',
     )
     _git(repo, "add", "build.py")
     _git(repo, "commit", "-q", "-m", "build")
