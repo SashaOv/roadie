@@ -163,7 +163,7 @@ def test_the_lock_is_released_before_the_result_is_served(
 
 # (spec) One run at a time
 # (spec) Command line
-def test_dry_run_takes_no_lock(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_dry_run_takes_the_lock_like_a_run(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = tmp_path.resolve()
     write_build(root, "class Note(Step[str]):\n    def build(self, run):\n        return 'v'\nitem = Note()\n")
     lock = root / "target" / "roadie" / "run.lock"
@@ -171,10 +171,14 @@ def test_dry_run_takes_no_lock(tmp_path: Path, capsys: pytest.CaptureFixture[str
     assert not lock.exists()
     assert "# run" in capsys.readouterr().out
 
-    _plant(lock, os.getpid(), _stamp(datetime.now(UTC)))
-    cli.run(root, dry_run=True)
-    assert "item = Note()  # run" in capsys.readouterr().out
-    assert lock.is_file()
+    started = _stamp(datetime.now(UTC))
+    _plant(lock, os.getpid(), started)
+    with pytest.raises(
+        SystemExit,
+        match=f"another roadie run holds {lock} \\(pid {os.getpid()}, started {started}\\)",
+    ):
+        cli.run(root, dry_run=True)
+    assert capsys.readouterr().out == ""
 
 
 # (spec) Command line

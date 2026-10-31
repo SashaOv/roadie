@@ -98,8 +98,8 @@ define is an error.
   prints `reused <name>`, `# not started` where it prints `not started
   <name>`, and `# run` otherwise. Where the run would build a step or start
   a deferred one, the dry run keeps a placeholder output fingerprint
-  instead. It takes no lock, writes no records, and does not publish, serve,
-  sweep, or tear down. See [One run at a time](#one-run-at-a-time).
+  instead. It takes the lock like a run, writes no records, and does not
+  publish, serve, sweep, or tear down. See [One run at a time](#one-run-at-a-time).
 
 There is no version option. `roadie --help` prints usage.
 
@@ -278,7 +278,7 @@ its PID and start time. Another run fails with `another roadie run holds
 <lock> (pid <n>, started <time>)`. A lock whose process is gone, which is
 older than 24 hours, or which cannot be read, is stale and taken over. The
 lock is released before a requested result is served, so a running dev server
-does not block builds. `--dry` takes no lock.
+does not block builds.
 
 ### Requested result
 

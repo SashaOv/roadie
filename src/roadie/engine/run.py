@@ -55,11 +55,9 @@ def execute(
     dry: bool = False,
 ) -> object:
     with use_project_root(root):
-        if dry:
-            return _run_steps(steps, locked=locked, env=env, dry=True)
         held = acquire_run_lock(root)
         try:
-            return _run_steps(steps, locked=locked, env=env, run_lock=held)
+            return _run_steps(steps, locked=locked, env=env, run_lock=held, dry=dry)
         finally:
             held.release()
 
