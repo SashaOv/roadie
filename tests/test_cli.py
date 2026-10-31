@@ -164,7 +164,7 @@ def test_cli_passes_locked_and_prints_keyword_output(tmp_path: Path, monkeypatch
     monkeypatch.setattr(
         cli,
         "execute",
-        lambda steps, *, root, locked, env=(), dry=False, jobs=1, targets=None, parameters=None: observed.append(
+        lambda steps, *, root, locked, env=(), dry=False, jobs=1, targets=None, parameters=None, leading=0: observed.append(
             (locked, env)
         ),
     )
@@ -344,3 +344,96 @@ def test_a_missing_build_file_names_the_path(tmp_path: Path) -> None:
     missing = tmp_path / "absent"
     with pytest.raises(SystemExit, match=f"build file does not exist: {missing}"):
         run_cli(["-f", str(missing), "--dry"])
+
+
+def _dry_names(output: str) -> list[str]:
+    return [line.split(" = ", 1)[0] for line in output.splitlines() if line.endswith("# run")]
+
+
+# (spec) Command line
+def test_setup_runs_before_other_steps_including_an_included_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_build(tmp_path / "lib", "prep = setup(Check('true'))\nitem = default_step(Check('true'))\n")
+    write_build(tmp_path, 'lib = include("lib")\nwork = Check("true")\n')
+
+    run_cli(["--dry", "--jobs", "1", "-f", str(tmp_path)])
+
+    assert _dry_names(capsys.readouterr().out) == ["lib:prep", "work"]
+
+
+# (spec) Command line
+def test_a_files_setup_follows_the_setup_of_files_it_includes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_build(tmp_path / "lib", "prep = setup(Check('true'))\nitem = Check('true')\n")
+    write_build(
+        tmp_path,
+        'lib = include("lib")\nprep = setup(Check("true"))\nwork = Check("true")\n',
+    )
+
+    run_cli(["--dry", "--jobs", "1", "-f", str(tmp_path)])
+
+    assert _dry_names(capsys.readouterr().out) == ["lib:prep", "prep", "work"]
+
+
+# (spec) Command line
+def test_setup_builds_after_its_own_dependencies(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_build(
+        tmp_path,
+        "dep = Check('true')\nprep = setup(Group(dep))\nwork = Check('true')\n",
+    )
+
+    run_cli(["--dry", "--jobs", "1", "-f", str(tmp_path)])
+
+    assert _dry_names(capsys.readouterr().out) == ["dep", "prep", "work"]
+
+
+# (spec) Command line
+def test_dry_of_another_result_still_lists_the_setup_step(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_build(tmp_path, "prep = setup(Check('true'))\nother = Check('true')\nwork = Check('true')\n")
+
+    run_cli(["--dry", "--jobs", "1", "-f", str(tmp_path), "other"])
+
+    assert _dry_names(capsys.readouterr().out) == ["prep", "other"]
+
+
+# (spec) Command line
+def test_a_failed_setup_step_stops_the_run(tmp_path: Path) -> None:
+    marker = tmp_path / "ran"
+    write_build(
+        tmp_path,
+        "from dataclasses import dataclass\n"
+        "from pathlib import Path\n"
+        "from roadie.engine.run import Run\n\n"
+        "@dataclass(eq=False)\n"
+        "class Boom(Step[None]):\n"
+        "    def build(self, run: Run) -> None:\n"
+        "        raise RuntimeError('boom')\n\n"
+        "@dataclass(eq=False)\n"
+        "class Touch(Step[None]):\n"
+        "    def build(self, run: Run) -> None:\n"
+        f"        Path({str(marker)!r}).write_text('yes')\n\n"
+        "prep = setup(Boom())\n"
+        "work = Touch()\n",
+    )
+
+    with pytest.raises(SystemExit, match="prep failed: boom"):
+        run_cli(["--jobs", "2", "-f", str(tmp_path)])
+
+    assert not marker.exists()
+
+
+# (spec) Command line
+def test_a_setup_step_is_reused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    write_build(tmp_path, "prep = setup(Check('true'))\nwork = Check('true')\n")
+    run_cli(["--jobs", "1", "-f", str(tmp_path)])
+    capsys.readouterr()
+
+    run_cli(["--jobs", "1", "-f", str(tmp_path)])
+
+    assert "reused prep" in capsys.readouterr().out

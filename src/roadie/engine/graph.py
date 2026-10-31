@@ -27,6 +27,7 @@ class Graph:
     results: Mapping[str, Step[Any]]
     root: Path
     default: Step[Any] | None = None
+    setup_step: Step[Any] | None = None
 
     # (spec) Command line
     def result(self, name: str | None = None) -> Step[Any]:
@@ -44,6 +45,10 @@ class Graph:
     # (spec) Plan order
     def plan(self, name: str | None = None) -> list[Step[Any]]:
         """Return the steps `name` needs, each after the steps it takes results from."""
+        return self.order(self.result(name))
+
+    def order(self, origin: Step[Any]) -> list[Step[Any]]:
+        """Return the steps `origin` needs, each after the steps it takes results from."""
         ordered: list[Step[Any]] = []
         seen: set[int] = set()
         visiting: list[Step[Any]] = []
@@ -61,7 +66,7 @@ class Graph:
             seen.add(id(result))
             ordered.append(result)
 
-        visit(self.result(name))
+        visit(origin)
         return ordered
 
     # (spec) Command line
@@ -76,6 +81,28 @@ class Graph:
                     ordered.append(step)
         return ordered
 
+    # (spec) Command line
+    def scheduled(self, names: Sequence[str]) -> tuple[list[Step[Any]], int]:
+        """The run's steps, setup plans first, and how many of those leading steps are setup."""
+        ordered: list[Step[Any]] = []
+        seen: set[int] = set()
+
+        def take(origin: Step[Any]) -> None:
+            for step in self.order(origin):
+                if id(step) not in seen:
+                    seen.add(id(step))
+                    ordered.append(step)
+
+        for step in setup_steps(self):
+            take(step)
+        leading = len(ordered)
+        if names:
+            for name in names:
+                take(self.result(name))
+        else:
+            take(self.result())
+        return ordered, leading
+
 
 @dataclass
 class _Session:
@@ -85,6 +112,7 @@ class _Session:
     graphs: dict[Path, Graph] = field(default_factory=dict)
     loading: list[Path] = field(default_factory=list)
     marks: dict[Path, list[Step[Any]]] = field(default_factory=dict)
+    setups: dict[Path, list[Step[Any]]] = field(default_factory=dict)
 
 
 _session: ContextVar[_Session | None] = ContextVar("roadie_session", default=None)
@@ -116,6 +144,16 @@ def default_step(step: Step[Any]) -> Step[Any]:
     return step
 
 
+# (spec) Command line
+def setup(step: Step[Any]) -> Step[Any]:
+    """Return `step` and mark it to build before every other step of a run."""
+    session = _session.get()
+    if session is None:
+        raise RoadieError("setup() works only in a build.py that Roadie loads")
+    session.setups.setdefault(session.loading[-1], []).append(step)
+    return step
+
+
 # (spec) Including build files
 def include(path: str) -> Step[Any]:
     """Load a build file, or `build.py` in a directory, and return its default step.
@@ -137,7 +175,7 @@ def include(path: str) -> Step[Any]:
             raise RoadieError(
                 f"{graph.path}: result {name} is reserved by Roadie in an included file"
             )
-    return _Included(graph.path, graph.default, graph.results)
+    return _Included(graph.path, graph.default, graph.results, graph.setup_step)
 
 
 # (spec) Loading a build file
@@ -168,6 +206,7 @@ def _load(session: _Session, build_file: Path) -> Graph:
         name: value for name, value in namespace.items() if isinstance(value, Step)
     }
     default = _marked_default(session, build_file, build_file, results)
+    marked_setup = _marked_setup(session, build_file, build_file, results)
     if not results:
         raise RoadieError(f"{build_file} defines no results")
 
@@ -180,7 +219,13 @@ def _load(session: _Session, build_file: Path) -> Graph:
             result.build_variables = names
         if result.name is None:
             result.name = f"{prefix}{name}"
-    graph = Graph(path=build_file, results=results, root=session.project, default=default)
+    graph = Graph(
+        path=build_file,
+        results=results,
+        root=session.project,
+        default=default,
+        setup_step=marked_setup,
+    )
     session.graphs[build_file] = graph
     return graph
 
@@ -216,6 +261,51 @@ def _marked_default(
     return bound[0][1]
 
 
+def _marked_setup(
+    session: _Session,
+    directory: Path,
+    path: Path,
+    results: Mapping[str, Step[Any]],
+) -> Step[Any] | None:
+    marked = session.setups.get(directory, [])
+    if not marked:
+        return None
+    bound: list[tuple[str, Step[Any]]] = []
+    for step in marked:
+        name = next((item for item, value in results.items() if value is step), None)
+        if name is None:
+            raise RoadieError(f"{path}: the setup step is not bound to a variable")
+        if all(item is not step for _, item in bound):
+            bound.append((name, step))
+    if len(bound) > 1:
+        names = ", ".join(name for name, _ in bound)
+        raise RoadieError(f"{path} marks more than one setup step: {names}")
+    return bound[0][1]
+
+
+def setup_steps(graph: Graph) -> list[Step[Any]]:
+    """Setup steps of included files, outer files after the files they include."""
+    found: list[Step[Any]] = []
+    seen: set[int] = set()
+    visited: set[int] = set()
+
+    def walk(results: Mapping[str, Step[Any]]) -> None:
+        for value in results.values():
+            if not isinstance(value, _Included) or id(value) in visited:
+                continue
+            visited.add(id(value))
+            walk(value._results)
+            marked = value._setup
+            if marked is not None and id(marked) not in seen:
+                seen.add(id(marked))
+                found.append(marked)
+
+    walk(graph.results)
+    if graph.setup_step is not None and id(graph.setup_step) not in seen:
+        found.append(graph.setup_step)
+    return found
+
+
 class _Included(Step[tuple[object, ...]]):
     """A group of the included file's default result, with its results as attributes."""
 
@@ -226,9 +316,11 @@ class _Included(Step[tuple[object, ...]]):
         path: Path,
         default: Step[Any] | None,
         results: Mapping[str, Step[Any]],
+        marked_setup: Step[Any] | None,
     ) -> None:
         self._path = path
         self._results = dict(results)
+        self._setup = marked_setup
         self.steps = () if default is None else (default,)
 
     def __getattr__(self, name: str) -> Any:

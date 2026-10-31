@@ -84,6 +84,7 @@ def execute(
     jobs: int = 1,
     targets: Sequence[Step[Any]] | None = None,
     parameters: ParameterValues | None = None,
+    leading: int = 0,
 ) -> object:
     if jobs < 1:
         raise RoadieError("--jobs must be at least 1")
@@ -99,6 +100,7 @@ def execute(
                 jobs=jobs,
                 targets=targets,
                 parameters=parameters,
+                leading=leading,
             )
         finally:
             held.release()
@@ -114,6 +116,7 @@ def _run_steps(
     jobs: int = 1,
     targets: Sequence[Step[Any]] | None = None,
     parameters: ParameterValues | None = None,
+    leading: int = 0,
 ) -> object:
     _apply_env(steps, env)
     run = Run(locked=locked)
@@ -166,6 +169,7 @@ def _run_steps(
                 run_lock=run_lock,
                 dry=dry,
                 jobs=jobs,
+                leading=leading,
             )
             if interrupted:
                 raise KeyboardInterrupt
@@ -215,6 +219,7 @@ def _schedule(
     run_lock: HeldLock | None,
     dry: bool,
     jobs: int,
+    leading: int,
 ) -> object:
     result: list[object] = []
 
@@ -232,7 +237,7 @@ def _schedule(
             with schedule:
                 if failures:
                     return
-                step = _next_ready(steps, finished, running, prerequisites, requested)
+                step = _next_ready(steps, finished, running, prerequisites, requested, leading)
                 if step is None:
                     if running:
                         schedule.wait()
@@ -355,9 +360,16 @@ def _next_ready(
     running: set[int],
     prerequisites: dict[int, set[int]],
     requested: set[int],
+    leading: int,
 ) -> Step[Any] | None:
-    for step in steps:
+    prefix_done = all(id(step) in finished for step in steps[:leading])
+    for index, step in enumerate(steps):
         if id(step) in finished or id(step) in running:
+            continue
+        if index < leading:
+            if any(id(earlier) not in finished for earlier in steps[:index]):
+                continue
+        elif not prefix_done:
             continue
         if (
             id(step) in requested

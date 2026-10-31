@@ -5,7 +5,15 @@ from pathlib import Path
 import pytest
 from support import plan_names, write_build
 
-from roadie.build import CargoPackage, Group, RoadieError, Step, default_step, include
+from roadie.build import (
+    CargoPackage,
+    Group,
+    RoadieError,
+    Step,
+    default_step,
+    include,
+    setup,
+)
 from roadie.engine.graph import Graph, load
 from roadie.engine.run import Run
 
@@ -75,6 +83,36 @@ def test_an_unbound_default_result_fails(tmp_path: Path) -> None:
     with pytest.raises(
         RoadieError,
         match=re.escape(f"{path}: the default result is not bound to a variable"),
+    ):
+        load(tmp_path)
+
+
+# (spec) Command line
+def test_setup_outside_a_build_file_fails() -> None:
+    with pytest.raises(RoadieError, match=r"setup\(\) works only in a build.py that Roadie loads"):
+        setup(Group())
+
+
+# (spec) Command line
+def test_an_unbound_setup_step_fails(tmp_path: Path) -> None:
+    write_build(tmp_path, "other = Group()\nsetup(Group())\n")
+    path = (tmp_path / "build.py").resolve()
+
+    with pytest.raises(
+        RoadieError,
+        match=re.escape(f"{path}: the setup step is not bound to a variable"),
+    ):
+        load(tmp_path)
+
+
+# (spec) Command line
+def test_marking_two_setup_steps_names_both(tmp_path: Path) -> None:
+    write_build(tmp_path, "a = setup(Group())\nb = setup(Group())\n")
+    path = (tmp_path / "build.py").resolve()
+
+    with pytest.raises(
+        RoadieError,
+        match=re.escape(f"{path} marks more than one setup step: a, b"),
     ):
         load(tmp_path)
 

@@ -101,7 +101,20 @@ that no variable of the file holds fails with `<path>: the default result is
 not bound to a variable`. Calling it outside a loading build file fails with
 `default_step() works only in a build.py that Roadie loads`. Without a mark,
 `roadie` runs the result constructed last. (Note: that is not the last name
-assigned: reassigning a name does not move the step it held). A word that
+assigned: reassigning a name does not move the step it held).
+
+`setup(step)` returns `step` and marks it so every run builds it, after its
+own plan and before any other step, whichever results the run builds, also
+under `--dry`. A build file marks at most one, and the step is bound to a
+variable. A second mark fails with `<path> marks more than one setup step:
+<names>`. A step no variable holds fails with `<path>: the setup step is not
+bound to a variable`. Calling it outside a loading build file fails with
+`setup() works only in a build.py that Roadie loads`. A mark in an included
+file counts, and a file's setup step builds after the setup steps of the
+files it includes. A failed setup step stops the run before any other step
+builds. Reuse is unchanged.
+
+A word that
 names no result and is an existing directory fails with `<path> has no result
 named '<word>'; to use the build file in <word>, pass -f <word>`. Naming any
 other missing result is an error that lists the file's results.

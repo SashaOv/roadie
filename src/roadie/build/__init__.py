@@ -18,7 +18,7 @@ from roadie.build.service import Deployment, HttpService, Service
 from roadie.build.tests import TestFailure, TestResults, Tests
 from roadie.engine.config import config
 from roadie.engine.errors import RoadieError
-from roadie.engine.graph import default_step, include
+from roadie.engine.graph import default_step, include, setup
 from roadie.engine.inputs import Input, run_state
 from roadie.engine.run import Run
 from roadie.engine.step import Step
@@ -53,4 +53,5 @@ __all__ = [
     "include",
     "run_state",
     "select_rust_packages",
+    "setup",
 ]

@@ -801,7 +801,7 @@ approve a run, such as a release, before it goes on. `--base_dir` becomes
   `Step` member (R12.4) fails with `<path>: result <name> is reserved by
   Roadie in an included file`. The spec's Including build files section
   states it, and the backlog item goes.
-- [ ] **R13.4: Build a setup step first.** `setup(step)` returns `step` and
+- [x] **R13.4: Build a setup step first.** `setup(step)` returns `step` and
   marks it, like `default_step`: every run builds it, after its own plan
   and before any other step, whichever results it runs, also under `--dry`.
   A build file marks at most one, bound to a variable (`<path>: the setup

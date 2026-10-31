@@ -73,7 +73,7 @@ def run(
         graph = load(directory, base_dir=base_dir)
         targets = _targets(graph, names)
         _one_requested(targets)
-        steps = graph.plan_results(names) if names else graph.plan()
+        steps, leading = graph.scheduled(names)
         own = (
             {id(step): params for step, (_name, params) in zip(targets, ordered, strict=True)}
             if names
@@ -91,6 +91,7 @@ def run(
             jobs=jobs,
             targets=targets,
             parameters=ParameterValues(run_wide, own),
+            leading=leading,
         )
     except RoadieError as error:
         raise SystemExit(str(error)) from error
