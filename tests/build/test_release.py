@@ -6,7 +6,7 @@ import pytest
 from support import execute, write_build
 
 from roadie.build import Release
-from roadie.build.release import PyProject
+from roadie.build.release import CargoManifest, PyProject
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.graph import load
 from roadie.engine.parameters import ParameterValues
@@ -72,9 +72,9 @@ def test_release_names_version_sources_by_their_files() -> None:
     with pytest.raises(RoadieError, match="Release takes paths: got int"):
         Release(1)
     with pytest.raises(
-        RoadieError, match=re.escape("Release takes pyproject.toml files: got Cargo.toml")
+        RoadieError, match=re.escape("Release takes pyproject.toml or Cargo.toml files: got notes.txt")
     ):
-        Release("Cargo.toml")
+        Release("notes.txt")
     step = Release("pyproject.toml", "other/pyproject.toml", message="ship it")
     assert step.call_arguments()[0] == ["pyproject.toml", "other/pyproject.toml"]
     import roadie.build as api
@@ -101,6 +101,100 @@ def test_pyproject_requires_a_static_version_and_fingerprints_its_content(tmp_pa
     original = source.fingerprint(tmp_path)
     missing.write_text('[project]\nname = "demo"\nversion = "0.1.1"\n')
     assert source.fingerprint(tmp_path) != original
+
+
+# (spec) Step kinds
+def test_cargo_reads_the_workspace_version_or_the_package_version(tmp_path: Path) -> None:
+    source = CargoManifest("Cargo.toml")
+    manifest = tmp_path / "Cargo.toml"
+    resolved = manifest.resolve()
+    manifest.write_text('[package]\nname = "demo"\nedition = "2021"\n')
+    with pytest.raises(RoadieError, match=re.escape(f"{resolved} has no static Cargo version")):
+        source.read_version(tmp_path)
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "lib.rs").write_text("pub fn demo() {}\n")
+    package = (
+        '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n\n'
+        '[lib]\npath = "src/lib.rs"\n# version = "leave"\n'
+    )
+    manifest.write_text(package)
+    assert source.read_version(tmp_path) == "0.1.0"
+    original = source.fingerprint(tmp_path)
+    assert source.write_version(tmp_path, "0.1.1") == (resolved,)
+    assert manifest.read_text() == package.replace('version = "0.1.0"', 'version = "0.1.1"', 1)
+    assert source.fingerprint(tmp_path) != original
+
+    manifest.write_text(
+        "[workspace]\nmembers = []\n\n"
+        "[workspace.package]\n"
+        'version = "0.2.0"\n\n'
+        "[package]\n"
+        'name = "demo"\n'
+        'version = "0.1.0"\n'
+        'edition = "2021"\n\n'
+        '[lib]\npath = "src/lib.rs"\n'
+    )
+    assert source.read_version(tmp_path) == "0.2.0"
+    source.write_version(tmp_path, "0.2.1")
+    text = manifest.read_text()
+    assert 'version = "0.2.1"' in text
+    assert 'version = "0.1.0"' in text
+    assert 'edition = "2021"' in text
+
+
+# (spec) Step kinds
+def test_a_tracked_cargo_lock_joins_the_release_commit(tmp_path: Path) -> None:
+    repo, bare = _repository(tmp_path, "0.1.0")
+    (repo / "src").mkdir()
+    (repo / "src" / "lib.rs").write_text("pub fn demo() {}\n")
+    (repo / "Cargo.toml").write_text(
+        '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n\n'
+        '[lib]\npath = "src/lib.rs"\n'
+    )
+    subprocess.run(["cargo", "generate-lockfile"], cwd=repo, check=True, capture_output=True)
+    _git(repo, "add", "Cargo.toml", "Cargo.lock", "src")
+    _git(repo, "commit", "-q", "-m", "cargo")
+    _git(repo, "push", "-q", "origin", "HEAD")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    before = (repo / "Cargo.lock").read_text()
+    step = Release("Cargo.toml")
+    step.base_dir = repo
+    step.name = "release"
+    assert execute([step], root=repo) == "0.1.1"
+    assert 'version = "0.1.1"' in (repo / "Cargo.toml").read_text()
+    assert 'edition = "2021"' in (repo / "Cargo.toml").read_text()
+    assert (repo / "Cargo.lock").read_text() != before
+    assert 'version = "0.1.1"' in (repo / "Cargo.lock").read_text()
+    committed = _git(repo, "show", "--name-only", "--format=", "HEAD").stdout.split()
+    assert set(committed) == {"Cargo.toml", "Cargo.lock"}
+    assert "v0.1.1" in _tags(bare)
+
+
+# (spec) Step kinds
+def test_a_failing_cargo_update_stops_the_release(tmp_path: Path) -> None:
+    repo, bare = _repository(tmp_path / "broken", "0.1.0")
+    (repo / "src").mkdir()
+    (repo / "src" / "lib.rs").write_text("pub fn demo() {}\n")
+    (repo / "Cargo.toml").write_text(
+        '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n\n'
+        '[lib]\npath = "src/lib.rs"\n\n'
+        '[dependencies]\nmissing = { path = "missing" }\n'
+    )
+    (repo / "Cargo.lock").write_text("# not a lockfile\n")
+    _git(repo, "add", "Cargo.toml", "Cargo.lock", "src")
+    _git(repo, "commit", "-q", "-m", "cargo")
+    _git(repo, "push", "-q", "origin", "HEAD")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    step = Release("Cargo.toml")
+    step.base_dir = repo
+    step.name = "release"
+    with pytest.raises(StepFailed, match="cannot release:") as error:
+        execute([step], root=repo)
+    assert "version line is missing" not in str(error.value)
+    assert _tags(bare) == set()
 
 
 # (spec) Step kinds

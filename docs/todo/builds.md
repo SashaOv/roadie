@@ -834,7 +834,7 @@ approve a run, such as a release, before it goes on. `--base_dir` becomes
   takes paths: got <type>`. `PyProject` leaves `roadie.build`; Roadie's
   `build.py` becomes `Release("pyproject.toml", ...)`, and `--dry` shows
   the paths.
-- [ ] **R13.8: Release a Cargo workspace's version.** A source named
+- [x] **R13.8: Release a Cargo workspace's version.** A source named
   `Cargo.toml` is a Cargo manifest. Its version is
   `[workspace.package] version`, or, without that table, `[package]
   version`; a manifest with neither as a string fails with `<path> has no

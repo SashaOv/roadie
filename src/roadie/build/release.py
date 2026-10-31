@@ -221,12 +221,133 @@ class PyProject(Input):
         return (file,)
 
 
-def _pyproject(path: object) -> PyProject:
+_VERSION_LINE = re.compile(r"^(\s*version\s*=\s*)(['\"])(.*)\2(.*)$")
+
+
+def _table_name(line: str) -> str | None:
+    stripped = line.strip()
+    if stripped.startswith("[") and stripped.endswith("]") and not stripped.startswith("[["):
+        return stripped[1:-1].strip()
+    return None
+
+
+def _replace_version(text: str, table: str, old: str, new: str) -> str:
+    current: str | None = None
+    lines = text.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        header = _table_name(line)
+        if header is not None:
+            current = header
+            continue
+        if current != table:
+            continue
+        ending = ""
+        body = line
+        if body.endswith("\r\n"):
+            body, ending = body[:-2], "\r\n"
+        elif body.endswith("\n"):
+            body, ending = body[:-1], "\n"
+        match = _VERSION_LINE.match(body)
+        if match is None or match.group(3) != old:
+            continue
+        quote = match.group(2)
+        lines[index] = f"{match.group(1)}{quote}{new}{quote}{match.group(4)}{ending}"
+        return "".join(lines)
+    raise RoadieError(f"cannot release: {table} version line is missing")
+
+
+def _cargo(directory: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    try:
+        completed = subprocess.run(
+            ["cargo", *args],
+            cwd=directory,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as error:
+        raise RoadieError(f"cannot release: {error}") from error
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        reason = detail or f"cargo exited with status {completed.returncode}"
+        raise RoadieError(f"cannot release: {reason}")
+    return completed
+
+
+# (spec) Step kinds
+class CargoManifest(Input):
+    """A version source read from a `Cargo.toml`.
+
+    The version is `[workspace.package] version`, or, without that table,
+    `[package] version`. A manifest with neither as a string fails with
+    `<path> has no static Cargo version`. The fingerprint is the file's
+    content. Writing replaces the version string on that table's `version`
+    line and leaves the rest of the file. When git tracks the workspace
+    `Cargo.lock`, from `cargo locate-project --workspace`, writing then runs
+    `cargo update --workspace --offline` and that lockfile joins the release
+    commit. A failing cargo fails with `cannot release: <cargo's message>`.
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = path
+
+    def _file(self, base_dir: Path) -> Path:
+        path = Path(self.path)
+        return path if path.is_absolute() else (base_dir / path).resolve()
+
+    def fingerprint(self, base_dir: Path) -> str:
+        file = self._file(base_dir)
+        if not file.is_file():
+            return hashlib.sha256(b"missing").hexdigest()
+        return hashlib.sha256(file.read_bytes()).hexdigest()
+
+    def _located(self, file: Path) -> tuple[str, str]:
+        try:
+            data = tomllib.loads(file.read_text())
+        except (OSError, tomllib.TOMLDecodeError) as error:
+            raise RoadieError(f"{file} has no static Cargo version") from error
+        workspace = data.get("workspace") if isinstance(data, dict) else None
+        package_table = workspace.get("package") if isinstance(workspace, dict) else None
+        if isinstance(workspace, dict) and "package" in workspace:
+            version = package_table.get("version") if isinstance(package_table, dict) else None
+            if isinstance(version, str):
+                return "workspace.package", version
+            raise RoadieError(f"{file} has no static Cargo version")
+        package = data.get("package") if isinstance(data, dict) else None
+        version = package.get("version") if isinstance(package, dict) else None
+        if not isinstance(version, str):
+            raise RoadieError(f"{file} has no static Cargo version")
+        return "package", version
+
+    def read_version(self, base_dir: Path) -> str:
+        return self._located(self._file(base_dir))[1]
+
+    def write_version(self, base_dir: Path, version: str) -> tuple[Path, ...]:
+        file = self._file(base_dir)
+        table, current = self._located(file)
+        file.write_text(_replace_version(file.read_text(), table, current, version))
+        located = _cargo(
+            file.parent, "locate-project", "--workspace", "--message-format", "plain"
+        )
+        root = Path(located.stdout.strip()).parent
+        if not _tracks(root, "Cargo.lock"):
+            return (file,)
+        _cargo(root, "update", "--workspace", "--offline")
+        return (file, root / "Cargo.lock")
+
+
+def _source(path: object) -> PyProject | CargoManifest:
+    kinds: dict[str, type[PyProject | CargoManifest]] = {
+        "pyproject.toml": PyProject,
+        "Cargo.toml": CargoManifest,
+    }
     if isinstance(path, (str, os.PathLike)):
         shown = os.fspath(path)
-        if Path(shown).name == "pyproject.toml":
-            return PyProject(shown)
-        raise RoadieError(f"Release takes pyproject.toml files: got {shown}")
+        kind = kinds.get(Path(shown).name)
+        if kind is not None:
+            return kind(shown)
+        accepted = " or ".join(kinds)
+        raise RoadieError(f"Release takes {accepted} files: got {shown}")
     raise RoadieError(f"Release takes paths: got {type(path).__name__}")
 
 
@@ -235,10 +356,11 @@ class Release(Step[str]):
     """Release the primary version; the value is that version.
 
     `primary` and each further source are paths, relative to the step's base
-    directory. The file name says the kind: `pyproject.toml` is a Python
-    project, read and written as `PyProject` does. Any other name fails with
-    `Release takes pyproject.toml files: got <path>`. A value that is not a
-    path fails with `Release takes paths: got <type>`.
+    directory.     The file name says the kind: `pyproject.toml` is a Python
+    project, read and written as `PyProject` does, and `Cargo.toml` is a
+    Cargo manifest. Any other name fails with `Release takes pyproject.toml
+    or Cargo.toml files: got <path>`. A value that is not a path fails with
+    `Release takes paths: got <type>`.
 
     Never reused and keeps no record, so the output fingerprint is the step's
     own fingerprint. It fails, before changing anything, with `cannot release:
@@ -281,8 +403,8 @@ class Release(Step[str]):
             raise RoadieError(
                 f"Release message takes a string or a Param: got {type(message).__name__}"
             )
-        self.primary = _pyproject(primary)
-        self.secondary = tuple(_pyproject(path) for path in secondary)
+        self.primary = _source(primary)
+        self.secondary = tuple(_source(path) for path in secondary)
         self.requires = one_or_many(
             requires, Step, owner="Release", parameter="requires", takes="steps"
         )
