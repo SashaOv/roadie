@@ -87,15 +87,23 @@ def reset_prefix(token: Token[str]) -> None:
     _prefix.reset(token)
 
 
+def output_streams() -> tuple[TextIO, TextIO]:
+    """The real standard output and error, beneath a parallel run's line sink."""
+    sink = current_sink()
+    if sink is None:
+        return sys.stdout, sys.stderr
+    return sink.stdout, sink.stderr
+
+
 def read_lines(
     pull: Callable[[], str],
-    stream: TextIO | None,
+    stream: TextIO,
     prefix: str,
     parts: list[str],
     *,
     daemon: bool = False,
 ) -> threading.Thread:
-    """Append each line from `pull` to `parts`, and print it live when `stream` is set."""
+    """Append each line from `pull` to `parts`, and print it live on `stream`."""
     sink = current_sink()
 
     def run() -> None:
@@ -104,8 +112,11 @@ def read_lines(
             if line == "":
                 return
             parts.append(line)
-            if stream is not None and sink is not None:
+            if sink is not None:
                 sink.emit(stream, prefix, line)
+            else:
+                stream.write(line)
+                stream.flush()
 
     thread = threading.Thread(target=run, daemon=daemon)
     thread.start()

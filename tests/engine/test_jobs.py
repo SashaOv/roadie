@@ -101,19 +101,23 @@ def test_captured_output_is_prefixed_and_returned(
 
 
 # (spec) Parallel steps
-def test_one_job_hides_captured_output(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
+def test_one_job_shows_program_output_unprefixed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     class Note(Step[str]):
         def build(self, run: Run) -> str:
             completed = self._cmd(
                 sys.executable,
                 "-c",
-                "print('from-prog', flush=True)",
+                "import sys; print('from-prog', flush=True); print('warn', file=sys.stderr)",
                 capture_output=True,
             )
             return completed.stdout or ""
 
     assert execute([_named(Note(), "note")], root=tmp_path, jobs=1) == "from-prog\n"
-    assert "from-prog" not in capfd.readouterr().out.splitlines()
+    shown = capsys.readouterr()
+    assert "from-prog" in shown.out.splitlines()
+    assert shown.err.splitlines() == ["warn"]
 
 
 # (spec) Parallel steps

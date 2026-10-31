@@ -25,7 +25,7 @@ from roadie.engine.config import base_directory, configured_env, loading_directo
 from roadie.engine.errors import StepFailed
 from roadie.engine.inputs import digest
 from roadie.engine.lock import RUN_PID_VARIABLE
-from roadie.engine.prefix import current_prefix, current_sink, read_lines
+from roadie.engine.prefix import current_prefix, output_streams, read_lines
 from roadie.engine.process import (
     RunningProcess,
     interrupt_requested,
@@ -204,19 +204,17 @@ class Step[T](ABC):
 
         Its environment is the process environment, then `environment`, then
         the step's environment files, then `ROADIE_RUN_PID` set to this
-        process's PID. It inherits standard input. Standard
-        output is shown, or returned when `capture_output` is set. When the
-        run uses more than one job, each line of standard output and standard
-        error is printed as it arrives, prefixed with `[<name>] `, and
-        captured standard output is still returned unprefixed. Otherwise
-        standard error is captured and shown only when the command fails.
+        process's PID. It inherits standard input. Standard output and
+        standard error are shown as they arrive, each line prefixed with
+        `[<name>] ` when the run uses more than one job. With
+        `capture_output`, standard output is also returned, unprefixed.
         Unless `check` is false, a non-zero exit fails the step with
         `<name> failed: <command> exited with status <n>: <last 2000
         characters of standard error>`.
         """
         print("+", shlex.join(args), flush=True)
         prefix = current_prefix()
-        sink = current_sink()
+        out, err = output_streams()
         process = subprocess.Popen(
             args,
             cwd=self.base_dir,
@@ -230,20 +228,16 @@ class Step[T](ABC):
         stdout_parts: list[str] = []
         stderr_parts: list[str] = []
         try:
-            if prefix and sink is not None and process.stdout is not None and process.stderr is not None:
-                readers = [
-                    read_lines(process.stdout.readline, sink.stdout, prefix, stdout_parts),
-                    read_lines(process.stderr.readline, sink.stderr, prefix, stderr_parts),
-                ]
+            assert process.stderr is not None
+            readers.append(read_lines(process.stderr.readline, err, prefix, stderr_parts))
+            if process.stdout is not None:
+                readers.append(read_lines(process.stdout.readline, out, prefix, stdout_parts))
             try:
-                if readers:
-                    process.wait()
-                    for reader in readers:
-                        reader.join()
-                    stdout = "".join(stdout_parts) if capture_output else None
-                    stderr = "".join(stderr_parts)
-                else:
-                    stdout, stderr = process.communicate()
+                process.wait()
+                for reader in readers:
+                    reader.join()
+                stdout = "".join(stdout_parts) if capture_output else None
+                stderr = "".join(stderr_parts)
             except KeyboardInterrupt:
                 if process.poll() is None:
                     process.terminate()

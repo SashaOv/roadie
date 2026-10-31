@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import signal
@@ -571,12 +572,11 @@ def test_env_files_override_step_settings_and_not_the_reverse(
         def __init__(self, *_args: object, **kwargs: object) -> None:
             self.returncode = 0
             self.pid = 1
+            self.stdout = None
+            self.stderr = io.StringIO()
             environment = kwargs["env"]
             assert isinstance(environment, dict)
             seen.append(environment)
-
-        def communicate(self) -> tuple[str, str]:
-            return "", ""
 
         def poll(self) -> int:
             return 0
