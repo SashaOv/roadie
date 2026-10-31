@@ -164,7 +164,7 @@ def test_cli_passes_locked_and_prints_keyword_output(tmp_path: Path, monkeypatch
     monkeypatch.setattr(
         cli,
         "execute",
-        lambda steps, *, root, locked, env=(), dry=False: observed.append((locked, env)),
+        lambda steps, *, root, locked, env=(), dry=False, jobs=1: observed.append((locked, env)),
     )
     run_cli(["--locked", str(tmp_path)])
     assert observed == [(True, ())]

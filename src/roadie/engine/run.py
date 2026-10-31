@@ -1,6 +1,8 @@
-"""Build a plan and tear down each step after its last consumer."""
+"""Build a plan and tear down each step after every step that takes it."""
 
+import contextvars
 import sys
+import threading
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
@@ -12,7 +14,12 @@ from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.fingerprint import fingerprint
 from roadie.engine.inputs import run_scope
 from roadie.engine.lock import HeldLock, acquire_run_lock
-from roadie.engine.process import interrupt_on_terminate
+from roadie.engine.process import (
+    interrupt_on_terminate,
+    interrupt_requested,
+    request_stop,
+    reset_interrupt,
+)
 from roadie.engine.records import (
     artifact_dir,
     load_records,
@@ -21,6 +28,8 @@ from roadie.engine.records import (
 )
 from roadie.engine.root import project_root, use_project_root
 from roadie.engine.step import Step
+
+_records = threading.Lock()
 
 
 class Run:
@@ -53,11 +62,16 @@ def execute(
     locked: bool = False,
     env: Sequence[Path] = (),
     dry: bool = False,
+    jobs: int = 1,
 ) -> object:
+    if jobs < 1:
+        raise RoadieError("--jobs must be at least 1")
     with use_project_root(root):
         held = acquire_run_lock(root)
         try:
-            return _run_steps(steps, locked=locked, env=env, run_lock=held, dry=dry)
+            return _run_steps(
+                steps, locked=locked, env=env, run_lock=held, dry=dry, jobs=jobs
+            )
         finally:
             held.release()
 
@@ -69,72 +83,54 @@ def _run_steps(
     env: Sequence[Path] = (),
     run_lock: HeldLock | None = None,
     dry: bool = False,
+    jobs: int = 1,
 ) -> object:
     _apply_env(steps, env)
     run = Run(locked=locked)
     live: list[Step[Any]] = []
-    last_use = {id(step): index for index, step in enumerate(steps)}
-    for index, step in enumerate(steps):
-        for dependency in step.dependencies():
-            last_use[id(dependency)] = max(last_use.get(id(dependency), index), index)
     requested = id(steps[-1]) if steps else None
-    _hold_deferred_dependencies(steps, last_use, requested)
-    result: object = None
+    blockers = _blockers(steps, requested)
     outputs: dict[int, str] = {}
     started: set[int] = set()
     marks: dict[int, str] = {}
+    finished: set[int] = set()
+    running: set[int] = set()
+    failures: list[BaseException] = []
+    interrupted: list[bool] = []
+    present = {id(step) for step in steps}
+    prerequisites = {
+        id(step): {id(item) for item in step.dependencies() if id(item) in present}
+        for step in steps
+    }
+    guards = {id(step): threading.Lock() for step in steps if step.deferred}
+    schedule = threading.Condition()
+    reset_interrupt()
     with run_scope(), interrupt_on_terminate():
         try:
-            for index, step in enumerate(steps):
-                try:
-                    step_fingerprint = fingerprint(step, outputs=outputs)
-                    if step.deferred and id(step) != requested:
-                        # A deferred step's output fingerprint is its step
-                        # fingerprint, so a consumer can be reused without it.
-                        outputs[id(step)] = step_fingerprint
-                        if dry:
-                            marks[id(step)] = "not started"
-                    else:
-                        record = _matching(step, step_fingerprint)
-                        if record is not None and dry:
-                            run.reused.add(id(step))
-                            marks[id(step)] = "reuse"
-                            outputs[id(step)] = str(record["output"])
-                        elif record is not None:
-                            value = step.decode(record["value"])
-                            run.reused.add(id(step))
-                            print(f"reused {step.name or type(step).__name__}", flush=True)
-                            result, output = _kept(
-                                step, run, live, value, built=False,
-                                step_fingerprint=step_fingerprint, requested=requested, run_lock=run_lock,
-                            )
-                            outputs[id(step)] = output
-                        elif dry and _reuses_without_record(step, run):
-                            run.reused.add(id(step))
-                            marks[id(step)] = "reuse"
-                            outputs[id(step)] = step_fingerprint
-                        elif dry:
-                            _dry_start_deferred(step, marks)
-                            marks[id(step)] = "run"
-                            outputs[id(step)] = "dry"
-                        else:
-                            _start_deferred(step, run, live, started)
-                            announce(step)
-                            value = step.build(run)
-                            if step.deferred:
-                                started.add(id(step))
-                            result, output = _kept(
-                                step, run, live, value, built=True,
-                                step_fingerprint=step_fingerprint, requested=requested, run_lock=run_lock,
-                            )
-                            outputs[id(step)] = output
-                except (KeyboardInterrupt, StepFailed):
-                    raise
-                except BaseException as error:
-                    raise StepFailed(step.name or type(step).__name__, _reason(error)) from error
-                if not dry:
-                    expired = [item for item in live if last_use[id(item)] == index]
-                    _teardown(run, live, expired)
+            value = _schedule(
+                steps,
+                run=run,
+                live=live,
+                outputs=outputs,
+                started=started,
+                marks=marks,
+                finished=finished,
+                running=running,
+                failures=failures,
+                interrupted=interrupted,
+                prerequisites=prerequisites,
+                blockers=blockers,
+                guards=guards,
+                schedule=schedule,
+                requested=requested,
+                run_lock=run_lock,
+                dry=dry,
+                jobs=jobs,
+            )
+            if interrupted:
+                raise KeyboardInterrupt
+            if failures:
+                raise failures[0]
             if dry:
                 for step in steps:
                     print(f"{format_step(step)}  # {marks[id(step)]}", flush=True)
@@ -143,30 +139,301 @@ def _run_steps(
                     if step.deferred and id(step) != requested and id(step) not in started:
                         name = step.name or type(step).__name__
                         print(f"not started {name}: no step that takes it runs", flush=True)
-            return result
+            if dry:
+                return None
+            return value
         finally:
             if not dry:
-                _teardown(run, live, list(live))
+                with schedule:
+                    expired = _take_live(run, live)
+                _teardown(expired)
+            reset_interrupt()
 
 
-# (spec) Deferred steps
-def _hold_deferred_dependencies(
-    steps: Sequence[Step[Any]], last_use: dict[int, int], requested: int | None
+def _schedule(
+    steps: Sequence[Step[Any]],
+    *,
+    run: Run,
+    live: list[Step[Any]],
+    outputs: dict[int, str],
+    started: set[int],
+    marks: dict[int, str],
+    finished: set[int],
+    running: set[int],
+    failures: list[BaseException],
+    interrupted: list[bool],
+    prerequisites: dict[int, set[int]],
+    blockers: dict[int, set[int]],
+    guards: dict[int, threading.Lock],
+    schedule: threading.Condition,
+    requested: int | None,
+    run_lock: HeldLock | None,
+    dry: bool,
+    jobs: int,
+) -> object:
+    result: list[object] = []
+
+    def loop(*, propagate: bool) -> None:
+        while True:
+            with schedule:
+                if failures:
+                    return
+                step = _next_ready(steps, finished, running, prerequisites)
+                if step is None:
+                    if running:
+                        schedule.wait()
+                        continue
+                    if any(id(item) not in finished for item in steps):
+                        raise RoadieError("cannot schedule the plan")
+                    return
+                running.add(id(step))
+            try:
+                _execute_step(
+                    step,
+                    run=run,
+                    live=live,
+                    outputs=outputs,
+                    started=started,
+                    marks=marks,
+                    guards=guards,
+                    schedule=schedule,
+                    requested=requested,
+                    run_lock=run_lock,
+                    dry=dry,
+                )
+            except KeyboardInterrupt:
+                request_stop()
+                with schedule:
+                    running.discard(id(step))
+                    finished.add(id(step))
+                    interrupted.append(True)
+                    schedule.notify_all()
+                if propagate:
+                    raise
+                return
+            except BaseException as error:  # noqa: BLE001 — SystemExit is a step failure
+                failure = (
+                    error
+                    if isinstance(error, StepFailed)
+                    else StepFailed(step.name or type(step).__name__, _reason(error))
+                )
+                with schedule:
+                    names = [
+                        item.name or type(item).__name__
+                        for item in steps
+                        if id(item) in running and item is not step
+                    ]
+                    running.discard(id(step))
+                    finished.add(id(step))
+                    if not failures:
+                        if names:
+                            print(f"waiting for {', '.join(names)}", flush=True)
+                        failures.append(failure)
+                    else:
+                        print(failure, file=sys.stderr)
+                    schedule.notify_all()
+                if propagate:
+                    raise failure
+                return
+            else:
+                with schedule:
+                    running.discard(id(step))
+                    finished.add(id(step))
+                    if (
+                        requested is not None
+                        and id(step) == requested
+                        and id(step) in run._values
+                    ):
+                        result.append(run._values[id(step)])
+                    expired = [] if failures else _take_due(run, live, blockers, finished)
+                    schedule.notify_all()
+                _teardown(expired)
+
+    if jobs == 1:
+        loop(propagate=True)
+        return result[-1] if result else None
+    threads = [
+        threading.Thread(
+            target=contextvars.copy_context().run,
+            args=(loop,),
+            kwargs={"propagate": False},
+        )
+        for _ in range(jobs)
+    ]
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    except KeyboardInterrupt:
+        request_stop()
+        for thread in threads:
+            thread.join()
+        raise
+    if interrupted:
+        raise KeyboardInterrupt
+    return result[-1] if result else None
+
+
+def _next_ready(
+    steps: Sequence[Step[Any]],
+    finished: set[int],
+    running: set[int],
+    prerequisites: dict[int, set[int]],
+) -> Step[Any] | None:
+    for step in steps:
+        if id(step) in finished or id(step) in running:
+            continue
+        if prerequisites[id(step)].issubset(finished):
+            return step
+    return None
+
+
+def _execute_step(
+    step: Step[Any],
+    *,
+    run: Run,
+    live: list[Step[Any]],
+    outputs: dict[int, str],
+    started: set[int],
+    marks: dict[int, str],
+    guards: dict[int, threading.Lock],
+    schedule: threading.Condition,
+    requested: int | None,
+    run_lock: HeldLock | None,
+    dry: bool,
 ) -> None:
-    """Keep a deferred step's dependencies until the step's last consumer."""
+    try:
+        _run_one(
+            step,
+            run=run,
+            live=live,
+            outputs=outputs,
+            started=started,
+            marks=marks,
+            guards=guards,
+            schedule=schedule,
+            requested=requested,
+            run_lock=run_lock,
+            dry=dry,
+        )
+    except KeyboardInterrupt:
+        raise
+    except StepFailed:
+        if interrupt_requested():
+            raise KeyboardInterrupt
+        raise
+    except BaseException as error:
+        if interrupt_requested():
+            raise KeyboardInterrupt from error
+        raise StepFailed(step.name or type(step).__name__, _reason(error)) from error
 
-    def extend(step: Step[Any], index: int, seen: set[int]) -> None:
+
+def _run_one(
+    step: Step[Any],
+    *,
+    run: Run,
+    live: list[Step[Any]],
+    outputs: dict[int, str],
+    started: set[int],
+    marks: dict[int, str],
+    guards: dict[int, threading.Lock],
+    schedule: threading.Condition,
+    requested: int | None,
+    run_lock: HeldLock | None,
+    dry: bool,
+) -> None:
+    if step.deferred and id(step) != requested:
+        # A deferred step's output fingerprint is its step fingerprint, so a
+        # consumer can be reused without it. The consumer builds it.
+        step_fingerprint = fingerprint(step, outputs=outputs)
+        with schedule:
+            outputs[id(step)] = step_fingerprint
+            if dry:
+                marks[id(step)] = "not started"
+        return
+    step_fingerprint = fingerprint(step, outputs=outputs)
+    record = _matching(step, step_fingerprint)
+    if record is not None and dry:
+        with schedule:
+            run.reused.add(id(step))
+            marks[id(step)] = "reuse"
+            outputs[id(step)] = str(record["output"])
+    elif record is not None:
+        value = step.decode(record["value"])
+        with schedule:
+            run.reused.add(id(step))
+        print(f"reused {step.name or type(step).__name__}", flush=True)
+        _value, output = _kept(
+            step, run, live, value, built=False,
+            step_fingerprint=step_fingerprint, requested=requested, run_lock=run_lock,
+            schedule=schedule,
+        )
+        with schedule:
+            outputs[id(step)] = output
+    elif dry and _reuses_without_record(step, run):
+        with schedule:
+            run.reused.add(id(step))
+            marks[id(step)] = "reuse"
+            outputs[id(step)] = step_fingerprint
+    elif dry:
+        _dry_start_deferred(step, marks)
+        with schedule:
+            marks[id(step)] = "run"
+            outputs[id(step)] = "dry"
+    else:
+        _start_deferred(step, run, live, started, guards, schedule)
+        announce(step)
+        value = step.build(run)
+        _value, output = _kept(
+            step, run, live, value, built=True,
+            step_fingerprint=step_fingerprint, requested=requested, run_lock=run_lock,
+            schedule=schedule,
+        )
+        with schedule:
+            if step.deferred:
+                started.add(id(step))
+            outputs[id(step)] = output
+
+
+def _blockers(steps: Sequence[Step[Any]], requested: int | None) -> dict[int, set[int]]:
+    present = {id(step) for step in steps}
+    blockers = {id(step): {id(step)} for step in steps}
+    for step in steps:
         for dependency in step.dependencies():
-            if id(dependency) in seen:
+            if id(dependency) in present:
+                blockers[id(dependency)].add(id(step))
+
+    def extend(step: Step[Any], holders: set[int], seen: set[int]) -> None:
+        for dependency in step.dependencies():
+            if id(dependency) not in present or id(dependency) in seen:
                 continue
             seen.add(id(dependency))
-            if last_use.get(id(dependency), -1) < index:
-                last_use[id(dependency)] = index
-            extend(dependency, index, seen)
+            blockers[id(dependency)].update(holders)
+            extend(dependency, holders, seen)
 
     for step in steps:
         if step.deferred and id(step) != requested:
-            extend(step, last_use[id(step)], set())
+            extend(step, set(blockers[id(step)]), set())
+    return blockers
+
+
+def _take_due(
+    run: Run,
+    live: list[Step[Any]],
+    blockers: dict[int, set[int]],
+    finished: set[int],
+) -> list[tuple[Step[Any], object]]:
+    due = [step for step in live if blockers[id(step)].issubset(finished)]
+    for step in due:
+        live.remove(step)
+    return [(step, run._values.pop(id(step))) for step in reversed(due)]
+
+
+def _take_live(run: Run, live: list[Step[Any]]) -> list[tuple[Step[Any], object]]:
+    expired = [(step, run._values.pop(id(step))) for step in reversed(live)]
+    live.clear()
+    return expired
 
 
 def _reuses_without_record(step: Step[Any], run: Run) -> bool:
@@ -195,12 +462,15 @@ def _kept(
     step_fingerprint: str,
     requested: int | None,
     run_lock: HeldLock | None,
+    schedule: threading.Condition,
 ) -> tuple[object, str]:
-    run._values[id(step)] = value
-    live.append(step)
+    with schedule:
+        run._values[id(step)] = value
+        live.append(step)
     if built:
         value = step.publish(run, value)
-        run._values[id(step)] = value
+        with schedule:
+            run._values[id(step)] = value
     step.report(value)
     output = _output_fingerprint(step, value, step_fingerprint)
     _remember(step, step_fingerprint, output, value)
@@ -216,23 +486,48 @@ def _kept(
 
 # (spec) Deferred steps
 def _start_deferred(
-    step: Step[Any], run: Run, live: list[Step[Any]], started: set[int]
+    step: Step[Any],
+    run: Run,
+    live: list[Step[Any]],
+    started: set[int],
+    guards: dict[int, threading.Lock],
+    schedule: threading.Condition,
 ) -> None:
-    """Build the deferred steps `step` takes, just before `step` builds."""
+    """Build the deferred steps `step` takes, just before `step` builds.
+
+    A deferred step starts once. A consumer that needs it while it starts waits.
+    """
     for dependency in step.dependencies():
-        if not dependency.deferred or id(dependency) in started:
+        if not dependency.deferred:
             continue
-        _start_deferred(dependency, run, live, started)
+        _start_one(dependency, run, live, started, guards, schedule)
+
+
+def _start_one(
+    dependency: Step[Any],
+    run: Run,
+    live: list[Step[Any]],
+    started: set[int],
+    guards: dict[int, threading.Lock],
+    schedule: threading.Condition,
+) -> None:
+    _start_deferred(dependency, run, live, started, guards, schedule)
+    with guards[id(dependency)]:
+        if id(dependency) in started:
+            return
         try:
             announce(dependency)
             value = dependency.build(run)
         except (KeyboardInterrupt, StepFailed):
             raise
         except BaseException as error:
-            raise StepFailed(dependency.name or type(dependency).__name__, _reason(error)) from error
-        run._values[id(dependency)] = value
-        live.append(dependency)
-        started.add(id(dependency))
+            raise StepFailed(
+                dependency.name or type(dependency).__name__, _reason(error)
+            ) from error
+        with schedule:
+            run._values[id(dependency)] = value
+            live.append(dependency)
+            started.add(id(dependency))
 
 
 # (spec) Environment files
@@ -272,7 +567,8 @@ def _reusable(step: Step[Any]) -> bool:
 def _matching(step: Step[Any], step_fingerprint: str) -> dict[str, Any] | None:
     if not _reusable(step):
         return None
-    record = load_records(step.build_dir, project_root()).get(step.variable or "")
+    with _records:
+        record = load_records(step.build_dir, project_root()).get(step.variable or "")
     if not isinstance(record, dict) or record.get("fingerprint") != step_fingerprint:
         return None
     if not step.matches(record.get("value")):
@@ -285,16 +581,17 @@ def _remember(step: Step[Any], step_fingerprint: str, output: str, value: object
     if not _reusable(step):
         return
     root = project_root()
-    records = load_records(step.build_dir, root)
-    if step.build_variables is not None:
-        records = {key: item for key, item in records.items() if key in step.build_variables}
-    assert step.variable is not None
-    records[step.variable] = {
-        "fingerprint": step_fingerprint,
-        "output": output,
-        "value": step.encode(value),
-    }
-    save_records(step.build_dir, records, root)
+    with _records:
+        records = load_records(step.build_dir, root)
+        if step.build_variables is not None:
+            records = {key: item for key, item in records.items() if key in step.build_variables}
+        assert step.variable is not None
+        records[step.variable] = {
+            "fingerprint": step_fingerprint,
+            "output": output,
+            "value": step.encode(value),
+        }
+        save_records(step.build_dir, records, root)
 
 
 # (spec) Step hooks
@@ -311,11 +608,9 @@ def _reason(error: BaseException) -> str:
 
 
 # (spec) Teardown
-def _teardown(run: Run, live: list[Step[Any]], expired: list[Step[Any]]) -> None:
+def _teardown(expired: list[tuple[Step[Any], object]]) -> None:
     errors: list[StepFailed] = []
-    for step in reversed(expired):
-        live[:] = [item for item in live if item is not step]
-        value = run._values.pop(id(step))
+    for step, value in expired:
         try:
             step.teardown(value)
         except Exception as error:  # noqa: BLE001 — finish releasing the other steps

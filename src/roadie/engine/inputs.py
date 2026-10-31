@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -12,6 +13,7 @@ from typing import cast
 _run_state: ContextVar[dict[object, object] | None] = ContextVar(
     "roadie_run_state", default=None
 )
+_run_state_lock = threading.Lock()
 
 
 def digest(payload: object) -> str:
@@ -47,6 +49,7 @@ def run_state[S](key: object, factory: Callable[[], S]) -> S:
     state = _run_state.get()
     if state is None:
         return factory()
-    if key not in state:
-        state[key] = factory()
-    return cast(S, state[key])
+    with _run_state_lock:
+        if key not in state:
+            state[key] = factory()
+        return cast(S, state[key])

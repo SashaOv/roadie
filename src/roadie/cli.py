@@ -39,9 +39,15 @@ def run(
         bool,
         Parameter(negative=False, help="Delete target/roadie and exit"),
     ] = False,
+    jobs: Annotated[
+        int,
+        Parameter(name=["--jobs", "-j"], help="Run up to N independent steps at once"),
+    ] = 1,
 ) -> None:
     """Run `result` of `<directory>/build.py`, by default the last one defined."""
     try:
+        if jobs < 1:
+            raise RoadieError("--jobs must be at least 1")
         if clean:
             clean_project(find_project_root(directory.resolve()))
             return
@@ -50,7 +56,7 @@ def run(
     except RoadieError as error:
         raise SystemExit(str(error)) from error
     try:
-        execute(steps, root=graph.root, locked=locked, env=env or (), dry=dry_run)
+        execute(steps, root=graph.root, locked=locked, env=env or (), dry=dry_run, jobs=jobs)
     except RoadieError as error:
         raise SystemExit(str(error)) from error
 

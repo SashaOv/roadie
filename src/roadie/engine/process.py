@@ -5,6 +5,7 @@ import shlex
 import signal
 import socket
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -12,7 +13,11 @@ from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
+
+_tracked: dict[int, tuple[subprocess.Popen[Any], bool]] = {}
+_tracked_lock = threading.Lock()
+_interrupt = threading.Event()
 
 _COMMAND_NAME_WORDS = 3
 
@@ -35,6 +40,7 @@ class RunningProcess:
         health_path: str | None = None,
     ) -> "RunningProcess":
         process = spawn_server(command, environment=environment, cwd=cwd)
+        track_process(process, session=os.name != "nt")
         url = f"http://127.0.0.1:{port}"
         try:
             if health_path is None:
@@ -43,12 +49,16 @@ class RunningProcess:
                 wait_for_http_server(process, url=f"{url}{health_path}", timeout=timeout)
             return cls(process, url)
         except BaseException:
+            untrack_process(process)
             stop_process_tree(process)
+            if interrupt_requested():
+                raise KeyboardInterrupt
             raise
 
     def stop(self) -> None:
         """Signal the process tree with SIGTERM, wait up to 10 seconds, then
         send SIGKILL, and kill any descendant that outlives its parent."""
+        untrack_process(self.process)
         stop_process_tree(self.process)
 
 
@@ -275,6 +285,7 @@ def interrupt_on_terminate() -> Generator[None]:
     """
 
     def raise_interrupt(_number: int, _frame: object) -> None:
+        request_stop()
         raise KeyboardInterrupt
 
     previous = signal.signal(signal.SIGTERM, raise_interrupt)
@@ -282,6 +293,47 @@ def interrupt_on_terminate() -> Generator[None]:
         yield
     finally:
         signal.signal(signal.SIGTERM, previous)
+        reset_interrupt()
+
+
+def track_process(process: subprocess.Popen[Any], *, session: bool) -> None:
+    """Remember a program a step is running so an interrupt can stop it."""
+    with _tracked_lock:
+        _tracked[process.pid] = (process, session)
+
+
+def untrack_process(process: subprocess.Popen[Any]) -> None:
+    with _tracked_lock:
+        _tracked.pop(process.pid, None)
+
+
+def interrupt_requested() -> bool:
+    return _interrupt.is_set()
+
+
+def reset_interrupt() -> None:
+    _interrupt.clear()
+
+
+def request_stop() -> None:
+    """Ask running steps to stop, and signal the programs they are running."""
+    _interrupt.set()
+    stop_tracked_processes()
+
+
+def stop_tracked_processes() -> None:
+    with _tracked_lock:
+        items = list(_tracked.values())
+    for process, session in items:
+        if process.poll() is not None:
+            continue
+        if session and os.name != "nt":
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                process.terminate()
+        else:
+            process.terminate()
 
 
 def stop_process_tree(process: subprocess.Popen[bytes]) -> None:

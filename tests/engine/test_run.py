@@ -1,7 +1,6 @@
 import json
 import os
 import signal
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -568,11 +567,25 @@ def test_env_files_override_step_settings_and_not_the_reverse(
     second.write_text("PORT=b\n")
     seen: list[dict[str, str]] = []
 
-    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        environment = kwargs["env"]
-        assert isinstance(environment, dict)
-        seen.append(environment)
-        return subprocess.CompletedProcess((), 0, "", "")
+    class FakeProcess:
+        def __init__(self, *_args: object, **kwargs: object) -> None:
+            self.returncode = 0
+            self.pid = 1
+            environment = kwargs["env"]
+            assert isinstance(environment, dict)
+            seen.append(environment)
+
+        def communicate(self) -> tuple[str, str]:
+            return "", ""
+
+        def poll(self) -> int:
+            return 0
+
+        def wait(self, timeout: float | None = None) -> int:
+            return 0
+
+        def terminate(self) -> None:
+            return None
 
     def fake_start(*args: object, **kwargs: object) -> Stopped:
         environment = kwargs["environment"]
@@ -580,7 +593,7 @@ def test_env_files_override_step_settings_and_not_the_reverse(
         seen.append(environment)
         return Stopped()
 
-    monkeypatch.setattr("roadie.engine.step.subprocess.run", fake_run)
+    monkeypatch.setattr("roadie.engine.step.subprocess.Popen", FakeProcess)
     monkeypatch.setattr("roadie.engine.step.RunningProcess.start", fake_start)
 
     class Server(Service):

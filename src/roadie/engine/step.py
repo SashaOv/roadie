@@ -24,7 +24,12 @@ from roadie.engine.config import base_directory, configured_env, loading_directo
 from roadie.engine.errors import StepFailed
 from roadie.engine.inputs import digest
 from roadie.engine.lock import RUN_PID_VARIABLE
-from roadie.engine.process import RunningProcess
+from roadie.engine.process import (
+    RunningProcess,
+    interrupt_requested,
+    track_process,
+    untrack_process,
+)
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -205,14 +210,32 @@ class Step[T](ABC):
         error>`.
         """
         print("+", shlex.join(args), flush=True)
-        completed = subprocess.run(
+        process = subprocess.Popen(
             args,
             cwd=self.base_dir,
             env=self._command_env(environment),
             stdout=subprocess.PIPE if capture_output else None,
             stderr=subprocess.PIPE,
             text=True,
-            check=False,
+        )
+        track_process(process, session=False)
+        try:
+            try:
+                stdout, stderr = process.communicate()
+            except KeyboardInterrupt:
+                if process.poll() is None:
+                    process.terminate()
+                process.wait()
+                raise
+        finally:
+            untrack_process(process)
+        if interrupt_requested():
+            raise KeyboardInterrupt
+        completed = subprocess.CompletedProcess(
+            args,
+            process.returncode if process.returncode is not None else 1,
+            stdout,
+            stderr,
         )
         if check:
             self._check_cmd(completed)

@@ -49,10 +49,11 @@ fingerprint**, a digest of what that dependency built. A step's build reads noth
 ### Plans and runs
 
 The **plan** of a result is the result and the steps it depends on, directly
-or indirectly. A **run** goes through a plan in order, building or reusing
-each step, and tears each step down after the last step that takes it. The
-`roadie` command loads the **root build file** and runs the plan of one of
-its results.
+or indirectly. A **run** builds or reuses a step once every step it takes is
+done, up to `--jobs` steps at once, and tears each step down after every
+step that takes it has finished. `--jobs` defaults to 1. The `roadie`
+command loads the **root build file** and runs the plan of one of its
+results.
 
 ### Project root
 
@@ -68,7 +69,7 @@ started, the run fails with `cannot run git to find the project root:
 ## Command line
 
 ```
-roadie [--dry-run | --dry] [--locked] [--clean] [--base_dir DIR] [--env FILE]... [directory] [result]
+roadie [--dry-run | --dry] [--locked] [--clean] [--jobs N] [--base_dir DIR] [--env FILE]... [directory] [result]
 ```
 
 `directory` (default `.`) holds the root build file; a directory that does
@@ -93,7 +94,9 @@ define is an error.
   [One run at a time](#one-run-at-a-time), and nothing is deleted until this
   run holds the lock.
 - `--env FILE`: an environment file for every step; may be repeated.
-- `--dry-run`, `--dry`: walk the plan through the same loop as a run:
+- `--jobs N`, `-j N`: run up to N steps at once. The default is 1. A value
+  below 1 fails with `--jobs must be at least 1`.
+- `--dry-run`, `--dry`: walk the plan through the same scheduler as a run:
   environment files, fingerprints, record matching, and deferred steps. It
   marks each step the way that run reports it: `# reuse` where the run
   prints `reused <name>`, `# not started` where it prints `not started
@@ -252,13 +255,15 @@ that depend on each other fail with `steps depend on each other: <a> -> <b>
 
 ### Teardown
 
-A step that no step takes is torn down right after it. Steps due at the same
-point are torn down in reverse build order. A reused step is torn down with
-its restored value.
+A step is torn down after every step that takes it has finished. A step that
+no step takes is torn down right after it. Steps due at the same point are
+torn down in reverse build order. A reused step is torn down with its
+restored value.
 
 When a step fails, or the run is interrupted by Ctrl-C or SIGTERM, every step
-still live is torn down in reverse build order. A teardown that fails does
-not stop the others from being torn down. The first teardown failure fails
+still live is torn down in reverse build order. Ctrl-C and SIGTERM stop the
+programs the steps are running, then wait for those steps to finish. A
+teardown that fails does not stop the others from being torn down. The first teardown failure fails
 the run with `<name> failed: teardown: <reason>` and the others are printed
 to standard error; when the run is already failing, all are printed and the
 original failure stands.
@@ -269,8 +274,12 @@ An exception raised while Roadie fingerprints, builds, publishes, reports,
 records or serves a step fails the run with `<name> failed: <reason>`, where `<name>` is the step's name, or its class name when
 it has none, and `<reason>` is the exception's message, or its class name
 when the message is empty. A string passed to `SystemExit` is its own reason.
-An interrupt is not a failure. The command prints a `RoadieError` message to
-standard error and exits with status 1.
+An interrupt is not a failure. When a step fails, no new step starts. Roadie
+lets the steps still running finish, then fails the run with the first
+failure. When any are still running it prints `waiting for <names>` once,
+naming them. Later failures are printed to standard error. Steps that finish
+are recorded. The command prints a `RoadieError` message to standard error
+and exits with status 1.
 
 ### One run at a time
 

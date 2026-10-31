@@ -445,7 +445,7 @@ backlog item asked for, because `--jobs 1` helps troubleshooting.
   run that started this one (pid <n>)` instead of waiting for itself. Tests:
   a step that runs `roadie` in the same project root fails with that message;
   a run started by an unrelated process holding the variable still waits.
-- [ ] **R11.3: Run up to `--jobs` steps at once.** `--jobs N` (`-j N`) runs a
+- [x] **R11.3: Run up to `--jobs` steps at once.** `--jobs N` (`-j N`) runs a
   step as soon as every step it takes is done, up to N at a time; a value
   below 1 fails with `--jobs must be at least 1`. The default stays 1 in this
   patch. Fingerprints, records, `run[...]` and teardown stay correct when
