@@ -1,13 +1,4 @@
-from roadie.build import (
-    Check,
-    Files,
-    Group,
-    PyProject,
-    Pytest,
-    PythonEnv,
-    Release,
-    default_step,
-)
+from roadie.build import *
 
 sources = Files("src", "tests", "pyproject.toml", "build.py")
 environment = PythonEnv()
