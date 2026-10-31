@@ -394,29 +394,29 @@ holding the lock waits for it, naming the holder once, instead of failing,
 and a run that a step of the holding run started fails at once instead of
 waiting for itself.
 
-**Decisions confirmed at the checkpoint (2026-10-31).** Keep `--jobs`,
-which no backlog item asked for, because `--jobs 1` helps troubleshooting;
-the first choice of each decision below holds.
+**Decisions at the checkpoint (2026-10-31).** Keep `--jobs`, which no
+backlog item asked for, because `--jobs 1` helps troubleshooting.
 
-1. `--jobs` defaults to the CPUs Roadie may use (`os.process_cpu_count()`),
-   like ninja and cargo. The alternative is 1, with parallel runs opt-in.
-2. With `--jobs` above 1, a step's `build` line prints when it starts, and
-   everything else it prints, its programs' output included, prints as one
-   block when it finishes. With `--jobs 1`, output is live, as today. The
-   alternative is live output with each line prefixed `<name> | `.
-3. When a step fails, no new step starts; Roadie prints `waiting for <names>`
-   once and lets the running steps finish, then tears down and fails with
-   the first failure, printing later failures to standard error. Cargo does
-   the same (`build failed, waiting for other jobs to finish...`). The
-   alternative is to stop the running steps.
+1. Confirmed: `--jobs` defaults to the CPUs Roadie may use
+   (`os.process_cpu_count()`), like ninja and cargo.
+2. Confirmed: with `--jobs` above 1, output stays live, and each line a step
+   prints, its programs' output included, starts with `[<name>] `, so it is
+   easy to filter out; `<name>` is the step's name, or its class name when it
+   has none. With `--jobs 1`, output is unprefixed, as today.
+3. Confirmed: when a step fails, no new step starts; Roadie prints
+   `waiting for <names>` once and lets the running steps finish, then tears
+   down and fails with the first failure, printing later failures to standard error. Cargo does
+   the same (`build failed, waiting for other jobs to finish...`). Steps that
+   finish are recorded, so the next run reuses them.
 
 **Acceptance check.**
 
 - `uv run roadie . checks` passes and CI passes on `ubuntu-latest` and
   `macos-latest`.
 - After `uv run roadie . --clean`, `uv run roadie . checks` prints the
-  `build` lines of ruff, mypy and pytest before any of their output, and a
-  second run reuses all three.
+  `build` lines of ruff, mypy and pytest before pytest's summary line, every
+  line of pytest's output starts with `[pytest] `, and a second run reuses
+  all three.
 - With `uv run roadie . checks` running after a source change, a second
   `uv run roadie . --dry` in another terminal prints the waiting line once,
   then its marks after the first run ends.
@@ -459,12 +459,12 @@ the first choice of each decision below holds.
   prints its marks in plan order. The spec's Plans and runs concept and
   Teardown section say "after every step that takes it" instead of "after the
   last".
-- [ ] **R11.4: Print each step's output as one block, and run on all CPUs by
-  default.** With `--jobs` above 1, a step's output follows decision 2: what
-  the step prints and the output of the programs `_cmd` runs are collected
-  per step and printed when it finishes, failed or not. The `--jobs` default
-  follows decision 1. Programs a service starts keep printing live, since
-  they outlive their step's build.
+- [ ] **R11.4: Prefix each line of a step's output with its name, and run on
+  all CPUs by default.** With `--jobs` above 1, a step's output follows
+  decision 2: what the step prints and the output of the programs `_cmd` and
+  `_start_cmd` run are read line by line and printed live with the prefix, a
+  line at a time, so lines of different steps never mix. The `--jobs`
+  default follows decision 1.
 
 **Author action required at completion.** Push `main` and confirm CI passes
 on both platforms, or authorize the executor to push. Discharges the CI
