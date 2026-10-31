@@ -11,8 +11,6 @@ bullet, except the input-enforcement design, which is moved whole.
 - Release process can take Rust and JS manifests as sources
 - `Release` takes a custom commit message, once steps take parameters.
 - Enforce declared inputs (the design below).
-- Hash step classes defined in a build file, so editing one reruns its steps;
-  today only classes in imported modules are hashed.
 - A project-root override (`config(root=...)`) for a project whose root is not
   its git top level.
 - `Env(*names)` input: the values of the named process environment variables.

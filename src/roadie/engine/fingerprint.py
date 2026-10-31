@@ -130,17 +130,23 @@ def _code_hash(step: Step[Any]) -> str:
     files: dict[str, Path] = {}
 
     def add(name: str, path: Path) -> None:
-        # A build file's module name is `roadie:<absolute path>`, and a class
-        # defined there is not hashed.
+        # The loader names a build file `roadie:<absolute path>`. Key it by
+        # the path relative to the project root, like the class id.
         if name.startswith("roadie:"):
-            return
+            name = "roadie:" + _relative(Path(name.removeprefix("roadie:")))
         files[name] = path.resolve()
 
     for cls in type(step).mro():
-        module = sys.modules.get(cls.__module__)
+        module_name = cls.__module__
+        if module_name.startswith("roadie:"):
+            # runpy loads the build file and drops it from sys.modules. The
+            # path is the module name after `roadie:`.
+            add(module_name, Path(module_name.removeprefix("roadie:")))
+            continue
+        module = sys.modules.get(module_name)
         file = getattr(module, "__file__", None) if module is not None else None
         if isinstance(file, str) and file.endswith(".py"):
-            add(cls.__module__, Path(file))
+            add(module_name, Path(file))
     package = Path(roadie.__file__).resolve().parent
     for path in package.rglob("*.py"):
         add(_module_name(package, path), path)

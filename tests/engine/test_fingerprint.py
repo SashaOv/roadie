@@ -134,3 +134,33 @@ def test_code_hash_keys_sources_by_module_name(monkeypatch: pytest.MonkeyPatch) 
     assert b"roadie.engine.step\0" in joined
     step_file = Path(fingerprints.__file__).resolve().parent / "step.py"
     assert str(step_file).encode() not in joined
+
+
+# (spec) Step fingerprints
+def test_editing_a_build_file_changes_the_fingerprint_of_its_class(tmp_path: Path) -> None:
+    source = "class Note(Step[str]):\n    def build(self, run):\n        return 'v'\nitem = Note()\n"
+    write_build(tmp_path, source)
+
+    def digest() -> str:
+        graph = load(tmp_path)
+        with use_project_root(graph.root):
+            return fingerprint(graph.result("item"))
+
+    before = digest()
+    write_build(tmp_path, source + "# edited\n")
+    assert digest() != before
+
+
+# (spec) Step fingerprints
+def test_editing_a_build_file_leaves_an_imported_class_unchanged(tmp_path: Path) -> None:
+    source = "item = Check('true')\n"
+    write_build(tmp_path, source)
+
+    def digest() -> str:
+        graph = load(tmp_path)
+        with use_project_root(graph.root):
+            return fingerprint(graph.result("item"))
+
+    before = digest()
+    write_build(tmp_path, source + "# edited\n")
+    assert digest() == before

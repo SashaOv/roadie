@@ -427,7 +427,8 @@ A step's fingerprint is a SHA-256 digest of:
 - a hash of the source files of the modules that define the classes of the
   step's class hierarchy, and of Roadie's own modules, each keyed by its
   module name. The hierarchy includes standard-library modules (`abc`,
-  `typing`). A class defined in a build file itself is not hashed;
+  `typing`). A class defined in a build file adds that file, keyed by
+  `roadie:<path relative to the project root>`;
 - its base directory, relative to the project root;
 - the values of its environment files;
 - its plain attributes; a `Path` inside the project root counts as its
