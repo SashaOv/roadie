@@ -1,6 +1,7 @@
 """Release a version from a `pyproject.toml` and push the tag."""
 
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -336,17 +337,101 @@ class CargoManifest(Input):
         return (file, root / "Cargo.lock")
 
 
-def _source(path: object) -> PyProject | CargoManifest:
-    kinds: dict[str, type[PyProject | CargoManifest]] = {
+def _replace_json_version(text: str, old: str, new: str) -> str:
+    """Replace the top-level `version` string and leave every other byte."""
+    depth = 0
+    index = 0
+    size = len(text)
+    while index < size:
+        char = text[index]
+        if char == '"':
+            end = index + 1
+            while end < size:
+                if text[end] == "\\":
+                    end += 2
+                    continue
+                if text[end] == '"':
+                    break
+                end += 1
+            if depth == 1 and text[index + 1 : end] == "version":
+                cursor = end + 1
+                while cursor < size and text[cursor] in " \t\r\n":
+                    cursor += 1
+                if cursor < size and text[cursor] == ":":
+                    cursor += 1
+                    while cursor < size and text[cursor] in " \t\r\n":
+                        cursor += 1
+                    if text.startswith(f'"{old}"', cursor):
+                        return text[: cursor + 1] + new + text[cursor + 1 + len(old) :]
+            index = end + 1
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        index += 1
+    raise RoadieError("cannot release: package.json version string was not found")
+
+
+# (spec) Step kinds
+class PackageJson(Input):
+    """A version source read from a `package.json`.
+
+    The version is the top-level `version` string. A file without one fails
+    with `<path> has no version`. The fingerprint is the file's content.
+    Writing replaces that string and leaves the rest of the file. A pnpm
+    lockfile is left untouched. When git tracks a `package-lock.json` beside
+    the file, the release fails before changing anything with `cannot release:
+    <path> has a package-lock.json, which Roadie does not update`.
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = path
+
+    def _file(self, base_dir: Path) -> Path:
+        path = Path(self.path)
+        return path if path.is_absolute() else (base_dir / path).resolve()
+
+    def fingerprint(self, base_dir: Path) -> str:
+        file = self._file(base_dir)
+        if not file.is_file():
+            return hashlib.sha256(b"missing").hexdigest()
+        return hashlib.sha256(file.read_bytes()).hexdigest()
+
+    def read_version(self, base_dir: Path) -> str:
+        file = self._file(base_dir)
+        try:
+            data = json.loads(file.read_text())
+        except (OSError, json.JSONDecodeError) as error:
+            raise RoadieError(f"{file} has no version") from error
+        version = data.get("version") if isinstance(data, dict) else None
+        if not isinstance(version, str):
+            raise RoadieError(f"{file} has no version")
+        return version
+
+    def write_version(self, base_dir: Path, version: str) -> tuple[Path, ...]:
+        file = self._file(base_dir)
+        if _tracks(file.parent, "package-lock.json"):
+            raise RoadieError(
+                f"cannot release: {file} has a package-lock.json, which Roadie does not update"
+            )
+        current = self.read_version(base_dir)
+        file.write_text(_replace_json_version(file.read_text(), current, version))
+        return (file,)
+
+
+def _source(path: object) -> PyProject | CargoManifest | PackageJson:
+    kinds: dict[str, type[PyProject | CargoManifest | PackageJson]] = {
         "pyproject.toml": PyProject,
         "Cargo.toml": CargoManifest,
+        "package.json": PackageJson,
     }
     if isinstance(path, (str, os.PathLike)):
         shown = os.fspath(path)
         kind = kinds.get(Path(shown).name)
         if kind is not None:
             return kind(shown)
-        accepted = " or ".join(kinds)
+        accepted = ", ".join(tuple(kinds)[:-1]) + ", or " + tuple(kinds)[-1]
         raise RoadieError(f"Release takes {accepted} files: got {shown}")
     raise RoadieError(f"Release takes paths: got {type(path).__name__}")
 
@@ -357,10 +442,11 @@ class Release(Step[str]):
 
     `primary` and each further source are paths, relative to the step's base
     directory.     The file name says the kind: `pyproject.toml` is a Python
-    project, read and written as `PyProject` does, and `Cargo.toml` is a
-    Cargo manifest. Any other name fails with `Release takes pyproject.toml
-    or Cargo.toml files: got <path>`. A value that is not a path fails with
-    `Release takes paths: got <type>`.
+    project, read and written as `PyProject` does, `Cargo.toml` is a Cargo
+    manifest, and `package.json` is a JS package. Any other name fails with
+    `Release takes pyproject.toml, Cargo.toml, or package.json files: got
+    <path>`. A value that is not a path fails with `Release takes paths:
+    got <type>`.
 
     Never reused and keeps no record, so the output fingerprint is the step's
     own fingerprint. It fails, before changing anything, with `cannot release:

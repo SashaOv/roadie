@@ -6,7 +6,7 @@ import pytest
 from support import execute, write_build
 
 from roadie.build import Release
-from roadie.build.release import CargoManifest, PyProject
+from roadie.build.release import CargoManifest, PackageJson, PyProject
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.graph import load
 from roadie.engine.parameters import ParameterValues
@@ -72,7 +72,10 @@ def test_release_names_version_sources_by_their_files() -> None:
     with pytest.raises(RoadieError, match="Release takes paths: got int"):
         Release(1)
     with pytest.raises(
-        RoadieError, match=re.escape("Release takes pyproject.toml or Cargo.toml files: got notes.txt")
+        RoadieError,
+        match=re.escape(
+            "Release takes pyproject.toml, Cargo.toml, or package.json files: got notes.txt"
+        ),
     ):
         Release("notes.txt")
     step = Release("pyproject.toml", "other/pyproject.toml", message="ship it")
@@ -195,6 +198,62 @@ def test_a_failing_cargo_update_stops_the_release(tmp_path: Path) -> None:
         execute([step], root=repo)
     assert "version line is missing" not in str(error.value)
     assert _tags(bare) == set()
+
+
+# (spec) Step kinds
+def test_package_json_replaces_its_version_and_refuses_a_package_lock(tmp_path: Path) -> None:
+    source = PackageJson("package.json")
+    package = tmp_path / "package.json"
+    resolved = package.resolve()
+    package.write_text('{"name": "demo"}\n')
+    with pytest.raises(RoadieError, match=re.escape(f"{resolved} has no version")):
+        source.read_version(tmp_path)
+    text = '{\n  "name": "demo",\n  "version": "0.1.0",\n  "deps": {"version": "9.9.9"}\n}\n'
+    package.write_text(text)
+    assert source.read_version(tmp_path) == "0.1.0"
+    assert source.write_version(tmp_path, "0.1.1") == (resolved,)
+    assert package.read_text() == text.replace('"version": "0.1.0"', '"version": "0.1.1"', 1)
+
+    repo, bare = _repository(tmp_path / "locked", "0.1.0")
+    locked = repo / "app" / "package.json"
+    locked.parent.mkdir()
+    original = '{\n  "name": "app",\n  "version": "0.1.0"\n}\n'
+    locked.write_text(original)
+    (repo / "app" / "package-lock.json").write_text("{}\n")
+    _git(repo, "add", "app")
+    _git(repo, "commit", "-q", "-m", "js")
+    _git(repo, "push", "-q", "origin", "HEAD")
+    step = PackageJson("app/package.json")
+    with pytest.raises(
+        RoadieError,
+        match=re.escape(
+            f"cannot release: {locked.resolve()} has a package-lock.json, "
+            "which Roadie does not update"
+        ),
+    ):
+        step.write_version(repo, "0.1.1")
+    assert locked.read_text() == original
+    assert _tags(bare) == set()
+
+    plain, plain_remote = _repository(tmp_path / "pnpm", "0.1.0")
+    (plain / "package.json").write_text('{\n  "name": "app",\n  "version": "0.1.0"\n}\n')
+    lock = plain / "pnpm-lock.yaml"
+    lock.write_text("lockfileVersion: '9.0'\n")
+    _git(plain, "add", "package.json", "pnpm-lock.yaml")
+    _git(plain, "commit", "-q", "-m", "pnpm")
+    _git(plain, "push", "-q", "origin", "HEAD")
+    _git(plain, "tag", "v0.1.0")
+    _advance(plain)
+    kept = lock.read_bytes()
+    release = Release("package.json")
+    release.base_dir = plain
+    release.name = "release"
+    assert execute([release], root=plain) == "0.1.1"
+    assert '"version": "0.1.1"' in (plain / "package.json").read_text()
+    assert lock.read_bytes() == kept
+    committed = _git(plain, "show", "--name-only", "--format=", "HEAD").stdout.split()
+    assert committed == ["package.json"]
+    assert "v0.1.1" in _tags(plain_remote)
 
 
 # (spec) Step kinds

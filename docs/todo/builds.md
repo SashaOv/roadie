@@ -844,7 +844,7 @@ approve a run, such as a release, before it goes on. `--base_dir` becomes
   writing then runs `cargo update --workspace --offline`, and the lockfile
   joins the release commit; a failing cargo fails with `cannot release:
   <cargo's message>`.
-- [ ] **R13.9: Release a `package.json` version.** A source named
+- [x] **R13.9: Release a `package.json` version.** A source named
   `package.json` is a JS package. Its version is the top-level `version`
   string; a file without one fails with `<path> has no version`. Writing
   replaces that string and leaves the rest of the file as it is. pnpm's
