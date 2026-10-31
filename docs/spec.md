@@ -326,8 +326,16 @@ record.
 Before a step that keeps a record builds, Roadie prints
 `build <name> = <Class>(<arguments>)`, or `build <Class>(<arguments>)` when
 the step has no name, with the same arguments `--dry` shows. A deferred step
-prints that line when it starts. A reused step prints only `reused <name>`.
-A step that keeps no record, such as a group, prints no build line.
+prints that line when it starts. After that step finishes building, Roadie
+prints `built <name> in <m:ss>`, or `built <Class> in <m:ss>` when the step
+has no name. `<m:ss>` is whole minutes and two digits of seconds, rounded
+down. A deferred step's duration is its start. With `--jobs` above 1 the
+`built` line is prefixed like the step's other lines. A reused step prints
+only `reused <name>`. A step that keeps no record, such as a group, prints
+no build line. A reused step, a step that keeps no record, and a failed step
+print no `built` line. A run that succeeds prints `finished in <m:ss>`,
+unprefixed, as its last line, or before it serves the requested result. A
+failed run and a dry run print none.
 
 ## Customization
 

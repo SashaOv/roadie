@@ -3,6 +3,7 @@
 import contextvars
 import sys
 import threading
+import time
 from collections.abc import Sequence
 from contextlib import nullcontext
 from pathlib import Path
@@ -10,12 +11,12 @@ from typing import Any, cast
 
 from dotenv import dotenv_values
 
-from roadie.engine.display import announce, format_step
+from roadie.engine.display import announce, format_elapsed, format_step, report_built
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.fingerprint import fingerprint
 from roadie.engine.inputs import run_scope
 from roadie.engine.lock import HeldLock, acquire_run_lock
-from roadie.engine.prefix import parallel_output, reset_prefix, set_prefix
+from roadie.engine.prefix import parallel_output, reset_prefix, set_prefix, unprefixed
 from roadie.engine.process import (
     interrupt_on_terminate,
     interrupt_requested,
@@ -39,6 +40,8 @@ class Run:
         self._values: dict[int, object] = {}
         self.reused: set[int] = set()
         self.locked = locked
+        self.started_at = 0.0
+        self.finish_reported = False
 
     # (spec) Step values
     def __getitem__[T](self, step: Step[T]) -> T:
@@ -55,6 +58,14 @@ class Run:
         destination = root / "target" / "roadie" / artifact_dir(step.build_dir, root) / f"{stem}{suffix}"
         destination.parent.mkdir(parents=True, exist_ok=True)
         return destination
+
+
+def _report_run(run: Run) -> None:
+    if run.finish_reported:
+        return
+    run.finish_reported = True
+    with unprefixed():
+        print(f"finished in {format_elapsed(time.monotonic() - run.started_at)}", flush=True)
 
 
 def execute(
@@ -89,6 +100,7 @@ def _run_steps(
 ) -> object:
     _apply_env(steps, env)
     run = Run(locked=locked)
+    run.started_at = time.monotonic()
     live: list[Step[Any]] = []
     requested = id(steps[-1]) if steps else None
     blockers = _blockers(steps, requested)
@@ -107,6 +119,7 @@ def _run_steps(
     guards = {id(step): threading.Lock() for step in steps if step.deferred}
     schedule = threading.Condition()
     reset_interrupt()
+    succeeded = False
     with run_scope(), interrupt_on_terminate():
         try:
             value = _schedule(
@@ -143,13 +156,16 @@ def _run_steps(
                         print(f"not started {name}: no step that takes it runs", flush=True)
             if dry:
                 return None
-            return value
+            succeeded = True
         finally:
             if not dry:
                 with schedule:
                     expired = _take_live(run, live)
                 _teardown(expired)
             reset_interrupt()
+    if succeeded:
+        _report_run(run)
+    return value
 
 
 def _schedule(
@@ -402,11 +418,13 @@ def _run_one(
     else:
         _start_deferred(step, run, live, started, guards, schedule)
         announce(step)
+        began = time.monotonic() if type(step).recorded else None
         value = step.build(run)
+        elapsed = None if began is None else time.monotonic() - began
         _value, output = _kept(
             step, run, live, value, built=True,
             step_fingerprint=step_fingerprint, requested=requested, run_lock=run_lock,
-            schedule=schedule,
+            schedule=schedule, elapsed=elapsed,
         )
         with schedule:
             if step.deferred:
@@ -481,6 +499,7 @@ def _kept(
     requested: int | None,
     run_lock: HeldLock | None,
     schedule: threading.Condition,
+    elapsed: float | None = None,
 ) -> tuple[object, str]:
     with schedule:
         run._values[id(step)] = value
@@ -492,12 +511,17 @@ def _kept(
     step.report(value)
     output = _output_fingerprint(step, value, step_fingerprint)
     _remember(step, step_fingerprint, output, value)
+    if elapsed is not None:
+        report_built(step, elapsed)
     if id(step) == requested:
         # A served result, such as a dev server, outlives the run and must not
-        # keep the lock.
+        # keep the lock. The total is printed first, so a server does not hide it.
         if run_lock is not None:
             sweep_stale_state(project_root())
             run_lock.release()
+        # A kind that serves, such as a service, would hide the total until it returns.
+        if type(step).serve is not Step.serve:
+            _report_run(run)
         step.serve(value)
     return value, output
 
@@ -535,13 +559,17 @@ def _start_one(
             return
         try:
             announce(dependency)
+            began = time.monotonic() if type(dependency).recorded else None
             value = dependency.build(run)
+            elapsed = None if began is None else time.monotonic() - began
         except (KeyboardInterrupt, StepFailed):
             raise
         except BaseException as error:
             raise StepFailed(
                 dependency.name or type(dependency).__name__, _reason(error)
             ) from error
+        if elapsed is not None:
+            report_built(dependency, elapsed)
         with schedule:
             run._values[id(dependency)] = value
             live.append(dependency)

@@ -562,7 +562,7 @@ test covers get tests.
 
 ### Patches
 
-- [ ] **R12.1: Print how long each step and the run took.** After a step
+- [x] **R12.1: Print how long each step and the run took.** After a step
   that printed a `build` line finishes building, Roadie prints `built <name> in <m:ss>`, or
   `built <Class> in <m:ss>` when the step has no name: whole minutes, then
   seconds as two digits, rounded down (`0:03`, `12:45`, `75:00`). It is

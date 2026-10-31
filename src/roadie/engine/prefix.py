@@ -83,6 +83,16 @@ def set_prefix(name: str) -> Token[str]:
     return _prefix.set(f"[{name}] ")
 
 
+@contextmanager
+def unprefixed() -> Iterator[None]:
+    """Print without the current step's prefix."""
+    token = _prefix.set("")
+    try:
+        yield
+    finally:
+        _prefix.reset(token)
+
+
 def reset_prefix(token: Token[str]) -> None:
     _prefix.reset(token)
 
