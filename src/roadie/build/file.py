@@ -34,7 +34,14 @@ class File(PathStep):
         previous = destination.read_bytes() if destination.exists() else None
         if previous == content:
             return destination
-        if run.locked and _tracked(destination):
+        tracked = _tracked(destination)
+        if (
+            previous is not None
+            and tracked
+            and _same_as_git_stores(destination, value)
+        ):
+            return destination
+        if run.locked and tracked:
             difference = difflib.diff_bytes(
                 difflib.unified_diff,
                 (previous or b"").splitlines(keepends=True),
@@ -53,10 +60,14 @@ class File(PathStep):
         return sha256(value)
 
 
-def _tracked(path: Path) -> bool:
-    repository = next(
+def _repository(path: Path) -> Path | None:
+    return next(
         (parent for parent in path.parents if (parent / ".git").exists()), None
     )
+
+
+def _tracked(path: Path) -> bool:
+    repository = _repository(path)
     if repository is None:
         return False
     completed = subprocess.run(
@@ -79,3 +90,34 @@ def _tracked(path: Path) -> bool:
             f"cannot check whether {path} is tracked: {completed.stderr.strip()}"
         )
     return bool(completed.stdout)
+
+
+def _same_as_git_stores(destination: Path, built: Path) -> bool:
+    """True when git would store the same blob for both under destination's path."""
+    repository = _repository(destination)
+    if repository is None:
+        return False
+    relative = destination.relative_to(repository).as_posix()
+    return _git_hash(repository, destination, relative) == _git_hash(
+        repository, built, relative
+    )
+
+
+def _git_hash(repository: Path, file: Path, path: str) -> str | None:
+    completed = subprocess.run(
+        (
+            "git",
+            "-C",
+            str(repository),
+            "hash-object",
+            f"--path={path}",
+            "--",
+            str(file),
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.strip() or None

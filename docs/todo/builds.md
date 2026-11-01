@@ -1062,7 +1062,7 @@ failure this build removes.
   (`newline=""`), so a release on Windows does not turn an LF file into
   CRLF. A test releases a CRLF and an LF manifest and checks each keeps its
   endings. Not platform code: the same call is right everywhere.
-- [ ] **R14.5: Compare a tracked generated file as git stores it.** As
+- [x] **R14.5: Compare a tracked generated file as git stores it.** As
   decision 7. A test sets `core.autocrlf=true` in the test repository,
   checks out an LF generated file as CRLF, and expects `--locked` to pass
   and no `updated` line. The spec's Generated files section states it. Not

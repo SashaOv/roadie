@@ -299,9 +299,12 @@ reused, and its output fingerprint.
 A file step with `output` publishes its built file after it builds: the
 destination is `output` resolved from the step's base directory, and the
 step's value becomes the destination. A destination whose content already
-equals the built file is left alone. Otherwise Roadie writes it and prints
-`updated <destination>`, creating its directories. A reused step does not
-publish.
+equals the built file is left alone. A tracked destination also counts as
+unchanged when `git hash-object --path=<destination>` of the destination and
+of the built file agree, so line-ending conversion from `core.autocrlf` does
+not make it look stale. An untracked destination keeps the byte comparison.
+Otherwise Roadie writes it and prints `updated <destination>`, creating its
+directories. A reused step does not publish.
 
 Under `--locked`, a destination that git tracks and that would change is left
 unwritten: Roadie prints a unified diff and fails with `generated file is

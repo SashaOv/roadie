@@ -68,6 +68,31 @@ def test_locked_file_output_protects_tracked_files_and_writes_untracked_files(pr
 
 
 # (spec) Generated files
+def test_locked_tracked_file_ignores_autocrlf_checkout_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path.resolve()
+    monkeypatch.chdir(root)
+    isolate_repo(monkeypatch, root)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "config", "user.email", "file@example.com"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "File"], cwd=root, check=True)
+    subprocess.run(["git", "config", "core.autocrlf", "true"], cwd=root, check=True)
+    destination = root / "output.txt"
+    destination.write_bytes(b"new\n")
+    subprocess.run(["git", "add", "output.txt"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "add"], cwd=root, check=True)
+    destination.unlink()
+    subprocess.run(["git", "checkout", "-q", "--", "output.txt"], cwd=root, check=True)
+    assert destination.read_bytes() == b"new\r\n"
+    step = TextFile("new\n", output="output.txt")
+    step.name = "generated"
+    assert execute([step], locked=True) == destination
+    assert destination.read_bytes() == b"new\r\n"
+    assert "updated" not in capsys.readouterr().out
+
+
+# (spec) Generated files
 def test_file_output_value_is_available_to_dependents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     isolate_repo(monkeypatch, tmp_path)
