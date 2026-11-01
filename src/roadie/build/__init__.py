@@ -16,6 +16,7 @@ from roadie.build.rust import (
 )
 from roadie.build.service import Deployment, HttpService, Service
 from roadie.build.tests import TestFailure, TestResults, Tests
+from roadie.build.user import UserTask
 from roadie.engine.config import config
 from roadie.engine.errors import RoadieError
 from roadie.engine.graph import default_step, include, setup
@@ -46,6 +47,7 @@ __all__ = [
     "TestFailure",
     "TestResults",
     "Tests",
+    "UserTask",
     "cargo_rust_packages",
     "config",
     "default_step",

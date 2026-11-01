@@ -11,12 +11,14 @@ import urllib.error
 import urllib.request
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, BinaryIO, TextIO
 
 from roadie.engine.prefix import current_prefix, current_sink, read_lines
 
+_inherit_stdin: ContextVar[bool] = ContextVar("roadie_inherit_stdin", default=True)
 _tracked: dict[int, tuple[subprocess.Popen[Any], bool]] = {}
 _tracked_lock = threading.Lock()
 _interrupt = threading.Event()
@@ -194,6 +196,16 @@ def _join_pumps(process: subprocess.Popen[bytes]) -> None:
         thread.join()
 
 
+@contextmanager
+def command_stdin(*, inherit: bool) -> Generator[None]:
+    """Choose whether a command started in this scope inherits standard input."""
+    token = _inherit_stdin.set(inherit)
+    try:
+        yield
+    finally:
+        _inherit_stdin.reset(token)
+
+
 def spawn_server(
     command: Sequence[str],
     *,
@@ -212,6 +224,7 @@ def spawn_server(
         command,
         cwd=cwd,
         env=None if environment is None else dict(environment),
+        stdin=None if _inherit_stdin.get() else subprocess.DEVNULL,
         stdout=stdout,
         stderr=stderr,
         start_new_session=os.name == "posix",

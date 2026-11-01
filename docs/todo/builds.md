@@ -852,7 +852,7 @@ approve a run, such as a release, before it goes on. `--base_dir` becomes
   is touched; when git tracks a `package-lock.json` beside the file, the
   release fails before changing anything with `cannot release: <path> has a
   package-lock.json, which Roadie does not update`. The backlog item goes.
-- [ ] **R13.10: Ask the user to run checks.** `UserTask(instructions,
+- [x] **R13.10: Ask the user to run checks.** `UserTask(instructions,
   *checks, inputs=())` is a `Tests` step: `instructions` is a
   string, each check a string (`UserTask takes checks as strings: got
   <type>`), at least one (`UserTask takes at least one check`); `inputs`

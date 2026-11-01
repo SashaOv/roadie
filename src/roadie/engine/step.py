@@ -101,6 +101,7 @@ class Step[T](ABC):
     recorded: ClassVar[bool] = True
     deferred: ClassVar[bool] = False
     once_per_run: ClassVar[bool] = False
+    asks: ClassVar[bool] = False
     serial: int
     base_dir: Path
     build_dir: Path | None

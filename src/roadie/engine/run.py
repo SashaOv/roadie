@@ -24,6 +24,7 @@ from roadie.engine.parameters import (
 )
 from roadie.engine.prefix import parallel_output, reset_prefix, set_prefix, unprefixed
 from roadie.engine.process import (
+    command_stdin,
     interrupt_on_terminate,
     interrupt_requested,
     request_stop,
@@ -362,9 +363,13 @@ def _next_ready(
     requested: set[int],
     leading: int,
 ) -> Step[Any] | None:
+    if any(type(item).asks for item in steps if id(item) in running):
+        return None
     prefix_done = all(id(step) in finished for step in steps[:leading])
     for index, step in enumerate(steps):
         if id(step) in finished or id(step) in running:
+            continue
+        if type(step).asks and running:
             continue
         if index < leading:
             if any(id(earlier) not in finished for earlier in steps[:index]):
@@ -480,10 +485,10 @@ def _run_one(
             marks[id(step)] = "run"
             outputs[id(step)] = "dry"
     else:
-        _start_deferred(step, run, live, started, guards, schedule)
+        _start_deferred(step, run, live, started, guards, schedule, requested)
         announce(step)
         began = time.monotonic() if type(step).recorded else None
-        with current_step(step):
+        with current_step(step), command_stdin(inherit=_inherits_stdin(step, requested)):
             value = step.build(run)
         elapsed = None if began is None else time.monotonic() - began
         _value, output = _kept(
@@ -595,6 +600,11 @@ def _kept(
 
 
 # (spec) Deferred steps
+def _inherits_stdin(step: Step[Any], requested: set[int]) -> bool:
+    """A service keeps the terminal only when it is a requested result."""
+    return type(step).serve is Step.serve or id(step) in requested
+
+
 def _start_deferred(
     step: Step[Any],
     run: Run,
@@ -602,6 +612,7 @@ def _start_deferred(
     started: set[int],
     guards: dict[int, threading.Lock],
     schedule: threading.Condition,
+    requested: set[int],
 ) -> None:
     """Build the deferred steps `step` takes, just before `step` builds.
 
@@ -610,7 +621,7 @@ def _start_deferred(
     for dependency in step.dependencies():
         if not dependency.deferred:
             continue
-        _start_one(dependency, run, live, started, guards, schedule)
+        _start_one(dependency, run, live, started, guards, schedule, requested)
 
 
 def _start_one(
@@ -620,15 +631,19 @@ def _start_one(
     started: set[int],
     guards: dict[int, threading.Lock],
     schedule: threading.Condition,
+    requested: set[int],
 ) -> None:
-    _start_deferred(dependency, run, live, started, guards, schedule)
+    _start_deferred(dependency, run, live, started, guards, schedule, requested)
     with guards[id(dependency)]:
         if id(dependency) in started:
             return
         try:
             announce(dependency)
             began = time.monotonic() if type(dependency).recorded else None
-            with current_step(dependency):
+            with (
+                current_step(dependency),
+                command_stdin(inherit=_inherits_stdin(dependency, requested)),
+            ):
                 value = dependency.build(run)
             elapsed = None if began is None else time.monotonic() - began
         except (KeyboardInterrupt, StepFailed):

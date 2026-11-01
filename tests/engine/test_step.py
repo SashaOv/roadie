@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -122,6 +123,51 @@ def test_started_commands_run_in_the_steps_base_directory(tmp_path: Path, monkey
     server = Server()
     execute([server, After(server)])
     assert marker.read_text() == str(tmp_path.resolve())
+
+
+# (spec) Step kinds
+def test_an_unrequested_service_reads_the_null_device(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    isolate_repo(monkeypatch, tmp_path)
+    port = available_port()
+    marker = tmp_path / "stdin.txt"
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, b"secret")
+    os.close(write_fd)
+    saved = os.dup(0)
+    os.dup2(read_fd, 0)
+    os.close(read_fd)
+
+    class Server(Service):
+        def build(self, run: Run) -> RunningProcess:
+            return self._start_cmd(
+                sys.executable,
+                "-c",
+                "import sys, socket, threading\n"
+                "got = sys.stdin.read(6)\n"
+                f"open({str(marker)!r}, 'w').write(got or 'eof')\n"
+                f"s = socket.socket(); s.bind(('127.0.0.1', {port})); s.listen()\n"
+                "threading.Event().wait()\n",
+                port=port,
+                timeout=5,
+            )
+
+    @dataclass(eq=False)
+    class After(Step[None]):
+        server: Service
+
+        def build(self, run: Run) -> None:
+            return None
+
+    server = Server()
+    try:
+        execute([server, After(server)])
+    finally:
+        os.dup2(saved, 0)
+        os.close(saved)
+    assert marker.read_text() == "eof"
 
 
 # (spec) Step helpers
