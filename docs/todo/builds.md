@@ -91,6 +91,32 @@ builds, then the one planned build. Unplanned work is in
   - About 25 other tests fail (`F` marks before the hang); their names were
     not captured, because the timeout ended pytest before its summary.
   The author stopped the probes here, to continue on a Windows machine.
+- 2026-11-01: on Windows 11 (Python 3.14.3, uv 0.11.26, git 2.53), the
+  same mypy errors and the same hang. `ruff` passes; pytest without the
+  hanging test gives 21 failed, 277 passed, 7 skipped (`test_jobs.py`
+  passes). The hang's cause is confirmed: `msvcrt.locking` locks byte 0,
+  which the token also occupies, so `_read` gets `PermissionError` and
+  returns `None`; every waiter prints no `(pid ...)`, failing three more
+  `test_lock.py` tests. The other failures:
+  - Product: a command that cannot start reports `[WinError 2] The system
+    cannot find the file specified` without the command's name
+    (`test_check.py`).
+  - Test assumptions: `pytest.raises(match=f"...{path}")` with an unescaped
+    Windows path (3 tests); hand-built cargo JSON with unescaped backslashes
+    (`test_rust.py`); `chmod(0)` does not make a directory unreadable (3
+    tests); `pty`/`termios` (5 `test_user_task.py` tests); `symlink_to`
+    needs a privilege (`test_fingerprint.py`); a copied executable's mode
+    differs from its source (2 `test_rust.py` tests); a text file's diff
+    shows `\r\n` and lacks the `---`/`+++` pair the test expects
+    (2 `test_file.py` tests, unclassified).
+- 2026-11-01: on the same machine, parallel steps work: steps run on worker
+  threads that start programs with `subprocess`, and `test_jobs.py` passes
+  with `--jobs` above 1 except its two SIGTERM tests, skipped. On Python
+  3.14.3 for Windows, `Thread.join()` with no timeout cannot be interrupted:
+  `_thread.interrupt_main()` one second into a ten-second join raised
+  `KeyboardInterrupt` after 10.0 s, while `join(0.1)` in a loop raised it
+  after 1.0 s. With `--jobs` above 1 the main thread waits in `join()`
+  (`engine/run.py`, `execute`), so Ctrl-C waits for every running step.
 
 --- Implemented / Next ---
 
@@ -942,6 +968,126 @@ is still open, and is not tagged `R13:`.
 **Reflection.** Patch names are written without code formatting, so a
 commit subject can equal its patch name literally; three builds in a row
 dropped the backticks.
+
+## R14: Roadie runs on Windows
+
+Status: planned, approved 2026-11-01
+
+**Improvement.** Roadie's checks pass on Windows, and CI proves it on every
+push. A second run on Windows names the run it waits for, and a step that runs
+Roadie in its own project fails instead of waiting forever. Stopping a server
+stops its whole process tree, as on Linux and macOS. Ctrl-C ends a run with
+several jobs at once, instead of waiting for its running steps. A command that cannot
+start names itself on every platform. A release keeps a manifest's line
+endings. Platform differences live in one package, `roadie.system`, and ruff
+fails any platform check outside it, so they stay there. The tests no longer
+assume POSIX paths, permissions and terminals. Facts, 2026-11-01, list each
+failure this build removes.
+
+**Decisions confirmed at the checkpoint (2026-11-01).**
+
+1. `roadie.system` holds every platform difference and imports nothing from
+   Roadie. It offers operations (lock a file, start a process in its own
+   group, stop a process tree, `executable_suffix()`) and, when a caller
+   needs one, capabilities, never the platform's name. Ruff's `banned-api` rule
+   (TID251) bans `sys.platform`, `os.name`, `platform.system`, `msvcrt`,
+   `fcntl`, `termios`, `pty`, `winreg`, `os.killpg`, `os.getpgid`,
+   `os.setsid` and `signal.SIGKILL` everywhere except `src/roadie/system/`
+   and `tests/support.py`. Ruff cannot ban an argument such as
+   `start_new_session=`; it is used in `roadie.system` alone.
+2. The run lock locks one byte at offset 2³⁰, past any token, on every
+   platform, so the holder's PID stays readable while it is locked. One
+   offset keeps one code path; `flock` ignores it.
+3. A command that cannot start fails with `<step> failed: cannot run
+   <program>: <reason>`, where `<reason>` is the error's text without its
+   filename. Today POSIX says `[Errno 2] No such file or directory:
+   '<program>'` and Windows names nothing.
+4. `--jobs` above 1 runs steps at once on Windows too. The author's
+   2026-11-01 decision to run one step at a time there assumed parallel steps
+   did not work; they do (Facts, 2026-11-01), except that Ctrl-C waits for
+   every running step to finish. The main thread waits with a timed join on
+   every platform, which Ctrl-C interrupts.
+5. Stopping a server on Windows runs `taskkill /T /PID <pid>`, then
+   `taskkill /T /F /PID <pid>` after 10 seconds, as POSIX sends SIGTERM and
+   then SIGKILL. If `taskkill` cannot run, Roadie kills the process alone.
+6. A test that needs a pseudo-terminal, `chmod(0)` or an unprivileged
+   symlink is skipped on Windows, with the reason, when no Windows equivalent
+   exists. The rules those tests cover still need a test that runs on Windows.
+7. A generated file counts as unchanged when git would store the same
+   content for it: Roadie compares `git hash-object --path=<destination>`
+   of the destination and of the built file, which applies the
+   destination's line-ending rules. With Git for Windows' default
+   `core.autocrlf=true`, a tracked LF file checks out as CRLF, so today's
+   byte comparison calls it stale under `--locked` and rewrites it on every
+   other run. An untracked destination keeps the byte comparison.
+
+**Acceptance check.**
+
+- On a Windows machine, `uv run ruff check`, `uv run mypy src build.py` and
+  `uv run pytest` pass, the last within the time it takes on macOS and with
+  no hang; `uv run roadie checks` passes.
+- CI passes on `ubuntu-latest`, `macos-latest` and `windows-latest`.
+- Adding `if sys.platform == "win32": pass` to `src/roadie/engine/run.py`
+  makes `uv run ruff check` fail with TID251; the same line in
+  `src/roadie/system/` passes.
+- On Windows, with `--jobs 1` and with `--jobs 2`, a dev server built from a
+  `cmd /c` wrapper that starts a child leaves neither process running after
+  Ctrl-C (checked with `tasklist`), and Ctrl-C during `uv run roadie checks`
+  ends the run within a second.
+- Each behaviour change below is covered by a test that fails before its
+  patch on the platform it concerns.
+
+### Patches
+
+- [ ] **R14.1: Move platform code into roadie.system and ban it elsewhere.**
+  As decision 1, with no change in behaviour. The OS calls of
+  `engine/lock.py` and `engine/process.py` move to `roadie.system`, whose
+  branches test `sys.platform`, so mypy checks each platform's branch on that
+  platform and `mypy src build.py` passes on all three; the engine keeps its
+  rules (the lock token, the waiting message, when to stop a server).
+  `build/rust.py` takes `executable_suffix()`. In the tests, the `os.name`
+  skips become markers in `tests/support.py` (`posix_only`, `needs_pty`,
+  `needs_symlinks`), and the lock-holder script in `test_lock.py` locks
+  through `roadie.system`. The ruff rule turns on in `pyproject.toml`. The
+  spec's Packages section already states the rule.
+- [ ] **R14.2: Keep the lock holder's PID readable on Windows.** As decision
+  2, in `roadie.system`. The waiter prints `(pid <pid>, started <time>)`,
+  and a step that runs Roadie in its own project fails as the spec says. The
+  four `test_lock.py` failures pass.
+- [ ] **R14.3: Name the command that cannot start.** As decision 3. The spec's
+  Step helpers section states the message; `test_check.py` asserts it
+  without the POSIX-only text.
+- [ ] **R14.4: Keep a manifest's line endings when releasing.** `Release`
+  rewrites `Cargo.toml` and `package.json` with the file's own line endings
+  (`newline=""`), so a release on Windows does not turn an LF file into
+  CRLF. A test releases a CRLF and an LF manifest and checks each keeps its
+  endings. Not platform code: the same call is right everywhere.
+- [ ] **R14.5: Compare a tracked generated file as git stores it.** As
+  decision 7. A test sets `core.autocrlf=true` in the test repository,
+  checks out an LF generated file as CRLF, and expects `--locked` to pass
+  and no `updated` line. The spec's Generated files section states it. Not
+  platform code: `core.autocrlf` can be set anywhere.
+- [ ] **R14.6: Let Ctrl-C interrupt a run with several jobs.** As decision
+  4. The main thread waits for its workers with `join(0.1)` in a loop. The
+  interrupt test raises `KeyboardInterrupt` in the main thread with
+  `_thread.interrupt_main()` instead of sending SIGTERM, so it runs on every
+  platform, with `--jobs` 1 and 2; it also checks that the step's program
+  is stopped. Not platform code: the loop is right everywhere.
+- [ ] **R14.7: Stop a server's process tree on Windows.** As decision 5, in
+  `roadie.system`, replacing the Windows branch that signals the process
+  alone and the `SIGKILL` Windows lacks. The spec's Step helpers section
+  drops "unverified" and states the rule. A test starts a server whose
+  wrapper starts a child and checks both are gone.
+- [ ] **R14.8: Make the tests platform-neutral.** Escape paths in
+  `pytest.raises(match=...)` (`re.escape`); build cargo JSON with
+  `json.dumps`; write test files with explicit `newline="\n"` (the
+  `TextFile` helper); compare a copied executable's mode only on POSIX; mark
+  the cases of decision 6 with the markers of R14.1. The 15 test-assumption
+  failures in Facts pass or skip, and each skipped rule keeps a test that
+  runs.
+- [ ] **R14.9: Add a Windows CI job.** `windows-latest` joins the matrix. The
+  backlog's Windows item and the spec's "unverified until the Windows CI
+  job" go.
 
 ## Backlog
 

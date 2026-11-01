@@ -498,6 +498,12 @@ state for the length of a run; its docstring specifies it.
 `roadie.build` is the build-file API. `roadie.engine` loads and runs build
 files and defines the extension points, `Step` and `Input`; it never imports
 `roadie.build` or `roadie.cli`. `roadie.cli` is the command.
+`roadie.system` holds every difference between operating systems and
+imports nothing from Roadie. It offers operations and capabilities, never
+the platform's name, so no other package branches on the platform. Ruff's
+`banned-api` rule enforces it: platform checks, platform-only modules and
+POSIX-only process calls fail `ruff check` outside `roadie.system` and the
+tests' shared support module.
 
 ### Step fingerprints
 
