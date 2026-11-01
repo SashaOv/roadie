@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from support import execute, write_build
+from support import execute, posix_only, write_build
 
 from roadie import cli
 from roadie.build import Step
@@ -437,7 +437,7 @@ def test_a_dry_run_prints_marks_in_plan_order(tmp_path: Path, capsys: pytest.Cap
 
 
 # (spec) Teardown
-@pytest.mark.skipif(os.name != "posix", reason="SIGTERM is POSIX-only")
+@posix_only
 @pytest.mark.parametrize("jobs", [1, 2])
 def test_an_interrupt_stops_the_program_a_step_is_running(tmp_path: Path, jobs: int) -> None:
     root = tmp_path.resolve()

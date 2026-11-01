@@ -16,6 +16,7 @@ from roadie.build.binary import Binary
 from roadie.build.files import Files, listed_files
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import Input, digest, run_state
+from roadie.system import executable_suffix
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -215,7 +216,7 @@ class RustBinary(Binary):
             capture_output=True,
         )
         source = _executable_from_cargo_messages(completed.stdout, self.package.name)
-        destination = run.artifact(self, ".exe" if os.name == "nt" else "")
+        destination = run.artifact(self, executable_suffix())
         shutil.copyfile(source, destination)
         os.chmod(destination, source.stat().st_mode)
         return destination

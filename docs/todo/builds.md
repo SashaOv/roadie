@@ -1039,7 +1039,7 @@ failure this build removes.
 
 ### Patches
 
-- [ ] **R14.1: Move platform code into roadie.system and ban it elsewhere.**
+- [x] **R14.1: Move platform code into roadie.system and ban it elsewhere.**
   As decision 1, with no change in behaviour. The OS calls of
   `engine/lock.py` and `engine/process.py` move to `roadie.system`, whose
   branches test `sys.platform`, so mypy checks each platform's branch on that

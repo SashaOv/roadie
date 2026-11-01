@@ -1,6 +1,8 @@
 """Helpers shared by Roadie's tests."""
 
+import os
 import subprocess
+import sys
 import tempfile
 import threading
 from dataclasses import dataclass
@@ -17,6 +19,22 @@ from roadie.engine.run import execute as _execute
 FIXTURES = Path(__file__).parent / "fixtures"
 _forced_root: Path | None = None
 _sandbox_root: Path | None = None
+
+is_posix = os.name == "posix"
+posix_only = pytest.mark.skipif(not is_posix, reason="POSIX-only")
+needs_pty = pytest.mark.skipif(
+    sys.platform == "win32", reason="pseudo-terminals are unavailable on Windows"
+)
+needs_symlinks = pytest.mark.skipif(
+    sys.platform == "win32", reason="unprivileged symlinks are unavailable on Windows"
+)
+
+
+def open_pty() -> tuple[int, int]:
+    import pty
+
+    return pty.openpty()
+
 
 
 def execute(steps, **kwargs):

@@ -35,3 +35,24 @@ pythonpath = ["tests"]
 testpaths = ["tests"]
 # pytest's default skips directories named `build`, which tests/build mirrors.
 norecursedirs = [".*", "*.egg", "__pycache__", "dist", "node_modules", "venv"]
+
+[tool.ruff.lint]
+extend-select = ["TID251"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/roadie/system/**" = ["TID251"]
+"tests/support.py" = ["TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"sys.platform".msg = "use roadie.system"
+"os.name".msg = "use roadie.system"
+"platform.system".msg = "use roadie.system"
+"msvcrt".msg = "use roadie.system"
+"fcntl".msg = "use roadie.system"
+"termios".msg = "use roadie.system"
+"pty".msg = "use roadie.system"
+"winreg".msg = "use roadie.system"
+"os.killpg".msg = "use roadie.system"
+"os.getpgid".msg = "use roadie.system"
+"os.setsid".msg = "use roadie.system"
+"signal.SIGKILL".msg = "use roadie.system"

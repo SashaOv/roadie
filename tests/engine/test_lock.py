@@ -32,18 +32,17 @@ held.release()
 """
 
 _EMPTY_HOLDER = """
-import fcntl
-import os
 import sys
 from pathlib import Path
+from roadie.system import lock, unlock
 path = Path(sys.argv[1]) / "target" / "roadie" / "run.lock"
 path.parent.mkdir(parents=True, exist_ok=True)
-fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o644)
-fcntl.flock(fd, fcntl.LOCK_EX)
+file = path.open("a+b")
+lock(file, blocking=True)
 print("held", flush=True)
 sys.stdin.readline()
-fcntl.flock(fd, fcntl.LOCK_UN)
-os.close(fd)
+unlock(file)
+file.close()
 """
 
 

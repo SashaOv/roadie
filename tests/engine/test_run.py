@@ -11,6 +11,7 @@ from support import (
     Stopped,
     Value,
     execute,
+    is_posix,
     isolate_repo,
     write_build,
 )
@@ -56,7 +57,7 @@ def test_steps_build_in_plan_order_with_dependency_values(tmp_path: Path) -> Non
 # (spec) Teardown
 @pytest.mark.parametrize("ending", ["success", "failure", "ctrl-c", "sigterm"])
 def test_teardown_after_last_consumer_and_on_failure_or_interrupt(ending: str) -> None:
-    if ending == "sigterm" and os.name != "posix":
+    if ending == "sigterm" and not is_posix:
         pytest.skip("SIGTERM unwinding is POSIX-only")
     events: list[str] = []
 

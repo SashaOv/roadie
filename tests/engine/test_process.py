@@ -11,8 +11,10 @@ from pathlib import Path
 
 import pytest
 from fixtures.http_service import HealthServer
+from support import posix_only
 
 from roadie.engine import process as processes
+from roadie.system import process as system_process
 
 
 def test_loopback_http_fixture_does_not_resolve_hostnames(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -26,7 +28,7 @@ def test_loopback_http_fixture_does_not_resolve_hostnames(monkeypatch: pytest.Mo
 
 
 # (spec) Teardown
-@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX-only")
+@posix_only
 def test_sigterm_takes_the_same_cleanup_path_as_ctrl_c() -> None:
     previous = signal.getsignal(signal.SIGTERM)
 
@@ -37,7 +39,7 @@ def test_sigterm_takes_the_same_cleanup_path_as_ctrl_c() -> None:
 
 
 # (spec) Step helpers
-@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX-only")
+@posix_only
 def test_stopping_a_server_stops_its_tree_not_only_the_wrapper(tmp_path: Path) -> None:
     """`cargo run` and `pnpm dev` hold the port in a grandchild, so a stop that
     signals only the wrapper leaves the port held."""
@@ -81,12 +83,12 @@ def test_stopping_a_server_stops_its_tree_not_only_the_wrapper(tmp_path: Path) -
         except ProcessLookupError:
             return
         time.sleep(0.05)
-    os.kill(grandchild, signal.SIGKILL)
+    os.kill(grandchild, 9)
     pytest.fail(f"grandchild {grandchild} survived the stop")
 
 
 # (spec) Step helpers
-@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX-only")
+@posix_only
 def test_stopping_reaches_a_descendant_outside_the_process_group(tmp_path: Path) -> None:
     """A grandchild can leave the wrapper's process group; stopping still finds it."""
     pid_file = tmp_path / "child.pid"
@@ -130,28 +132,30 @@ def test_stopping_reaches_a_descendant_outside_the_process_group(tmp_path: Path)
             process.kill()
         if child is not None:
             try:
-                os.kill(child, signal.SIGKILL)
+                os.kill(child, 9)
             except ProcessLookupError:
                 pass
 
 
 # (spec) Step helpers
+@posix_only
 def test_ps_discovery_keeps_the_root_when_ps_cannot_run(monkeypatch: pytest.MonkeyPatch) -> None:
     def fail(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         raise OSError("no ps")
 
-    monkeypatch.setattr(processes.subprocess, "run", fail)
-    assert processes._ps_descendant_pids(os.getpid()) == (os.getpid(),)
+    monkeypatch.setattr(system_process.subprocess, "run", fail)
+    assert system_process._ps_descendant_pids(os.getpid()) == (os.getpid(),)
 
 
 # (spec) Step helpers
+@posix_only
 def test_ps_discovery_skips_lines_that_are_not_pids(monkeypatch: pytest.MonkeyPatch) -> None:
     class Completed:
         returncode = 0
         stdout = "nope\n"
 
-    monkeypatch.setattr(processes.subprocess, "run", lambda *_args, **_kwargs: Completed())
-    assert processes._ps_descendant_pids(4) == (4,)
+    monkeypatch.setattr(system_process.subprocess, "run", lambda *_args, **_kwargs: Completed())
+    assert system_process._ps_descendant_pids(4) == (4,)
 
 
 # (spec) Step helpers

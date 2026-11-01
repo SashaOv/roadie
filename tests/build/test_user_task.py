@@ -10,7 +10,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from support import Value, execute, isolate_repo, plan_names, run_cli, write_build
+from support import (
+    Value,
+    execute,
+    isolate_repo,
+    open_pty,
+    plan_names,
+    run_cli,
+    write_build,
+)
 
 import roadie
 from roadie.build import RoadieError, Step, UserApproval, UserTask
@@ -37,9 +45,7 @@ def _read_until(
 
 
 def _pty_run(directory: Path, answers: list[str]) -> tuple[int, str]:
-    import pty
-
-    master, slave = pty.openpty()
+    master, slave = open_pty()
     root = Path(roadie.__file__).resolve().parent.parent
     process = subprocess.Popen(
         [
@@ -148,10 +154,8 @@ def test_a_failed_user_check_is_not_recorded(tmp_path: Path) -> None:
 
 # (spec) Step kinds
 def test_a_user_task_fails_at_end_of_input(tmp_path: Path) -> None:
-    import pty
-
     write_build(tmp_path, "look = UserTask('Look.', 'the app starts')\n")
-    master, slave = pty.openpty()
+    master, slave = open_pty()
     root = Path(roadie.__file__).resolve().parent.parent
     process = subprocess.Popen(
         [
@@ -183,11 +187,9 @@ def test_a_user_task_fails_at_end_of_input(tmp_path: Path) -> None:
 def test_a_user_step_asks_while_nothing_else_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import pty
-
     monkeypatch.chdir(tmp_path)
     isolate_repo(monkeypatch, tmp_path)
-    master, slave = pty.openpty()
+    master, slave = open_pty()
     stdin = os.fdopen(slave, "r", buffering=1)
     monkeypatch.setattr(sys, "stdin", stdin)
     asking = threading.Event()

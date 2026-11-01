@@ -3,7 +3,6 @@
 import json
 import os
 import shutil
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import BinaryIO
@@ -11,8 +10,9 @@ from typing import BinaryIO
 from pydantic import BaseModel, ValidationError
 
 from roadie.engine.errors import RoadieError
+from roadie.system import lock as lock_file
+from roadie.system import unlock as unlock_file
 
-_LOCK_BYTES = 1
 RUN_PID_VARIABLE = "ROADIE_RUN_PID"
 
 
@@ -31,7 +31,7 @@ class HeldLock:
         if not self._held:
             return
         self._held = False
-        _unlock(self._file)
+        unlock_file(self._file)
         self._file.close()
 
 
@@ -67,10 +67,10 @@ def acquire_run_lock(root: Path) -> HeldLock:
     path.parent.mkdir(parents=True, exist_ok=True)
     file = path.open("a+b")
     try:
-        if not _lock(file, blocking=False):
+        if not lock_file(file, blocking=False):
             _refuse_parent(path)
             _announce(path)
-            _lock(file, blocking=True)
+            lock_file(file, blocking=True)
         _write_token(file)
     except BaseException:
         file.close()
@@ -123,48 +123,3 @@ def _read(path: Path) -> _LockFile | None:
         return _LockFile.model_validate(json.loads(path.read_text()))
     except (OSError, UnicodeError, json.JSONDecodeError, ValidationError):
         return None
-
-
-if sys.platform == "win32":
-    import msvcrt
-
-    def _lock(file: BinaryIO, *, blocking: bool) -> bool:
-        while True:
-            file.seek(0)
-            try:
-                msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, _LOCK_BYTES)
-            except OSError:
-                if not blocking:
-                    return False
-                try:
-                    file.seek(0)
-                    msvcrt.locking(file.fileno(), msvcrt.LK_LOCK, _LOCK_BYTES)
-                except OSError:
-                    continue
-                return True
-            return True
-
-    def _unlock(file: BinaryIO) -> None:
-        file.seek(0)
-        try:
-            msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK, _LOCK_BYTES)
-        except OSError:
-            return
-
-else:
-    import fcntl
-
-    def _lock(file: BinaryIO, *, blocking: bool) -> bool:
-        flags = fcntl.LOCK_EX
-        if not blocking:
-            flags |= fcntl.LOCK_NB
-        try:
-            fcntl.flock(file.fileno(), flags)
-        except BlockingIOError:
-            if blocking:
-                raise
-            return False
-        return True
-
-    def _unlock(file: BinaryIO) -> None:
-        fcntl.flock(file.fileno(), fcntl.LOCK_UN)

@@ -12,6 +12,7 @@ from support import (
     FakeDeployment,
     execute,
     fake_server,
+    posix_only,
     write_build,
 )
 
@@ -143,7 +144,7 @@ def test_requested_service_stays_up_until_ctrl_c(capsys: pytest.CaptureFixture[s
 
 
 # (spec) Requested result
-@pytest.mark.skipif(os.name != "posix", reason="SIGTERM is POSIX-only")
+@posix_only
 def test_sigterm_while_a_requested_service_is_up_exits_0(capsys: pytest.CaptureFixture[str]) -> None:
     started = threading.Event()
 
