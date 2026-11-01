@@ -1078,7 +1078,7 @@ failure this build removes.
   alone and the `SIGKILL` Windows lacks. The spec's Step helpers section
   drops "unverified" and states the rule. A test starts a server whose
   wrapper starts a child and checks both are gone.
-- [ ] **R14.8: Make the tests platform-neutral.** Escape paths in
+- [x] **R14.8: Make the tests platform-neutral.** Escape paths in
   `pytest.raises(match=...)` (`re.escape`); build cargo JSON with
   `json.dumps`; write test files with explicit `newline="\n"` (the
   `TextFile` helper); compare a copied executable's mode only on POSIX; mark

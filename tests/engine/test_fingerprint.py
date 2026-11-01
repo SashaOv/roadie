@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from support import Value, execute, isolate_repo, write_build
+from support import Value, execute, isolate_repo, needs_symlinks, write_build
 
 import roadie.engine.fingerprint as fingerprints
 from roadie.build import Files, Input, RoadieError, Step
@@ -38,9 +38,6 @@ def test_step_fingerprint_covers_files_dependency_outputs_and_env(tmp_path: Path
         bundle = root / "dist"
         bundle.mkdir()
         (bundle / "app.js").write_text("one")
-        outside = root / "outside.txt"
-        outside.write_text("one")
-        (bundle / "link.js").symlink_to(outside)
 
         @dataclass(eq=False)
         class Bundle(Step[None]):
@@ -57,10 +54,7 @@ def test_step_fingerprint_covers_files_dependency_outputs_and_env(tmp_path: Path
         (bundle / "app.js").write_text("two")
         edited = fingerprint(step, outputs=outputs)
         assert edited != original
-        outside.write_text("two")
-        followed = fingerprint(step, outputs=outputs)
-        assert followed != edited
-        assert fingerprint(step, outputs={source: "b" * 64}) != followed
+        assert fingerprint(step, outputs={source: "b" * 64}) != edited
         assert fingerprint(step, outputs=outputs, env={"PORT": "1"}) != fingerprint(step, outputs=outputs, env={})
         step.env_values = {"PORT": "9"}
         assert fingerprint(step, outputs=outputs) == fingerprint(step, outputs=outputs, env={"PORT": "9"})
@@ -71,6 +65,32 @@ def test_step_fingerprint_covers_files_dependency_outputs_and_env(tmp_path: Path
         before = missing.fingerprint(root)
         (root / "absent").write_text("created")
         assert missing.fingerprint(root) != before
+
+
+# (spec) Step fingerprints
+# (spec) Files input
+@needs_symlinks
+def test_step_fingerprint_follows_symlinks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path.resolve()
+    monkeypatch.chdir(root)
+    with use_project_root(root):
+        bundle = root / "dist"
+        bundle.mkdir()
+        outside = root / "outside.txt"
+        outside.write_text("one")
+        (bundle / "link.js").symlink_to(outside)
+
+        @dataclass(eq=False)
+        class Bundle(Step[None]):
+            files: Files
+
+            def build(self, run: Run) -> None:
+                pass
+
+        step = Bundle(Files("dist"))
+        original = fingerprint(step)
+        outside.write_text("two")
+        assert fingerprint(step) != original
 
 
 # (spec) Step fingerprints

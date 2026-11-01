@@ -1,8 +1,16 @@
+import re
 import subprocess
 from pathlib import Path
 
 import pytest
-from support import EMITTER, isolate_repo, plan_names, run_cli, write_build
+from support import (
+    EMITTER,
+    isolate_repo,
+    passing_check,
+    plan_names,
+    run_cli,
+    write_build,
+)
 
 from roadie import cli
 
@@ -342,7 +350,7 @@ def test_two_services_cannot_both_be_requested(tmp_path: Path) -> None:
 # (spec) Command line
 def test_a_missing_build_file_names_the_path(tmp_path: Path) -> None:
     missing = tmp_path / "absent"
-    with pytest.raises(SystemExit, match=f"build file does not exist: {missing}"):
+    with pytest.raises(SystemExit, match=re.escape(f"build file does not exist: {missing}")):
         run_cli(["-f", str(missing), "--dry"])
 
 
@@ -430,7 +438,10 @@ def test_a_failed_setup_step_stops_the_run(tmp_path: Path) -> None:
 
 # (spec) Command line
 def test_a_setup_step_is_reused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    write_build(tmp_path, "prep = setup(Check('true'))\nwork = Check('true')\n")
+    write_build(
+        tmp_path,
+        f"prep = setup({passing_check()})\nwork = {passing_check()}\n",
+    )
     run_cli(["--jobs", "1", "-f", str(tmp_path)])
     capsys.readouterr()
 

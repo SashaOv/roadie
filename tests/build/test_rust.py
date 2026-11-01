@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from support import FIXTURES, execute, isolate_repo
+from support import FIXTURES, execute, is_posix, isolate_repo, posix_only
 
 from roadie.build import CargoPackage, RustBinary, Step
 from roadie.build import rust as cargo
@@ -165,6 +165,7 @@ def test_cargo_package_fingerprint_follows_its_dependency_closure(tmp_path: Path
 
 # (spec) Cargo packages
 # (spec) Files input
+@posix_only
 def test_cargo_package_reports_an_unreadable_directory(tmp_path: Path) -> None:
     root = tmp_path.resolve()
     _cargo_workspace(root)
@@ -302,7 +303,8 @@ def test_rust_binary_picks_executable_from_captured_cargo_json(
     copied = execute([step])
     assert copied != source
     assert copied.read_bytes() == b"binary"
-    assert copied.stat().st_mode == source.stat().st_mode
+    if is_posix:
+        assert copied.stat().st_mode == source.stat().st_mode
     assert captured == [
         ("cargo", "build", "--locked", "-p", package, "--message-format=json")
     ]
@@ -326,10 +328,24 @@ def test_rust_binary_rejects_missing_executable(
 # (spec) Step kinds
 def test_rust_binary_rejects_several_executables(monkeypatch: pytest.MonkeyPatch) -> None:
     message = (
-        '{"reason":"compiler-artifact","package_id":"path+file:///tmp/app#app@0.1.0",'
-        '"target":{"kind":["bin"]},"executable":"/tmp/one"}\n'
-        '{"reason":"compiler-artifact","package_id":"path+file:///tmp/app#app@0.1.0",'
-        '"target":{"kind":["bin"]},"executable":"/tmp/two"}\n'
+        json.dumps(
+            {
+                "reason": "compiler-artifact",
+                "package_id": "path+file:///tmp/app#app@0.1.0",
+                "target": {"kind": ["bin"]},
+                "executable": "/tmp/one",
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "reason": "compiler-artifact",
+                "package_id": "path+file:///tmp/app#app@0.1.0",
+                "target": {"kind": ["bin"]},
+                "executable": "/tmp/two",
+            }
+        )
+        + "\n"
     )
     monkeypatch.setattr(
         "roadie.build.rust.CargoPackage.fingerprint",
@@ -368,8 +384,15 @@ def test_rust_binary_is_rebuilt_when_its_recorded_copy_changes(tmp_path: Path, m
     source.write_bytes(b"v1")
     source.chmod(0o755)
     message = (
-        '{"reason":"compiler-artifact","package_id":"path+file:///tmp/app#app@0.1.0",'
-        f'"target":{{"kind":["bin"]}},"executable":"{source}"}}\n'
+        json.dumps(
+            {
+                "reason": "compiler-artifact",
+                "package_id": "path+file:///tmp/app#app@0.1.0",
+                "target": {"kind": ["bin"]},
+                "executable": str(source),
+            }
+        )
+        + "\n"
     )
     calls: list[tuple[str, ...]] = []
 

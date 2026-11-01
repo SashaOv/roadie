@@ -95,8 +95,20 @@ class TextFile(File):
 
     def build(self, run: Run) -> Path:
         artifact = run.artifact(self, ".txt")
-        artifact.write_text(self.text)
+        with artifact.open("w", newline="\n") as handle:
+            handle.write(self.text)
         return artifact
+
+
+def passing_check(*extra: str) -> str:
+    """Build-file `Check(...)` source that exits 0 on every platform."""
+    args = ", ".join([repr(sys.executable), repr("-c"), repr("pass"), *(repr(a) for a in extra)])
+    return f"Check({args})"
+
+
+def failing_check() -> str:
+    """Build-file `Check(...)` source that exits 1 on every platform."""
+    return f"Check({sys.executable!r}, '-c', 'raise SystemExit(1)')"
 
 
 EMITTER = """

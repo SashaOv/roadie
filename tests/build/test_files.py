@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from support import execute, git_init
+from support import execute, git_init, posix_only
 
 from roadie.build import Files, Step
 from roadie.engine.errors import RoadieError, StepFailed
@@ -75,6 +75,7 @@ def test_directory_outside_a_work_tree_includes_every_file(tmp_path: Path) -> No
 
 
 # (spec) Files input
+@posix_only
 def test_unreadable_directory_outside_a_work_tree_fails_the_step(tmp_path: Path) -> None:
     hidden = tmp_path / "hidden"
     hidden.mkdir()
@@ -107,6 +108,7 @@ def test_unreadable_directory_outside_a_work_tree_fails_the_step(tmp_path: Path)
 
 
 # (spec) Files input
+@posix_only
 def test_unreadable_directory_in_a_work_tree_reports_the_git_warning(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     git_init(root)

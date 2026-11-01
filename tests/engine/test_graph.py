@@ -233,7 +233,7 @@ def test_include_takes_a_build_file_or_its_directory(tmp_path: Path) -> None:
 
 # (spec) Loading a build file
 def test_missing_build_file_names_the_directory(tmp_path: Path) -> None:
-    with pytest.raises(RoadieError, match=f"{tmp_path} has no build.py"):
+    with pytest.raises(RoadieError, match=re.escape(f"{tmp_path} has no build.py")):
         load(tmp_path)
 
 
@@ -252,7 +252,8 @@ def test_include_cycle_names_the_files(tmp_path: Path) -> None:
     a, b = (tmp_path / name / "build.py" for name in "ab")
 
     with pytest.raises(
-        RoadieError, match=f"build files include each other: {a} -> {b} -> {a}$"
+        RoadieError,
+        match=re.escape(f"build files include each other: {a} -> {b} -> {a}") + "$",
     ):
         load(tmp_path / "a")
 

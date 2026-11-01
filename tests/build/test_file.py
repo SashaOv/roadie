@@ -26,11 +26,11 @@ def test_file_output_is_published_and_equal_file_is_not_rewritten(previous: str 
     destination = tmp_path / "nested/output.txt"
     if previous is not None:
         destination.parent.mkdir()
-        destination.write_text(previous)
+        destination.write_bytes(previous.encode())
         os.utime(destination, ns=(1_000_000_000, 1_000_000_000))
     step = TextFile("new\n", output="nested/output.txt")
     assert execute([step]) == destination
-    assert destination.read_text() == "new\n"
+    assert destination.read_bytes() == b"new\n"
     output = capsys.readouterr().out
     if previous == "new\n":
         assert "updated" not in output
@@ -47,7 +47,7 @@ def test_locked_file_output_protects_tracked_files_and_writes_untracked_files(pr
     isolate_repo(monkeypatch, tmp_path)
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     destination = tmp_path / "output.txt"
-    destination.write_text(previous or "old\n")
+    destination.write_bytes((previous or "old\n").encode())
     if tracked:
         subprocess.run(["git", "add", "output.txt"], cwd=tmp_path, check=True)
     if previous is None:
@@ -60,11 +60,13 @@ def test_locked_file_output_protects_tracked_files_and_writes_untracked_files(pr
         assert "generated failed" in str(error.value)
         assert str(destination) in str(error.value)
         diff = capsys.readouterr().out
-        assert "--- " in diff and "+++ " in diff and "+new\n" in diff
-        assert (destination.read_text() if destination.exists() else None) == previous
+        assert "--- " in diff and "+++ " in diff
+        assert "+new\n" in diff or "+new\r\n" in diff
+        expected = None if previous is None else previous.encode()
+        assert (destination.read_bytes() if destination.exists() else None) == expected
     else:
         assert execute([step], locked=True) == destination
-        assert destination.read_text() == "new\n"
+        assert destination.read_bytes() == b"new\n"
 
 
 # (spec) Generated files

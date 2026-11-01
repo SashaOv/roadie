@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from support import execute, write_build
+from support import execute, failing_check, passing_check, write_build
 
 from roadie.build import Release
 from roadie.build.release import CargoManifest, PackageJson, PyProject
@@ -405,18 +405,18 @@ def test_release_requires_run_before_it_and_a_failure_publishes_nothing(tmp_path
     repo, bare = _repository(tmp_path, "0.1.0")
     write_build(
         repo,
-        'gate = Check("false")\nrelease = Release("pyproject.toml", requires=(gate,))\n',
+        f"gate = {failing_check()}\nrelease = Release('pyproject.toml', requires=(gate,))\n",
     )
     plan = load(repo).plan("release")
     assert [step.name for step in plan] == ["gate", "release"]
-    with pytest.raises(StepFailed, match="false"):
+    with pytest.raises(StepFailed, match="gate failed"):
         execute(plan, root=repo)
     assert _tags(bare) == set()
 
     passing, passing_remote = _repository(tmp_path / "passing", "0.1.0")
     write_build(
         passing,
-        'gate = Check("true")\nrelease = Release("pyproject.toml", requires=(gate,))\n',
+        f"gate = {passing_check()}\nrelease = Release('pyproject.toml', requires=(gate,))\n",
     )
     _git(passing, "add", "build.py")
     _git(passing, "commit", "-q", "-m", "build")

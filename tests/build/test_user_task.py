@@ -14,6 +14,7 @@ from support import (
     Value,
     execute,
     isolate_repo,
+    needs_pty,
     open_pty,
     plan_names,
     run_cli,
@@ -123,6 +124,7 @@ def test_dry_run_does_not_ask(tmp_path: Path, capsys: pytest.CaptureFixture[str]
 
 
 # (spec) Step kinds
+@needs_pty
 def test_a_user_task_records_a_pass_and_reuses_it(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -143,6 +145,7 @@ def test_a_user_task_records_a_pass_and_reuses_it(
 
 
 # (spec) Step kinds
+@needs_pty
 def test_a_failed_user_check_is_not_recorded(tmp_path: Path) -> None:
     write_build(tmp_path, "look = UserTask('Look.', 'the app starts', 'the button works')\n")
     status, output = _pty_run(tmp_path, ["y", "maybe", "n", "the button is missing"])
@@ -153,6 +156,7 @@ def test_a_failed_user_check_is_not_recorded(tmp_path: Path) -> None:
 
 
 # (spec) Step kinds
+@needs_pty
 def test_a_user_task_fails_at_end_of_input(tmp_path: Path) -> None:
     write_build(tmp_path, "look = UserTask('Look.', 'the app starts')\n")
     master, slave = open_pty()
@@ -184,6 +188,7 @@ def test_a_user_task_fails_at_end_of_input(tmp_path: Path) -> None:
 
 
 # (spec) Step kinds
+@needs_pty
 def test_a_user_step_asks_while_nothing_else_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -249,6 +254,7 @@ def test_user_approval_takes_a_question() -> None:
 
 
 # (spec) Step kinds
+@needs_pty
 def test_user_approval_continues_or_cancels_and_asks_every_run(tmp_path: Path) -> None:
     write_build(tmp_path, 'approve = UserApproval("Release main?")\n')
     status, output = _pty_run(tmp_path, ["maybe", "y"])
