@@ -169,9 +169,12 @@ def test_a_user_task_fails_at_end_of_input(tmp_path: Path) -> None:
         cwd=root,
     )
     os.close(slave)
-    os.close(master)
+    assert process.stdout is not None
+    pending = _read_until(process.stdout.fileno(), b"", b"? ")
+    os.write(master, b"\x04")
     output, errors = process.communicate(timeout=10)
-    text = (output + errors).decode()
+    os.close(master)
+    text = (pending + output + errors).decode()
     assert process.returncode != 0, text
     assert "look: no answer from the user" in text
 
