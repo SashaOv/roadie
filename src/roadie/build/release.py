@@ -326,7 +326,7 @@ class CargoManifest(Input):
     def write_version(self, base_dir: Path, version: str) -> tuple[Path, ...]:
         file = self._file(base_dir)
         table, current = self._located(file)
-        file.write_text(_replace_version(file.read_text(), table, current, version))
+        _write_text(file, _replace_version(_read_text(file), table, current, version))
         located = _cargo(
             file.parent, "locate-project", "--workspace", "--message-format", "plain"
         )
@@ -416,8 +416,18 @@ class PackageJson(Input):
                 f"cannot release: {file} has a package-lock.json, which Roadie does not update"
             )
         current = self.read_version(base_dir)
-        file.write_text(_replace_json_version(file.read_text(), current, version))
+        _write_text(file, _replace_json_version(_read_text(file), current, version))
         return (file,)
+
+
+def _read_text(path: Path) -> str:
+    with path.open(newline="") as handle:
+        return handle.read()
+
+
+def _write_text(path: Path, text: str) -> None:
+    with path.open("w", newline="") as handle:
+        handle.write(text)
 
 
 def _source(path: object) -> PyProject | CargoManifest | PackageJson:

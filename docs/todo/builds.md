@@ -1057,7 +1057,7 @@ failure this build removes.
 - [x] **R14.3: Name the command that cannot start.** As decision 3. The spec's
   Step helpers section states the message; `test_check.py` asserts it
   without the POSIX-only text.
-- [ ] **R14.4: Keep a manifest's line endings when releasing.** `Release`
+- [x] **R14.4: Keep a manifest's line endings when releasing.** `Release`
   rewrites `Cargo.toml` and `package.json` with the file's own line endings
   (`newline=""`), so a release on Windows does not turn an LF file into
   CRLF. A test releases a CRLF and an LF manifest and checks each keeps its

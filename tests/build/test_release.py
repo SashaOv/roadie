@@ -201,6 +201,31 @@ def test_a_failing_cargo_update_stops_the_release(tmp_path: Path) -> None:
 
 
 # (spec) Step kinds
+def test_cargo_and_package_json_keep_their_line_endings(tmp_path: Path) -> None:
+    cargo = (
+        '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n\n'
+        '[lib]\npath = "src/lib.rs"\n'
+    )
+    package = '{\n  "name": "demo",\n  "version": "0.1.0"\n}\n'
+    cases = (
+        (CargoManifest("Cargo.toml"), "Cargo.toml", cargo, 'version = "0.1.1"'),
+        (PackageJson("package.json"), "package.json", package, '"version": "0.1.1"'),
+    )
+    for source, name, text, marker in cases:
+        for ending, label in (("\n", "lf"), ("\r\n", "crlf")):
+            directory = tmp_path / f"{label}-{name}"
+            directory.mkdir()
+            path = directory / name
+            path.write_bytes(text.replace("\n", ending).encode())
+            assert source.write_version(directory, "0.1.1") == (path.resolve(),)
+            written = path.read_bytes()
+            assert marker.encode() in written
+            assert ending.encode() in written
+            if ending == "\n":
+                assert b"\r\n" not in written
+
+
+# (spec) Step kinds
 def test_package_json_replaces_its_version_and_refuses_a_package_lock(tmp_path: Path) -> None:
     source = PackageJson("package.json")
     package = tmp_path / "package.json"
