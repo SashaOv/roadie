@@ -1085,7 +1085,7 @@ failure this build removes.
   the cases of decision 6 with the markers of R14.1. The 15 test-assumption
   failures in Facts pass or skip, and each skipped rule keeps a test that
   runs.
-- [ ] **R14.9: Add a Windows CI job.** `windows-latest` joins the matrix. The
+- [x] **R14.9: Add a Windows CI job.** `windows-latest` joins the matrix. The
   backlog's Windows item and the spec's "unverified until the Windows CI
   job" go.
 
