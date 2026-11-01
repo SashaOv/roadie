@@ -448,7 +448,9 @@ creates its parent directory.
 `Step` provides helpers that run a program in the step's base directory with
 its environment files: `_cmd` runs it to completion, and `_start_cmd` starts
 a server and returns a `RunningProcess` once it is ready. Their docstrings
-specify them.
+specify them. A command that cannot start fails with `<step> failed: cannot
+run <program>: <reason>`, where `<reason>` is the error's text without its
+filename.
 
 Stopping a server signals its process group and every descendant. On Linux
 the descendants come from `/proc`; on macOS, where `/proc` is absent, from

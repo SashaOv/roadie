@@ -1054,7 +1054,7 @@ failure this build removes.
   2, in `roadie.system`. The waiter prints `(pid <pid>, started <time>)`,
   and a step that runs Roadie in its own project fails as the spec says. The
   four `test_lock.py` failures pass.
-- [ ] **R14.3: Name the command that cannot start.** As decision 3. The spec's
+- [x] **R14.3: Name the command that cannot start.** As decision 3. The spec's
   Step helpers section states the message; `test_check.py` asserts it
   without the POSIX-only text.
 - [ ] **R14.4: Keep a manifest's line endings when releasing.** `Release`

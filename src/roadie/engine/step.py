@@ -213,19 +213,26 @@ class Step[T](ABC):
         `capture_output`, standard output is also returned, unprefixed.
         Unless `check` is false, a non-zero exit fails the step with
         `<name> failed: <command> exited with status <n>: <last 2000
-        characters of standard error>`.
+        characters of standard error>`. A command that cannot start fails
+        with `<name> failed: cannot run <program>: <reason>`, where
+        `<reason>` is the error's text without its filename.
         """
         print("+", shlex.join(args), flush=True)
         prefix = current_prefix()
         out, err = output_streams()
-        process = subprocess.Popen(
-            args,
-            cwd=self.base_dir,
-            env=self._command_env(environment),
-            stdout=subprocess.PIPE if capture_output or prefix else None,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+        try:
+            process = subprocess.Popen(
+                args,
+                cwd=self.base_dir,
+                env=self._command_env(environment),
+                stdout=subprocess.PIPE if capture_output or prefix else None,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except OSError as error:
+            raise StepFailed(
+                self.name or type(self).__name__, _cannot_run(args[0], error)
+            ) from error
         track_process(process, session=False)
         readers: list[threading.Thread] = []
         stdout_parts: list[str] = []
@@ -296,17 +303,23 @@ class Step[T](ABC):
         `<process> did not start listening on port <port> within <timeout>s`
         (or `did not become ready at <url> within <timeout>s`). `<process>` is
         the executable's file name and up to two following arguments that are
-        not options. In both cases the process tree is stopped.
+        not options. In both cases the process tree is stopped. A command that
+        cannot start fails as `_cmd` does.
         """
         print("+", shlex.join(args), flush=True)
-        return RunningProcess.start(
-            args,
-            port=port,
-            environment=self._command_env(environment),
-            timeout=timeout,
-            cwd=self.base_dir,
-            health_path=health_path,
-        )
+        try:
+            return RunningProcess.start(
+                args,
+                port=port,
+                environment=self._command_env(environment),
+                timeout=timeout,
+                cwd=self.base_dir,
+                health_path=health_path,
+            )
+        except OSError as error:
+            raise StepFailed(
+                self.name or type(self).__name__, _cannot_run(args[0], error)
+            ) from error
 
     def _command_env(self, environment: Mapping[str, str] | None) -> dict[str, str]:
         # Process environment, then the step's settings, then env files.
@@ -314,6 +327,13 @@ class Step[T](ABC):
         merged = {**os.environ, **(environment or {}), **self.env_values}
         merged[RUN_PID_VARIABLE] = str(os.getpid())
         return merged
+
+
+def _cannot_run(program: str, error: OSError) -> str:
+    reason = str(error)
+    if error.filename is not None:
+        reason = reason.removesuffix(f": {error.filename!r}")
+    return f"cannot run {program}: {reason}"
 
 
 def _reserved_names() -> frozenset[str]:

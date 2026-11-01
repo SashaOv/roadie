@@ -68,9 +68,11 @@ def test_check_fails_when_the_command_cannot_start(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     step = _check("roadie-missing-command")
-    with pytest.raises(StepFailed, match="roadie-missing-command") as error:
+    with pytest.raises(StepFailed) as error:
         execute([step], root=tmp_path)
-    assert "No such file or directory" in str(error.value)
+    message = str(error.value)
+    assert message.startswith("lint failed: cannot run roadie-missing-command: ")
+    assert "roadie-missing-command" not in message.split(": ", 2)[-1]
 
 
 # (spec) Step kinds
