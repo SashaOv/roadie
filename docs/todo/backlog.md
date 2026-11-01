@@ -13,7 +13,10 @@ bullet, except the input-enforcement design, which is moved whole.
 - A cargo-nextest test step that reads the runner's JUnit report into
   `TestResults`.
 - A Windows CI job, then stop a Windows process tree (`taskkill /T`) and
-  replace the `SIGKILL` that Windows lacks.
+  replace the `SIGKILL` that Windows lacks. On Windows, `--jobs` above 1
+  prints a warning and runs one step at a time (author, 2026-11-01). Probe
+  findings are in [builds.md](builds.md) Facts, 2026-11-01.
+
 ## User manual
 
 Guidance taken out of the spec because it follows from the rules.

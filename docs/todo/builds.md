@@ -75,6 +75,23 @@ builds, then the one planned build. Unplanned work is in
   (`build`, `report`, `serve`, `teardown`, ...); its root file's `build`
   result is never included.
 
+- 2026-11-01: on `windows-latest` (probe runs 41283209577 and 41284571941
+  on a deleted branch, `bebee9e` with CI on Windows only; uv chose Python
+  3.15.1), `uv sync` and `ruff` pass, and `tests/engine/test_jobs.py` passes
+  (18 passed, 2 skipped). Three failures:
+  - `test_a_step_that_runs_roadie_in_the_same_project_fails` hangs: the
+    nested run prints `waiting for another roadie run: <lock>` with no
+    `(pid ...)` and waits, so `ROADIE_RUN_PID` never matches. Likely cause,
+    unverified: `msvcrt.locking` locks the bytes holding the PID, so the
+    waiter cannot read them.
+  - `mypy src build.py` reports six errors in `engine/process.py`:
+    `os.killpg`, `os.getpgid` and `signal.SIGKILL` do not exist on Windows;
+    the guards test `os.name`, which mypy does not narrow on, unlike
+    `sys.platform`.
+  - About 25 other tests fail (`F` marks before the hang); their names were
+    not captured, because the timeout ended pytest before its summary.
+  The author stopped the probes here, to continue on a Windows machine.
+
 --- Implemented / Next ---
 
 ## R8: Roadie's state survives upgrades, concurrent runs and moves
@@ -668,7 +685,7 @@ and last `finished in 0:16`; the second run printed only `reused` lines and
 
 ## R13: Runs take several results and parameters, build files compose, the user checks and approves, and Rust and JS projects release
 
-Status: planned, approved 2026-10-31
+Status: implemented 2026-10-31 (commits R13.*)
 
 **Improvement.** The command line names results and their parameters, as in
 `roadie version=1.2.0 package release message="Fix the lock"`; the build
@@ -881,9 +898,50 @@ approve a run, such as a release, before it goes on. `--base_dir` becomes
   `UserApproval("Release main?")`. `roadie.build` exports it, and the
   backlog item goes.
 
-**Author action required at completion.** Push `main` and confirm CI passes
+**Acceptance run (2026-10-31).** Commit `bebee9ee4f243857d809c71fc4a516ae8f370081`,
+tree `f93771ef82e0f836effa89972a8feed8ae3952fa`. Host Darwin 25.6.0 arm64,
+uv 0.12.23, Python 3.13.13. Script
+`/Users/sasha/.local/share/roadie/r13-acceptance.py`, sha256
+`ce15aadf9ea4176ee7272a4982b97200dade6b2f63353bb15e7ca4ae69d5c669`. Log
+`/Users/sasha/.local/share/roadie/r13-acceptance.log`, sha256
+`7b435f4851db708a9126d6658598d89692de35e34f0fdb1c20ec056cb11e8de1`.
+
+- `uv run ruff check`, `uv run mypy src`, and `uv run pytest -q --tb=line` on
+  that commit: 306 passed.
+- `uv run roadie checks` exited 0.
+- `uv run roadie --help` lists `--file`, `-f`, and `--base-dir`, and not
+  `--base_dir`. `uv run roadie --dry --base_dir .` exited 0.
+- `uv run roadie . checks --dry` failed with `pass -f .`.
+  `uv run roadie -f build.py ruff mypy --dry` exited 0 and marked both.
+- `uv run roadie release message=x --dry` exited 0 and showed
+  `message=Param('message', default=None)` on `release`'s line.
+  `uv run roadie release mesage=x --dry` failed with `release takes no
+  parameter mesage; it takes: message`. `uv run roadie message=x --dry`
+  failed with `unknown parameter message; the plan takes no parameters`.
+- CI run [41282856686](https://github.com/SashaOv/roadie/actions/runs/41282856686)
+  on `bebee9e` passed on `ubuntu-latest` and `macos-latest`. The earlier run
+  on `f791383` failed on Ubuntu: closing the pty master before the child
+  read made standard input not a terminal. `bebee9e` sends end of input
+  after the prompt, while the terminal is still open.
+
+**Author action required at completion.** ~~Push `main` and confirm CI passes
 on both platforms, or authorize the executor to push. Discharges the CI
-clause.
+clause.~~ The author authorized the push. CI run 41282856686 on `bebee9e`
+passed on `ubuntu-latest` and `macos-latest`.
+
+**Review (2026-11-01).** CI run 41282856686 on `bebee9e` passed on both
+platforms (checked with `gh run view`), and every acceptance command above,
+rerun on `bebee9e`, gave the recorded result. Four subjects drop the
+backticks of their patch names (R13.1, R13.3, R13.5, R13.9), as R11.3 and
+R12.3 did; the rest match. Two commits are not patches: `2895004` (the
+author's, between R13.3 and R13.4) lets `include` take a build file as well
+as a directory, and the spec states it; `bebee9e` fixes the user-task test
+that failed on Ubuntu CI by sending end of input while the pseudo-terminal
+is still open, and is not tagged `R13:`.
+
+**Reflection.** Patch names are written without code formatting, so a
+commit subject can equal its patch name literally; three builds in a row
+dropped the backticks.
 
 ## Backlog
 
