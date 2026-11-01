@@ -243,7 +243,11 @@ class Step[T](ABC):
             if process.stdout is not None:
                 readers.append(read_lines(process.stdout.readline, out, prefix, stdout_parts))
             try:
-                process.wait()
+                while process.poll() is None:
+                    try:
+                        process.wait(timeout=0.1)
+                    except subprocess.TimeoutExpired:
+                        pass
                 for reader in readers:
                     reader.join()
                 stdout = "".join(stdout_parts) if capture_output else None

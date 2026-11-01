@@ -1,11 +1,13 @@
+import _thread
 import os
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from support import execute, posix_only, write_build
+from support import execute, write_build
 
 from roadie import cli
 from roadie.build import Step
@@ -437,17 +439,15 @@ def test_a_dry_run_prints_marks_in_plan_order(tmp_path: Path, capsys: pytest.Cap
 
 
 # (spec) Teardown
-@posix_only
 @pytest.mark.parametrize("jobs", [1, 2])
 def test_an_interrupt_stops_the_program_a_step_is_running(tmp_path: Path, jobs: int) -> None:
     root = tmp_path.resolve()
     pidfile = root / "child.pid"
     script = (
-        "import os, signal\n"
+        "import os, time\n"
         "from pathlib import Path\n"
         f"Path({str(pidfile)!r}).write_text(str(os.getpid()))\n"
-        "os.kill(os.getppid(), signal.SIGTERM)\n"
-        "signal.pause()\n"
+        "time.sleep(60)\n"
     )
 
     class Resource(Step[str]):
@@ -465,11 +465,27 @@ def test_an_interrupt_stops_the_program_a_step_is_running(tmp_path: Path, jobs: 
             assert run[self.resource] == "held"
             self._cmd(sys.executable, "-c", script)
 
+    def interrupt_when_ready() -> None:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if pidfile.exists() and pidfile.read_text().strip():
+                _thread.interrupt_main()
+                return
+            time.sleep(0.05)
+
     value_holder: list[str] = []
     resource = Resource()
+    threading.Thread(target=interrupt_when_ready, daemon=True).start()
     with pytest.raises(KeyboardInterrupt):
         execute([resource, Program(resource)], root=root, jobs=jobs)
     assert value_holder == ["stop"]
     pid = int(pidfile.read_text())
-    with pytest.raises(ProcessLookupError):
-        os.kill(pid, 0)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail(f"child {pid} survived the interrupt")

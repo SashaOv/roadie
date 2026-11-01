@@ -1067,7 +1067,7 @@ failure this build removes.
   checks out an LF generated file as CRLF, and expects `--locked` to pass
   and no `updated` line. The spec's Generated files section states it. Not
   platform code: `core.autocrlf` can be set anywhere.
-- [ ] **R14.6: Let Ctrl-C interrupt a run with several jobs.** As decision
+- [x] **R14.6: Let Ctrl-C interrupt a run with several jobs.** As decision
   4. The main thread waits for its workers with `join(0.1)` in a loop. The
   interrupt test raises `KeyboardInterrupt` in the main thread with
   `_thread.interrupt_main()` instead of sending SIGTERM, so it runs on every

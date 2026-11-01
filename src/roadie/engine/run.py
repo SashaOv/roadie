@@ -327,11 +327,13 @@ def _schedule(
             for thread in threads:
                 thread.start()
             for thread in threads:
-                thread.join()
+                while thread.is_alive():
+                    thread.join(0.1)
         except KeyboardInterrupt:
             request_stop()
             for thread in threads:
-                thread.join()
+                while thread.is_alive():
+                    thread.join(0.1)
             raise
         if interrupted:
             raise KeyboardInterrupt
