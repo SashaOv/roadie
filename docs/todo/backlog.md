@@ -5,7 +5,6 @@ bullet, except the input-enforcement design, which is moved whole.
 
 ## Features
 
-- `AuthorApproval`: an author task that continues the run or cancels it.
 - Enforce declared inputs (the design below).
 - A project-root override (`config(root=...)`) for a project whose root is not
   its git top level.

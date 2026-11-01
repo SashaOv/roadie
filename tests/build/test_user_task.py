@@ -13,7 +13,7 @@ import pytest
 from support import Value, execute, isolate_repo, plan_names, run_cli, write_build
 
 import roadie
-from roadie.build import RoadieError, Step, UserTask
+from roadie.build import RoadieError, Step, UserApproval, UserTask
 from roadie.engine.fingerprint import fingerprint
 from roadie.engine.run import Run
 
@@ -235,3 +235,34 @@ def test_a_user_step_asks_while_nothing_else_runs(
         os.close(master)
         stdin.close()
     assert not thread.is_alive()
+
+
+# (spec) Step kinds
+def test_user_approval_takes_a_question() -> None:
+    with pytest.raises(RoadieError, match="UserApproval takes a question as a string: got int"):
+        UserApproval(1)  # type: ignore[arg-type]
+
+
+# (spec) Step kinds
+def test_user_approval_continues_or_cancels_and_asks_every_run(tmp_path: Path) -> None:
+    write_build(tmp_path, 'approve = UserApproval("Release main?")\n')
+    status, output = _pty_run(tmp_path, ["maybe", "y"])
+    assert status == 0, output
+    assert "Release main? [y/n]" in output
+
+    status, output = _pty_run(tmp_path, ["n"])
+    assert status != 0, output
+    assert "cancelled by the user" in output
+
+
+# (spec) Step kinds
+def test_user_approval_needs_a_terminal(tmp_path: Path) -> None:
+    write_build(tmp_path, 'approve = UserApproval("Release main?")\n')
+    with pytest.raises(SystemExit, match="approve needs the user at a terminal"):
+        run_cli(["--jobs", "1", "-f", str(tmp_path)])
+
+
+# (spec) Step kinds
+def test_the_release_requires_approval() -> None:
+    root = Path(roadie.__file__).resolve().parents[2]
+    assert "approve" in plan_names(root, "release")

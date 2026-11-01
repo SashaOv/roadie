@@ -871,7 +871,7 @@ approve a run, such as a release, before it goes on. `--base_dir` becomes
   a requested result starts with standard input from the null device.
   `--dry` asks nothing. `roadie.build` exports it, and the backlog item
   goes.
-- [ ] **R13.11: Ask the user to approve a run.** `UserApproval(question)`
+- [x] **R13.11: Ask the user to approve a run.** `UserApproval(question)`
   is a user step whose question is asked once,
   `<question> [y/n] `, under R13.10's rules for answers and the terminal.
   `y` continues the run; `n` fails the step with `cancelled by the user`,

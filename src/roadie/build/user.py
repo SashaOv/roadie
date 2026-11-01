@@ -107,3 +107,45 @@ def _reason(label: str) -> str:
         reason = _answer(label)
         if reason:
             return reason
+
+
+# (spec) Step kinds
+class UserApproval(Step[None]):
+    """Ask the user once whether to continue; the value is `None`.
+
+    The question is asked as `<question> [y/n] `, under the same answer and
+    terminal rules as `UserTask`. `y` or `yes` continues. `n` or `no` fails
+    the step with `cancelled by the user`. Any other answer asks again.
+    Standard input that is not a terminal fails the step with `<name> needs
+    the user at a terminal`, and an end of input with `<name>: no answer from
+    the user`. It asks only while no other step is running.
+
+    It is never reused and keeps no record, so it asks on every run. Its
+    output fingerprint is its own fingerprint. `--dry` asks nothing.
+    """
+
+    asks: ClassVar[bool] = True
+    reusable: ClassVar[bool] = False
+    recorded: ClassVar[bool] = False
+
+    def __init__(self, question: str) -> None:
+        if not isinstance(question, str):
+            raise RoadieError(
+                f"UserApproval takes a question as a string: got {type(question).__name__}"
+            )
+        self.question = question
+
+    def output_fingerprint(self, fingerprint: str, value: None) -> str:
+        return fingerprint
+
+    def build(self, run: "Run") -> None:
+        label = self.name or type(self).__name__
+        if not sys.stdin.isatty():
+            raise StepFailed(label, f"{label} needs the user at a terminal")
+        while True:
+            print(f"{self.question} [y/n] ", end="", flush=True)
+            answer = _answer(label).lower()
+            if answer in _YES:
+                return
+            if answer in _NO:
+                raise StepFailed(label, "cancelled by the user")

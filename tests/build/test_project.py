@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from roadie.build import Check, Group, Pytest, Release
+from roadie.build import Check, Group, Pytest, Release, UserApproval
 from roadie.engine.graph import load
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -17,6 +17,7 @@ def test_roadie_checks_itself_and_releases_only_when_asked() -> None:
         "mypy",
         "pytest",
         "checks",
+        "approve",
         "release",
     ]
 
@@ -28,6 +29,8 @@ def test_roadie_checks_itself_and_releases_only_when_asked() -> None:
     assert isinstance(pytest_step, Pytest)
     assert pytest_step.args == ()
     assert isinstance(checks, Group)
-    release = graph.plan("release")[-1]
+    approve, release = graph.plan("release")[-2:]
+    assert isinstance(approve, UserApproval)
+    assert approve.question == "Release main?"
     assert isinstance(release, Release)
-    assert release.requires == (checks,)
+    assert release.requires == (checks, approve)
