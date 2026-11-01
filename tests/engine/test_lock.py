@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import subprocess
@@ -100,9 +101,12 @@ def test_a_run_waits_for_the_holder_and_proceeds_when_it_releases(tmp_path: Path
     try:
         assert holder.stdin is not None
         assert _line(holder) == "held"
+        holder_pid = json.loads(lock.read_text())["pid"]
         waiter = _process(_WAITER, root)
         waiting = _line(waiter)
-        assert waiting.startswith(f"waiting for another roadie run: {lock} (pid {holder.pid}, started ")
+        assert waiting.startswith(
+            f"waiting for another roadie run: {lock} (pid {holder_pid}, started "
+        )
         assert waiting.endswith(")")
         holder.stdin.write("\n")
         holder.stdin.flush()
@@ -356,6 +360,7 @@ def test_a_run_started_by_an_unrelated_process_still_waits(tmp_path: Path) -> No
     try:
         assert holder.stdin is not None
         assert _line(holder) == "held"
+        holder_pid = json.loads(lock.read_text())["pid"]
         environment = os.environ.copy()
         environment["ROADIE_RUN_PID"] = str(os.getpid())
         waiter = subprocess.Popen(
@@ -368,7 +373,7 @@ def test_a_run_started_by_an_unrelated_process_still_waits(tmp_path: Path) -> No
         )
         waiting = _line(waiter)
         assert waiting.startswith(
-            f"waiting for another roadie run: {lock} (pid {holder.pid}, started "
+            f"waiting for another roadie run: {lock} (pid {holder_pid}, started "
         )
         holder.stdin.write("\n")
         holder.stdin.flush()

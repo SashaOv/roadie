@@ -1050,7 +1050,7 @@ failure this build removes.
   `needs_symlinks`), and the lock-holder script in `test_lock.py` locks
   through `roadie.system`. The ruff rule turns on in `pyproject.toml`. The
   spec's Packages section already states the rule.
-- [ ] **R14.2: Keep the lock holder's PID readable on Windows.** As decision
+- [x] **R14.2: Keep the lock holder's PID readable on Windows.** As decision
   2, in `roadie.system`. The waiter prints `(pid <pid>, started <time>)`,
   and a step that runs Roadie in its own project fails as the spec says. The
   four `test_lock.py` failures pass.
