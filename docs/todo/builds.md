@@ -1073,7 +1073,7 @@ failure this build removes.
   `_thread.interrupt_main()` instead of sending SIGTERM, so it runs on every
   platform, with `--jobs` 1 and 2; it also checks that the step's program
   is stopped. Not platform code: the loop is right everywhere.
-- [ ] **R14.7: Stop a server's process tree on Windows.** As decision 5, in
+- [x] **R14.7: Stop a server's process tree on Windows.** As decision 5, in
   `roadie.system`, replacing the Windows branch that signals the process
   alone and the `SIGKILL` Windows lacks. The spec's Step helpers section
   drops "unverified" and states the rule. A test starts a server whose

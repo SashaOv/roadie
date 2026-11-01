@@ -43,22 +43,35 @@ if sys.platform == "win32":
     def signal_process_tree(
         process: subprocess.Popen[bytes], sent: signal.Signals
     ) -> None:
-        """Signal the process alone. Unverified until a Windows CI job exists."""
-        process.send_signal(sent)
+        if not _taskkill(process.pid, force=False):
+            process.send_signal(sent)
 
     def interrupt_process(process: subprocess.Popen[Any], *, session: bool) -> None:
-        process.terminate()
+        if not _taskkill(process.pid, force=False):
+            process.terminate()
 
     def stop_process_tree(process: subprocess.Popen[bytes]) -> None:
-        """Signal the process alone, with no new session. Unverified until a
-        Windows CI job exists; force-kill uses TerminateProcess."""
-        if process.poll() is None:
-            process.send_signal(signal.SIGTERM)
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
+        """taskkill /T, wait up to 10 seconds, then taskkill /T /F."""
+        if process.poll() is not None:
+            return
+        if not _taskkill(process.pid, force=False):
+            process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            if not _taskkill(process.pid, force=True):
                 process.kill()
-                process.wait()
+            process.wait()
+
+    def _taskkill(pid: int, *, force: bool) -> bool:
+        command = ["taskkill", "/T", "/PID", str(pid)]
+        if force:
+            command.append("/F")
+        try:
+            subprocess.run(command, capture_output=True, check=False)
+        except OSError:
+            return False
+        return True
 
 else:
 

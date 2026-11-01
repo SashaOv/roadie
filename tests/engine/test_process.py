@@ -39,8 +39,56 @@ def test_sigterm_takes_the_same_cleanup_path_as_ctrl_c() -> None:
 
 
 # (spec) Step helpers
-@posix_only
 def test_stopping_a_server_stops_its_tree_not_only_the_wrapper(tmp_path: Path) -> None:
+    """`cargo run` and `pnpm dev` hold the port in a grandchild, so a stop that
+    signals only the wrapper leaves the port held."""
+    pid_file = tmp_path / "child.pid"
+    process = processes.spawn_server(
+        (
+            sys.executable,
+            "-c",
+            (
+                "import subprocess, sys, time\n"
+                "from pathlib import Path\n"
+                f"pid_file = Path({str(pid_file)!r})\n"
+                "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
+                "pid_file.write_text(str(child.pid))\n"
+                "time.sleep(120)\n"
+            ),
+        ),
+        cwd=tmp_path,
+    )
+    child: int | None = None
+    try:
+        deadline = time.monotonic() + 10
+        while not pid_file.is_file() or not pid_file.read_text().strip():
+            if process.poll() is not None or time.monotonic() > deadline:
+                pytest.fail("child never reported its pid")
+            time.sleep(0.05)
+        child = int(pid_file.read_text().strip())
+        processes.stop_process_tree(process)
+        assert process.poll() is not None
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                os.kill(child, 0)
+            except OSError:
+                return
+            time.sleep(0.05)
+        pytest.fail(f"child {child} survived the stop")
+    finally:
+        if process.poll() is None:
+            process.kill()
+        if child is not None:
+            try:
+                os.kill(child, 9)
+            except OSError:
+                pass
+
+
+# (spec) Step helpers
+@posix_only
+def test_stopping_a_server_stops_its_forked_grandchild(tmp_path: Path) -> None:
     """`cargo run` and `pnpm dev` hold the port in a grandchild, so a stop that
     signals only the wrapper leaves the port held."""
     if os.environ.get("RUNNER_ENVIRONMENT") == "self-hosted":

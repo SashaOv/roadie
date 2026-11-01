@@ -458,8 +458,9 @@ filename.
 Stopping a server signals its process group and every descendant. On Linux
 the descendants come from `/proc`; on macOS, where `/proc` is absent, from
 `ps -A -o pid=,ppid=`. A `ps` that cannot be run leaves the group signal as
-the only one. Windows signals the process alone, which is unverified until
-the Windows CI job in the backlog.
+the only one. On Windows, Roadie runs `taskkill /T /PID <pid>`, waits up to
+10 seconds, then `taskkill /T /F /PID <pid>`; if `taskkill` cannot run, it
+kills the process alone.
 
 ### Step hooks
 
