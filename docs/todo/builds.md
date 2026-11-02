@@ -1159,6 +1159,151 @@ slices, as `_cmd` already did.
 the review fix and R14.10, passed on `ubuntu-latest`, `macos-latest` and
 `windows-latest`.
 
+## R15: A step builds a directory, and a changed directory is never replayed
+
+Status: planned, approved 2026-11-01
+
+**Improvement.** A step can build a directory, such as a bundler's output or a
+generated site, and Roadie treats that directory as one value. Roadie records
+every file under it and reuses the step only while the directory still holds
+that content. A deleted, added or edited file builds the step again, and a
+consumer reruns only when the content it reads changes; a rebuild with identical
+files leaves its consumers reusable. A directory step can publish into the
+source tree as a file step does with `output`, and under `--locked` a committed
+directory that would change fails with the paths that differ. A `Files`
+directory that git ignores fails with its path instead of fingerprinting
+nothing, so a stale build output is never reused.
+
+Today a bundler's output can only be a `Check`, whose record survives the
+output's deletion, or a `Files` directory, which is reused stale when git
+ignores it.
+
+Current state (2026-11-01, `bdbf30d`):
+
+- `PathStep` (`build/path.py`) records one file's path and SHA-256. No step kind
+  has a directory value. `File` publishes with `output` and compares a tracked
+  destination with `git hash-object` (`build/file.py`).
+- `Files` (`build/files.py`) lists a directory with `git ls-files --cached
+  --others --exclude-standard` in a work tree and walks it otherwise. Verified
+  2026-11-01 in a temporary repository: `git ls-files` lists nothing under an
+  ignored directory, so that fingerprint is the same whatever the directory
+  holds. A named file inside it is hashed directly.
+- Facts (2026-10-29) record a `Files` directory with its permissions removed
+  building without error. The spec's Files section says an unreadable directory
+  fails with `cannot read <path>: <reason>`.
+
+Decided at the checkpoint (2026-11-01):
+
+1. The kind is `Directory`, after `File` and `Binary`. Its value is the path of
+   the directory it built. Its record lists every regular file under the
+   directory, ignored or not, by path relative to the directory and SHA-256.
+   Empty directories do not count, as in `Files`. Symbolic links are not
+   followed; see R15.2.
+2. Its output fingerprint is a SHA-256 of that record, so a rebuild with
+   identical content leaves its consumers reusable.
+3. `Directory(output=...)` publishes the built directory to `output`, resolved
+   from the base directory, under the rules `File` follows. Each tracked file is
+   compared as `File` compares it, so `core.autocrlf` does not make it stale.
+   Untracked files are written. Under `--locked`, a tracked file that would
+   change fails the step with `generated directory is stale: <destination>`
+   and one line per changed path.
+4. Publishing removes a tracked file in the destination that the build no
+   longer produces; under `--locked` it fails the step as stale instead. An
+   untracked file in the destination is left alone, because it is not Roadie's
+   to delete.
+5. A `Files` directory that git ignores fails when fingerprinted, with
+   `Files(<path>): <path> is ignored by git; take the step that builds it`. A
+   named file is still hashed whether or not git ignores it, and ignored files
+   under a listed directory git does not ignore stay excluded, as now.
+
+Not in this build, and why:
+
+- `Dir(path)` input (git tree id): it needs a decision on untracked files, which
+  git's tree id leaves out and `Files` includes. It stays in the backlog.
+- `Image(tag)` output: its acceptance needs a container runtime on every
+  platform, which this build does not provide.
+- `Log(path)` output: `File` already records a written file by content, so the
+  kind would duplicate it. Removed from the backlog on 2026-11-01.
+- `Toolchain`, `NodeEnv`, `Host(label)`, `GitCommit`: separate kinds, each a
+  different input, not part of this change.
+- Enforcing declared inputs: a design of its own, with a file-access tracer.
+
+Verified before the checkpoint:
+
+- 2026-11-01, `git ls-files` under an ignored directory: lists nothing (above).
+- 2026-11-01, symbolic-link creation on the `windows-latest` runner: unconfirmed.
+  A web search found no GitHub-specific evidence. Windows allows `os.symlink`
+  only with the `SeCreateSymbolicLinkPrivilege` privilege or Developer Mode, and
+  the runner's grant is unknown. The first CI run on Windows decides; the rule
+  in the acceptance check says what follows.
+
+**Acceptance check.**
+
+- `uv run roadie checks` passes, and CI passes on `ubuntu-latest`,
+  `macos-latest` and `windows-latest`.
+- The scenario in R15.5 runs the real `roadie` command as a subprocess in a
+  temporary git project, outside the repo, and asserts on its output. It shows:
+  a first run builds the directory step and a second run builds nothing; deleting
+  or editing one output file builds it again; a rebuild with identical files
+  leaves a consumer reused; `Files('dist')` with `dist` ignored fails and names
+  `dist`; a stale tracked file under `--locked` fails and names the path, and an
+  untracked file is written.
+- Each behavior is covered by a test that fails before its patch.
+- Link tests (R15.2) run on all three platforms. If the first Windows CI run
+  shows the runner cannot create symbolic links, the executor skips those tests
+  on Windows only. Each skip carries a reason naming the missing privilege, and
+  the executor reports the skip and its CI run to the author before the build is
+  marked implemented. Linux and macOS never skip them. This skip is the one
+  accepted exception to the CI clause above.
+- The scenario uses no live or external service, so the suite and the CLI run
+  are the whole check.
+
+**Author action required at completion.** Push `main` and confirm CI passes on
+all three platforms, or authorize the executor to push. Discharges the CI
+clause.
+
+### Patches
+
+- [ ] **R15.1: Add the Directory step kind.** A `Directory` step's value is the
+  path of the directory it built, and its record is the path and the relative
+  path and SHA-256 of every file under it. It is reused only while the directory
+  holds exactly that content. A build that returns a path that is not a
+  directory fails with `<step> built <path>, which is not a directory`. Move the
+  recursive walk out of `files.py` into `path.py` so `Files` and `Directory`
+  share it. `roadie.build` exports `Directory`, its docstring specifies the kind,
+  the spec's Kinds of step names it, and the backlog's `Dir(path)` output item
+  goes. Tests cover reuse, a deleted, added or edited file rebuilding, a rebuild
+  with identical content keeping the output fingerprint, and the not-a-directory
+  failure.
+- [ ] **R15.2: Record links by target, and fail on an unreadable entry.** A
+  symbolic link is recorded by its target text and not followed, so a link to a
+  directory is not descended and a retargeted link changes the record. A file
+  the walk cannot read fails with `cannot read <path>: <reason>`, the same
+  wording as `Files`, and the `Files` case in Facts gets the same rule. The
+  spec's Files and Directory sections state both. Tests use a monkeypatched read
+  error, not file permissions, so they hold on Windows. Link tests follow the
+  Windows rule in the acceptance check.
+- [ ] **R15.3: Fail a Files directory that git ignores.** A `Files` directory
+  inside a git work tree that git ignores fails when fingerprinted, with
+  `Files(<path>): <path> is ignored by git; take the step that builds it`. The
+  spec's Files input section states it. Tests cover an ignored directory (fails),
+  an ignored named file (hashed, as now), and an ignored file under a listed
+  directory (excluded, as now).
+- [ ] **R15.4: Publish a Directory output into the source tree.**
+  `Directory(output=...)` follows the rules in item 3 above. Factor the tracked
+  comparison and `git hash-object` helpers out of `file.py` so `File` and
+  `Directory` share one implementation (DRY). Tests cover: a new destination is
+  written; an identical destination is not rewritten; under `--locked`, a
+  tracked changed file fails and names its path, and no destination file is
+  written; an untracked file is written under `--locked`; a file outside git is
+  written; a reused step does not publish; the failed step releases its built
+  directory, as `File` does. A tracked file that the build no longer produces is
+  removed, and an untracked one is kept, as item 4 states.
+- [ ] **R15.5: Run the directory scenario through the CLI.** Add the scenario from
+  the acceptance check as a test that runs `roadie` as a subprocess in a
+  temporary git project. It covers each clause the acceptance check lists and
+  fails if a clause does not hold.
+
 ## Backlog
 
 See [backlog.md](backlog.md).
