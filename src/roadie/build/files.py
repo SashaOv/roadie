@@ -124,6 +124,28 @@ def _git_list(root: Path, directory: Path, spec: str) -> list[Path]:
     return [root / name for name in names]
 
 
+def _refuse_ignored_directory(raw: str | Path, directory: Path) -> None:
+    """Fail when a directory in a work tree is ignored by git."""
+    root = _work_tree(directory)
+    if root is None:
+        return
+    relative = _relative_to_root(directory, root)
+    if relative is None or not relative.parts:
+        return
+    completed = subprocess.run(
+        ["git", "check-ignore", "-q", "--", relative.as_posix()],
+        cwd=root,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return
+    shown = raw if isinstance(raw, str) else os.fspath(raw)
+    raise RoadieError(
+        f"Files({shown}): {shown} is ignored by git; take the step that builds it"
+    )
+
+
 # (spec) Files input
 class Files(Input):
     def __init__(self, *paths: str | Path) -> None:
@@ -146,6 +168,7 @@ class Files(Input):
             if path.is_symlink():
                 entries[_entry_key(path, root)] = _file_mark(path)
             elif path.is_dir():
+                _refuse_ignored_directory(raw, path)
                 for child in listed_files(path):
                     entries[_entry_key(child, root)] = _file_mark(child)
             else:

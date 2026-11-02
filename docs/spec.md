@@ -223,7 +223,9 @@ a work tree, a directory stands for every file under it, recursively, and
 empty directories do not count. Symbolic links are not followed: a link is
 recorded by its target text, so retargeting it changes the fingerprint, and
 a link to a directory is not descended. A file named explicitly counts
-even when it is ignored. A directory or a file that cannot be read fails
+even when it is ignored. A directory inside a git work tree that git
+ignores fails with `Files(<path>): <path> is ignored by git; take the step
+that builds it`. A directory or a file that cannot be read fails
 with `cannot read <path>: <reason>`; under git, `<reason>` for a directory
 is the warning `git ls-files` prints, because git skips an unreadable
 directory and exits 0. The fingerprint covers each file's path, relative to

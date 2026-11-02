@@ -62,6 +62,44 @@ def test_directory_in_a_work_tree_skips_ignored_files_unless_named(tmp_path: Pat
 
 
 # (spec) Files input
+def test_ignored_directory_fails_and_ignored_files_stay_as_they_are(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    git_init(root)
+    (root / ".gitignore").write_text("dist/\n*.ignored\n")
+    source = root / "src"
+    source.mkdir()
+    (source / "main.py").write_text("one")
+    (source / "skip.ignored").write_text("nope")
+    dist = root / "dist"
+    dist.mkdir()
+    (dist / "out.txt").write_text("built")
+
+    listed = Files("src")
+    baseline = listed.fingerprint(root)
+    (source / "skip.ignored").write_text("changed")
+    assert listed.fingerprint(root) == baseline
+
+    named = Files("src/skip.ignored")
+    named_before = named.fingerprint(root)
+    (source / "skip.ignored").write_text("again")
+    assert named.fingerprint(root) != named_before
+
+    with pytest.raises(RoadieError) as error:
+        Files("dist").fingerprint(root)
+    assert str(error.value) == "Files(dist): dist is ignored by git; take the step that builds it"
+
+    outside = tmp_path / "loose"
+    outside.mkdir()
+    (outside / ".gitignore").write_text("dist/\n")
+    loose = outside / "dist"
+    loose.mkdir(parents=True)
+    (loose / "a.txt").write_text("a")
+    before = Files("dist").fingerprint(outside)
+    (loose / "a.txt").write_text("b")
+    assert Files("dist").fingerprint(outside) != before
+
+
+# (spec) Files input
 def test_directory_outside_a_work_tree_includes_every_file(tmp_path: Path) -> None:
     (tmp_path / ".gitignore").write_text("*.ignored\n")
     source = tmp_path / "src"

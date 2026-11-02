@@ -1284,7 +1284,7 @@ clause.
   spec's Files and Directory sections state both. Tests use a monkeypatched read
   error, not file permissions, so they hold on Windows. Link tests follow the
   Windows rule in the acceptance check.
-- [ ] **R15.3: Fail a Files directory that git ignores.** A `Files` directory
+- [x] **R15.3: Fail a Files directory that git ignores.** A `Files` directory
   inside a git work tree that git ignores fails when fingerprinted, with
   `Files(<path>): <path> is ignored by git; take the step that builds it`. The
   spec's Files input section states it. Tests cover an ignored directory (fails),
