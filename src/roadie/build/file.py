@@ -1,11 +1,12 @@
 """File steps, and publishing generated files into the source tree."""
 
 import difflib
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from roadie.build.generated import same_as_git_stores as _same_as_git_stores
+from roadie.build.generated import tracked as _tracked
 from roadie.build.path import PathStep, sha256
 from roadie.engine.errors import RoadieError
 
@@ -58,66 +59,3 @@ class File(PathStep):
 
     def output_fingerprint(self, fingerprint: str, value: Path) -> str:
         return sha256(value)
-
-
-def _repository(path: Path) -> Path | None:
-    return next(
-        (parent for parent in path.parents if (parent / ".git").exists()), None
-    )
-
-
-def _tracked(path: Path) -> bool:
-    repository = _repository(path)
-    if repository is None:
-        return False
-    completed = subprocess.run(
-        (
-            "git",
-            "--literal-pathspecs",
-            "-C",
-            str(repository),
-            "ls-files",
-            "-z",
-            "--",
-            path.relative_to(repository).as_posix(),
-        ),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise RoadieError(
-            f"cannot check whether {path} is tracked: {completed.stderr.strip()}"
-        )
-    return bool(completed.stdout)
-
-
-def _same_as_git_stores(destination: Path, built: Path) -> bool:
-    """True when git would store the same blob for both under destination's path."""
-    repository = _repository(destination)
-    if repository is None:
-        return False
-    relative = destination.relative_to(repository).as_posix()
-    return _git_hash(repository, destination, relative) == _git_hash(
-        repository, built, relative
-    )
-
-
-def _git_hash(repository: Path, file: Path, path: str) -> str | None:
-    completed = subprocess.run(
-        (
-            "git",
-            "-C",
-            str(repository),
-            "hash-object",
-            f"--path={path}",
-            "--",
-            str(file),
-        ),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        return None
-    return completed.stdout.strip() or None

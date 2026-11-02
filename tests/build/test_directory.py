@@ -11,6 +11,7 @@ from support import execute, git_init, isolate_repo
 
 from roadie.build import Directory, Step
 from roadie.engine.errors import StepFailed
+from roadie.engine.root import use_project_root
 from roadie.engine.run import Run
 
 
@@ -246,3 +247,255 @@ def test_directory_unreadable_file_fails_with_cannot_read(
     with pytest.raises(StepFailed) as error:
         execute([site])
     assert str(error.value) == f"site failed: cannot read {path}: denied"
+
+
+def _site(text: bytes = b"new\n") -> Directory:
+    @dataclass(eq=False)
+    class Site(Directory):
+        def build(self, run: Run) -> Path:
+            path = run.artifact(self, "")
+            path.mkdir(exist_ok=True)
+            (path / "out.txt").write_bytes(text)
+            return path
+
+    site = Site(output="dist")
+    site.name = site.variable = "site"
+    return site
+
+
+# (spec) Directory step
+@pytest.mark.parametrize("previous", [None, b"old\n", b"new\n"])
+def test_directory_output_is_published_and_equal_directory_is_not_rewritten(
+    previous: bytes | None,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path.resolve()
+    monkeypatch.chdir(root)
+    isolate_repo(monkeypatch, root)
+    destination = root / "dist"
+    output = destination / "out.txt"
+    if previous is not None:
+        destination.mkdir()
+        output.write_bytes(previous)
+        os.utime(output, ns=(1_000_000_000, 1_000_000_000))
+    assert execute([_site()]) == destination
+    assert output.read_bytes() == b"new\n"
+    printed = capsys.readouterr().out
+    if previous == b"new\n":
+        assert "updated" not in printed
+        assert output.stat().st_mtime_ns == 1_000_000_000
+    else:
+        assert f"updated {output}" in printed
+
+
+# (spec) Directory step
+@pytest.mark.parametrize("previous", [None, b"old\n", b"new\n"])
+@pytest.mark.parametrize("tracked", [False, True])
+def test_locked_directory_output_protects_tracked_files_and_writes_untracked_files(
+    previous: bytes | None,
+    tracked: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path.resolve()
+    monkeypatch.chdir(root)
+    isolate_repo(monkeypatch, root)
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    destination = root / "dist"
+    output = destination / "out.txt"
+    destination.mkdir()
+    output.write_bytes(previous or b"old\n")
+    if tracked:
+        subprocess.run(["git", "add", "dist/out.txt"], cwd=root, check=True)
+    if previous is None:
+        output.unlink()
+    if tracked and previous != b"new\n":
+        with pytest.raises(StepFailed) as error:
+            execute([_site()], locked=True)
+        assert str(error.value) == f"site failed: generated directory is stale: {destination}"
+        assert str(output) in capsys.readouterr().out.splitlines()
+        expected = None if previous is None else previous
+        assert (output.read_bytes() if output.exists() else None) == expected
+    else:
+        assert execute([_site()], locked=True) == destination
+        assert output.read_bytes() == b"new\n"
+
+
+# (spec) Directory step
+def test_locked_directory_names_every_changed_tracked_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path.resolve()
+    monkeypatch.chdir(root)
+    isolate_repo(monkeypatch, root)
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    destination = root / "dist"
+    destination.mkdir()
+    first = destination / "a.txt"
+    second = destination / "b.txt"
+    first.write_bytes(b"old")
+    second.write_bytes(b"old")
+    subprocess.run(["git", "add", "dist/a.txt", "dist/b.txt"], cwd=root, check=True)
+
+    @dataclass(eq=False)
+    class Site(Directory):
+        def build(self, run: Run) -> Path:
+            path = run.artifact(self, "")
+            path.mkdir(exist_ok=True)
+            (path / "a.txt").write_bytes(b"new")
+            (path / "b.txt").write_bytes(b"new")
+            return path
+
+    site = Site(output="dist")
+    site.name = site.variable = "site"
+    with pytest.raises(StepFailed) as error:
+        execute([site], locked=True)
+    assert str(error.value) == f"site failed: generated directory is stale: {destination}"
+    assert capsys.readouterr().out.splitlines()[-2:] == [str(first), str(second)]
+    assert first.read_bytes() == b"old"
+    assert second.read_bytes() == b"old"
+
+
+# (spec) Directory step
+def test_locked_tracked_directory_file_ignores_autocrlf_checkout_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path.resolve()
+    monkeypatch.chdir(root)
+    isolate_repo(monkeypatch, root)
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "dir@example.com"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "Directory"], cwd=root, check=True)
+    subprocess.run(["git", "config", "core.autocrlf", "true"], cwd=root, check=True)
+    output = root / "dist" / "out.txt"
+    output.parent.mkdir()
+    output.write_bytes(b"new\n")
+    subprocess.run(["git", "add", "dist/out.txt"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "add"], cwd=root, check=True)
+    output.unlink()
+    subprocess.run(["git", "checkout", "-q", "--", "dist/out.txt"], cwd=root, check=True)
+    assert output.read_bytes() == b"new\r\n"
+    assert execute([_site()], locked=True) == root / "dist"
+    assert output.read_bytes() == b"new\r\n"
+    assert "updated" not in capsys.readouterr().out
+
+
+# (spec) Directory step
+def test_directory_output_is_written_under_locked_outside_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    monkeypatch.chdir(root)
+    isolate_repo(monkeypatch, root)
+    destination = root / "dist"
+    assert execute([_site()], locked=True) == destination
+    assert (destination / "out.txt").read_bytes() == b"new\n"
+
+
+# (spec) Directory step
+def test_reused_directory_does_not_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    monkeypatch.chdir(root)
+    isolate_repo(monkeypatch, root)
+    published: list[Path] = []
+
+    class Site(_site().__class__):
+        def publish(self, run: Run, value: Path) -> Path:
+            published.append(value)
+            return super().publish(run, value)
+
+    site = Site(output="dist")
+    site.name = site.variable = "site"
+    execute([site])
+    execute([site])
+    assert published == [root / "target" / "roadie" / "site"]
+
+
+# (spec) Directory step
+def test_directory_output_failure_releases_the_built_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    monkeypatch.chdir(root)
+    isolate_repo(monkeypatch, root)
+    (root / "dist").write_bytes(b"blocking")
+    released: list[Path] = []
+
+    class Releasing(_site().__class__):
+        def teardown(self, value: Path) -> None:
+            released.append(value)
+
+    step = Releasing(output="dist")
+    step.name = step.variable = "site"
+    with pytest.raises(StepFailed, match="dist"):
+        execute([step])
+    with use_project_root(root):
+        assert released == [Run().artifact(step, "")]
+
+
+# (spec) Directory step
+def test_publishing_removes_a_tracked_file_and_keeps_an_untracked_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    monkeypatch.chdir(root)
+    isolate_repo(monkeypatch, root)
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    destination = root / "dist"
+    destination.mkdir()
+    (destination / "old.txt").write_bytes(b"old")
+    (destination / "keep.txt").write_bytes(b"keep")
+    (destination / "extra.txt").write_bytes(b"extra")
+    subprocess.run(["git", "add", "dist/old.txt", "dist/keep.txt"], cwd=root, check=True)
+
+    @dataclass(eq=False)
+    class Site(Directory):
+        def build(self, run: Run) -> Path:
+            path = run.artifact(self, "")
+            path.mkdir(exist_ok=True)
+            (path / "keep.txt").write_bytes(b"keep")
+            return path
+
+    site = Site(output="dist")
+    site.name = site.variable = "site"
+    assert execute([site]) == destination
+    assert not (destination / "old.txt").exists()
+    assert (destination / "keep.txt").read_bytes() == b"keep"
+    assert (destination / "extra.txt").read_bytes() == b"extra"
+
+
+# (spec) Directory step
+def test_locked_publish_keeps_a_tracked_file_the_build_no_longer_produces(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path.resolve()
+    monkeypatch.chdir(root)
+    isolate_repo(monkeypatch, root)
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    destination = root / "dist"
+    destination.mkdir()
+    old = destination / "old.txt"
+    old.write_bytes(b"old")
+    subprocess.run(["git", "add", "dist/old.txt"], cwd=root, check=True)
+
+    @dataclass(eq=False)
+    class Site(Directory):
+        def build(self, run: Run) -> Path:
+            path = run.artifact(self, "")
+            path.mkdir(exist_ok=True)
+            (path / "keep.txt").write_bytes(b"keep")
+            return path
+
+    site = Site(output="dist")
+    site.name = site.variable = "site"
+    with pytest.raises(StepFailed) as error:
+        execute([site], locked=True)
+    assert str(error.value) == f"site failed: generated directory is stale: {destination}"
+    assert str(old) in capsys.readouterr().out.splitlines()
+    assert old.read_bytes() == b"old"
+    assert not (destination / "keep.txt").exists()

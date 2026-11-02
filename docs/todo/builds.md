@@ -1290,7 +1290,7 @@ clause.
   spec's Files input section states it. Tests cover an ignored directory (fails),
   an ignored named file (hashed, as now), and an ignored file under a listed
   directory (excluded, as now).
-- [ ] **R15.4: Publish a Directory output into the source tree.**
+- [x] **R15.4: Publish a Directory output into the source tree.**
   `Directory(output=...)` follows the rules in item 3 above. Factor the tracked
   comparison and `git hash-object` helpers out of `file.py` so `File` and
   `Directory` share one implementation (DRY). Tests cover: a new destination is

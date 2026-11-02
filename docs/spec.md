@@ -332,6 +332,20 @@ fails with `<step> built <path>, which is not a directory`. The output
 fingerprint is a SHA-256 of that file record, so a rebuild with identical
 content leaves its consumers reusable.
 
+With `output`, the built directory is published to `output` resolved from
+the step's base directory, and the step's value becomes the destination.
+Each file is compared as a generated file is, so `core.autocrlf` does not
+make a tracked file look stale. An identical file is left alone. Otherwise
+Roadie writes it and prints `updated <path>`. A tracked file the build no
+longer produces is removed. An untracked file in the destination is left
+alone. A reused step does not publish.
+
+Under `--locked`, a tracked file that would change, including one that
+would be removed, is left unwritten: Roadie prints one line per changed
+path and fails with `generated directory is stale: <destination>`. Nothing
+else in the destination is written. An untracked file is written, as is a
+file outside a git work tree.
+
 ### Deferred steps
 
 A step of a deferred kind, such as a service, is built late. One that is not
