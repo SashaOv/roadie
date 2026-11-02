@@ -28,9 +28,10 @@ programs in and resolves its paths from.
 Roadie provides these kinds of step: a **file step** builds a file; a file
 that belongs in the source tree, such as committed generated code, is a
 **generated file**; a **binary step**
-builds an executable; a **service** starts a process that runs until the step
-is torn down; a **test step** builds test results; a **group** stands for
-several steps. **Step writers** add kinds of step and input in Python.
+builds an executable; a **directory step** builds a directory; a **service**
+starts a process that runs until the step is torn down; a **test step**
+builds test results; a **group** stands for several steps. **Step writers**
+add kinds of step and input in Python.
 
 ### Build files and settings
 

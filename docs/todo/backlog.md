@@ -38,8 +38,6 @@ Guidance taken out of the spec because it follows from the rules.
 
 - `Dir(path)` input: a directory's tracked content, fingerprinted by git tree
   id.
-- `Dir(path)` output: a directory a step produced, fingerprinted from its
-  content.
 - `Toolchain` input: the pinned toolchain file and the compiler version it
   resolves to.
 - `NodeEnv` input: the `package.json` files, the pnpm lockfile and the Node

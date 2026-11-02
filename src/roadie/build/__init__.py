@@ -1,5 +1,6 @@
 from roadie.build.binary import Binary
 from roadie.build.check import Check
+from roadie.build.directory import Directory
 from roadie.build.env import Env
 from roadie.build.file import File
 from roadie.build.files import Files
@@ -29,6 +30,7 @@ __all__ = [
     "CargoPackage",
     "Check",
     "Deployment",
+    "Directory",
     "Env",
     "File",
     "Files",

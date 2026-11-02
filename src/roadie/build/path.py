@@ -1,14 +1,47 @@
-"""Steps whose value is the path of a file they build."""
+"""Steps whose value is the path of a file they build, and a directory walk."""
 
 import hashlib
 from pathlib import Path
 
+from roadie.engine.errors import RoadieError
 from roadie.engine.root import from_stored, to_stored
 from roadie.engine.step import Step
 
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def walk_files(directory: Path) -> list[Path]:
+    """Every file under `directory`.
+
+    Symbolic links are followed, a directory reached by several links counts
+    once, and empty directories do not count. An unreadable directory fails
+    with `cannot read <path>: <reason>`.
+    """
+    files: list[Path] = []
+    seen: set[Path] = set()
+
+    def walk(current: Path) -> None:
+        try:
+            resolved = current.resolve()
+        except OSError as error:
+            raise RoadieError(f"cannot read {current}: {error}") from error
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        try:
+            children = list(current.iterdir())
+        except OSError as error:
+            raise RoadieError(f"cannot read {current}: {error}") from error
+        for child in children:
+            if child.is_dir():
+                walk(child)
+            else:
+                files.append(child)
+
+    walk(directory)
+    return files
 
 
 # (spec) Step kinds

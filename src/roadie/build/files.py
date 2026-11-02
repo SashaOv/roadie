@@ -5,6 +5,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from roadie.build.path import walk_files
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import Input, digest
 from roadie.engine.root import project_root
@@ -43,10 +44,10 @@ def listed_files(directory: Path) -> list[Path]:
     """
     root = _work_tree(directory)
     if root is None:
-        return _walk(directory)
+        return walk_files(directory)
     relative = _relative_to_root(directory, root)
     if relative is None:
-        return _walk(directory)
+        return walk_files(directory)
     spec = relative.as_posix() if relative.parts else "."
     return _git_list(root, directory, spec)
 
@@ -118,32 +119,6 @@ def _git_list(root: Path, directory: Path, spec: str) -> list[Path]:
         raise RoadieError(f"cannot read {directory}: {reason}")
     names = [item for item in completed.stdout.decode().split("\0") if item]
     return [root / name for name in names]
-
-
-def _walk(directory: Path) -> list[Path]:
-    files: list[Path] = []
-    seen: set[Path] = set()
-
-    def walk(current: Path) -> None:
-        try:
-            resolved = current.resolve()
-        except OSError as error:
-            raise RoadieError(f"cannot read {current}: {error}") from error
-        if resolved in seen:
-            return
-        seen.add(resolved)
-        try:
-            children = list(current.iterdir())
-        except OSError as error:
-            raise RoadieError(f"cannot read {current}: {error}") from error
-        for child in children:
-            if child.is_dir():
-                walk(child)
-            else:
-                files.append(child)
-
-    walk(directory)
-    return files
 
 
 # (spec) Files input

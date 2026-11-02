@@ -1264,7 +1264,7 @@ clause.
 
 ### Patches
 
-- [ ] **R15.1: Add the Directory step kind.** A `Directory` step's value is the
+- [x] **R15.1: Add the Directory step kind.** A `Directory` step's value is the
   path of the directory it built, and its record is the path and the relative
   path and SHA-256 of every file under it. It is reused only while the directory
   holds exactly that content. A build that returns a path that is not a
