@@ -10,6 +10,9 @@ bullet, except the input-enforcement design, which is moved whole.
   its git top level.
 - Reuse unnamed steps: an inline or loop-built step takes a derived identity,
   its consumer's variable and the path to it (`copy.source`, `checks[2]`).
+- On Ctrl-C or SIGTERM, print `interrupted: stopping <names>` once, naming
+  the running steps and live services being stopped, as a failure prints
+  `waiting for <names>`.
 - A cargo-nextest test step that reads the runner's JUnit report into
   `TestResults`.
 
