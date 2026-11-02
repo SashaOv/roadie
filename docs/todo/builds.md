@@ -971,7 +971,7 @@ dropped the backticks.
 
 ## R14: Roadie runs on Windows
 
-Status: executed, pending author verification
+Status: implemented 2026-11-01 (commits R14.*)
 
 **Improvement.** Roadie's checks pass on Windows, and CI proves it on every
 push. A second run on Windows names the run it waits for, and a step that runs
@@ -1154,6 +1154,10 @@ probe's server exits on Ctrl-C by itself, which hid a gap: on Windows a
 requested service's untimed `wait()` sees Ctrl-C only when the process exits,
 so a server that outlives Ctrl-C hung the run. Fixed in review by waiting in
 slices, as `_cmd` already did.
+
+**Final CI (2026-11-02).** CI run 41391184321 on `68ec836`, which includes
+the review fix and R14.10, passed on `ubuntu-latest`, `macos-latest` and
+`windows-latest`.
 
 ## Backlog
 
