@@ -43,35 +43,43 @@ if sys.platform == "win32":
     def signal_process_tree(
         process: subprocess.Popen[bytes], sent: signal.Signals
     ) -> None:
-        if not _taskkill(process.pid, force=False):
+        if _taskkill(process.pid, force=False) is None:
             process.send_signal(sent)
 
     def interrupt_process(process: subprocess.Popen[Any], *, session: bool) -> None:
-        if not _taskkill(process.pid, force=False):
+        if _taskkill(process.pid, force=False) is None:
             process.terminate()
 
     def stop_process_tree(process: subprocess.Popen[bytes]) -> None:
-        """taskkill /T, wait up to 10 seconds, then taskkill /T /F."""
+        """taskkill /T, wait up to 10 seconds, then taskkill /T /F.
+
+        A console program has no window to close, so taskkill without /F
+        fails for it; then /F follows at once instead of after the wait.
+        """
         if process.poll() is not None:
             return
-        if not _taskkill(process.pid, force=False):
+        status = _taskkill(process.pid, force=False)
+        if status is None:
             process.terminate()
+        elif status != 0:
+            _taskkill(process.pid, force=True)
         try:
             process.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            if not _taskkill(process.pid, force=True):
+            if _taskkill(process.pid, force=True) is None:
                 process.kill()
             process.wait()
 
-    def _taskkill(pid: int, *, force: bool) -> bool:
+    def _taskkill(pid: int, *, force: bool) -> int | None:
+        """Return taskkill's exit status, or None when it cannot run."""
         command = ["taskkill", "/T", "/PID", str(pid)]
         if force:
             command.append("/F")
         try:
-            subprocess.run(command, capture_output=True, check=False)
+            completed = subprocess.run(command, capture_output=True, check=False)
         except OSError:
-            return False
-        return True
+            return None
+        return completed.returncode
 
 else:
 

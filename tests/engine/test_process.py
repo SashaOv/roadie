@@ -66,7 +66,11 @@ def test_stopping_a_server_stops_its_tree_not_only_the_wrapper(tmp_path: Path) -
                 pytest.fail("child never reported its pid")
             time.sleep(0.05)
         child = int(pid_file.read_text().strip())
+        begin = time.monotonic()
         processes.stop_process_tree(process)
+        # A console program on Windows cannot be asked to close, only killed;
+        # the stop must not wait out the grace period for it.
+        assert time.monotonic() - begin < 5
         assert process.poll() is not None
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:

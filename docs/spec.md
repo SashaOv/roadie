@@ -459,8 +459,9 @@ Stopping a server signals its process group and every descendant. On Linux
 the descendants come from `/proc`; on macOS, where `/proc` is absent, from
 `ps -A -o pid=,ppid=`. A `ps` that cannot be run leaves the group signal as
 the only one. On Windows, Roadie runs `taskkill /T /PID <pid>`, waits up to
-10 seconds, then `taskkill /T /F /PID <pid>`; if `taskkill` cannot run, it
-kills the process alone.
+10 seconds, then `taskkill /T /F /PID <pid>`. A console program has no window
+to close, so when the first `taskkill` fails, the forced one follows at once.
+If `taskkill` cannot run, Roadie kills the process alone.
 
 ### Step hooks
 

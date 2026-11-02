@@ -173,7 +173,7 @@ def test_ctrl_c_stops_a_requested_service_that_outlives_it() -> None:
     begin = time.monotonic()
     try:
         execute([Stubborn()])
-        assert time.monotonic() - begin < 30
+        assert time.monotonic() - begin < 10
         assert started[0].process.poll() is not None
     finally:
         for server in started:

@@ -1088,6 +1088,12 @@ failure this build removes.
 - [x] **R14.9: Add a Windows CI job.** `windows-latest` joins the matrix. The
   backlog's Windows item and the spec's "unverified until the Windows CI
   job" go.
+- [x] **R14.10: Force a console program's stop at once on Windows.** Added
+  in review (author decision, 2026-11-01), amending decision 5: `taskkill`
+  without `/F` cannot close a console program ("can only be terminated
+  forcefully"), so every stop of a running server waited the full 10
+  seconds. When the first `taskkill` fails, `/F` follows at once. The
+  tree-stop test bounds the stop at 5 seconds.
 
 **Acceptance run (2026-11-01).** Commit `82269080ffcbf0e4aff5cc9c0b2154bd8a25d873`,
 tree `bbf3bac2fed8f4dda7dfb8804dc14d077d5126a2`. Host Windows-11-10.0.26200-SP0
