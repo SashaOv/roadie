@@ -1300,7 +1300,7 @@ clause.
   written; a reused step does not publish; the failed step releases its built
   directory, as `File` does. A tracked file that the build no longer produces is
   removed, and an untracked one is kept, as item 4 states.
-- [ ] **R15.5: Run the directory scenario through the CLI.** Add the scenario from
+- [x] **R15.5: Run the directory scenario through the CLI.** Add the scenario from
   the acceptance check as a test that runs `roadie` as a subprocess in a
   temporary git project. It covers each clause the acceptance check lists and
   fails if a clause does not hold.

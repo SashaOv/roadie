@@ -3,11 +3,12 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from support import execute, git_init, isolate_repo
+from support import execute, git_init, isolate_repo, write_build
 
 from roadie.build import Directory, Step
 from roadie.engine.errors import StepFailed
@@ -499,3 +500,127 @@ def test_locked_publish_keeps_a_tracked_file_the_build_no_longer_produces(
     assert str(old) in capsys.readouterr().out.splitlines()
     assert old.read_bytes() == b"old"
     assert not (destination / "keep.txt").exists()
+
+
+def _roadie() -> Path:
+    parent = Path(sys.executable).parent
+    for name in ("roadie", "roadie.exe"):
+        candidate = parent / name
+        if candidate.is_file():
+            return candidate
+    raise AssertionError(f"roadie is not installed next to {sys.executable}")
+
+
+def _project(text: str, extra: bool) -> str:
+    extra_line = '        (path / "extra.txt").write_text("extra", newline="\\n")\n' if extra else ""
+    return f"""\
+from dataclasses import dataclass
+from pathlib import Path
+from roadie.engine.run import Run
+
+@dataclass(eq=False, kw_only=True)
+class Site(Directory):
+    text: str = {text!r}
+    marker: Files = Files("marker.txt")
+
+    def build(self, run: Run) -> Path:
+        (self.base_dir / "marker.txt").read_text()
+        path = run.artifact(self, "")
+        path.mkdir(exist_ok=True)
+        (path / "out.txt").write_text(self.text, newline="\\n")
+{extra_line}        return path
+
+@dataclass(eq=False)
+class Consumer(Step[str]):
+    source: Directory
+
+    def build(self, run: Run) -> str:
+        tally = self.base_dir / "consumer-runs.txt"
+        count = int(tally.read_text()) + 1 if tally.exists() else 1
+        tally.write_text(str(count), newline="\\n")
+        return (run[self.source] / "out.txt").read_text()
+
+@dataclass(eq=False)
+class Watch(Step[None]):
+    files: Files
+
+    def build(self, run: Run) -> None:
+        return None
+
+site = Site(output="dist")
+watch = Watch(Files("dist"))
+consumer = default_step(Consumer(site))
+"""
+
+
+def _cli(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(_roadie()), "-j", "1", *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+# (spec) Directory step
+def test_directory_scenario_runs_through_the_roadie_command(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+    git_init(root)
+    (root / ".gitignore").write_text("dist/\n")
+    (root / "marker.txt").write_text("a")
+    write_build(root, _project("one", extra=False))
+    output = root / "dist" / "out.txt"
+
+    first = _cli(root)
+    assert first.returncode == 0, first.stderr
+    assert "built site" in first.stdout
+    assert "built consumer" in first.stdout
+    assert output.read_text() == "one"
+    assert (root / "consumer-runs.txt").read_text() == "1"
+
+    second = _cli(root)
+    assert second.returncode == 0, second.stderr
+    assert "reused site" in second.stdout
+    assert "reused consumer" in second.stdout
+    assert "built site" not in second.stdout
+    assert "built consumer" not in second.stdout
+
+    output.unlink()
+    deleted = _cli(root)
+    assert deleted.returncode == 0, deleted.stderr
+    assert "built site" in deleted.stdout
+    assert output.read_text() == "one"
+
+    output.write_text("hand")
+    edited = _cli(root)
+    assert edited.returncode == 0, edited.stderr
+    assert "built site" in edited.stdout
+    assert output.read_text() == "one"
+
+    (root / "marker.txt").write_text("b")
+    rebuilt = _cli(root)
+    assert rebuilt.returncode == 0, rebuilt.stderr
+    assert "built site" in rebuilt.stdout
+    assert "reused consumer" in rebuilt.stdout
+    assert (root / "consumer-runs.txt").read_text() == "1"
+
+    ignored = _cli(root, "watch")
+    assert ignored.returncode == 1
+    assert "Files(dist): dist is ignored by git; take the step that builds it" in (
+        ignored.stderr + ignored.stdout
+    )
+
+    subprocess.run(["git", "add", "-f", "dist/out.txt"], cwd=root, check=True)
+    write_build(root, _project("two", extra=False))
+    stale = _cli(root, "--locked")
+    assert stale.returncode == 1
+    assert f"generated directory is stale: {root / 'dist'}" in (stale.stderr + stale.stdout)
+    assert str(output) in stale.stdout
+    assert output.read_text() == "one"
+
+    write_build(root, _project("one", extra=True))
+    written = _cli(root, "--locked")
+    assert written.returncode == 0, written.stderr
+    assert (root / "dist" / "extra.txt").read_text() == "extra"
+    assert output.read_text() == "one"
