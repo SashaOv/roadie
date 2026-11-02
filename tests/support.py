@@ -130,7 +130,7 @@ api = Emitter()
 
 
 class _Exited:
-    def wait(self) -> int:
+    def wait(self, timeout: float | None = None) -> int:
         return 0
 
     def poll(self) -> int:
@@ -160,7 +160,7 @@ class FakeDeployment:
         self.release = threading.Event()
         self.stopped = False
 
-    def wait(self) -> int:
+    def wait(self, timeout: float | None = None) -> int:
         if self.interrupt:
             self.waiting.set()
             if not self.release.wait(5):

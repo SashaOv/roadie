@@ -31,6 +31,7 @@ from roadie.engine.process import (
     interrupt_requested,
     track_process,
     untrack_process,
+    wait_interruptibly,
 )
 
 if TYPE_CHECKING:
@@ -243,11 +244,7 @@ class Step[T](ABC):
             if process.stdout is not None:
                 readers.append(read_lines(process.stdout.readline, out, prefix, stdout_parts))
             try:
-                while process.poll() is None:
-                    try:
-                        process.wait(timeout=0.1)
-                    except subprocess.TimeoutExpired:
-                        pass
+                wait_interruptibly(process)
                 for reader in readers:
                     reader.join()
                 stdout = "".join(stdout_parts) if capture_output else None

@@ -1142,6 +1142,13 @@ From the Roadie checkout, with `$probe = "$HOME\.local\share\roadie\r14-ctrlc"`:
 Any failure: paste the console output and the `check.py` lines; it reopens
 R14 with a fix patch.
 
+**Ctrl-C result (2026-11-01).** The author ran steps 1–3; all passed, and
+step 3's prompt returned at once. Discharges the live Ctrl-C clause. The
+probe's server exits on Ctrl-C by itself, which hid a gap: on Windows a
+requested service's untimed `wait()` sees Ctrl-C only when the process exits,
+so a server that outlives Ctrl-C hung the run. Fixed in review by waiting in
+slices, as `_cmd` already did.
+
 ## Backlog
 
 See [backlog.md](backlog.md).

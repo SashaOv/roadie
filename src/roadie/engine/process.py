@@ -264,6 +264,19 @@ def interrupt_on_terminate() -> Generator[None]:
         reset_interrupt()
 
 
+def wait_interruptibly(process: subprocess.Popen[Any]) -> int:
+    """Wait for a process in short slices, so Ctrl-C ends the wait at once.
+
+    On Windows, an untimed `wait()` raises `KeyboardInterrupt` only when the
+    process exits, so a program that outlives Ctrl-C would hang the run.
+    """
+    while True:
+        try:
+            return process.wait(timeout=0.1)
+        except subprocess.TimeoutExpired:
+            pass
+
+
 def track_process(process: subprocess.Popen[Any], *, session: bool) -> None:
     """Remember a program a step is running so an interrupt can stop it."""
     with _tracked_lock:

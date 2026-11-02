@@ -144,6 +144,43 @@ def test_requested_service_stays_up_until_ctrl_c(capsys: pytest.CaptureFixture[s
 
 
 # (spec) Requested result
+def test_ctrl_c_stops_a_requested_service_that_outlives_it() -> None:
+    started: list[RunningProcess] = []
+
+    class Stubborn(Service):
+        def build(self, run: Run) -> RunningProcess:
+            port = available_port()
+            server = self._start_cmd(
+                sys.executable,
+                "-c",
+                (
+                    "import socket, time; s = socket.socket(); "
+                    f"s.bind(('127.0.0.1', {port})); s.listen(); time.sleep(60)"
+                ),
+                port=port,
+                timeout=5,
+            )
+            started.append(server)
+            return server
+
+    def interrupt() -> None:
+        while not started:
+            time.sleep(0.05)
+        time.sleep(0.5)
+        signal.raise_signal(signal.SIGINT)
+
+    threading.Thread(target=interrupt, daemon=True).start()
+    begin = time.monotonic()
+    try:
+        execute([Stubborn()])
+        assert time.monotonic() - begin < 30
+        assert started[0].process.poll() is not None
+    finally:
+        for server in started:
+            server.stop()
+
+
+# (spec) Requested result
 @posix_only
 def test_sigterm_while_a_requested_service_is_up_exits_0(capsys: pytest.CaptureFixture[str]) -> None:
     started = threading.Event()
@@ -153,7 +190,7 @@ def test_sigterm_while_a_requested_service_is_up_exits_0(capsys: pytest.CaptureF
         process = None
         stopped = False
 
-        def wait(self) -> int:
+        def wait(self, timeout: float | None = None) -> int:
             started.set()
             time.sleep(5)
             return 0

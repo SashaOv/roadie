@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from typing import ClassVar, Protocol
 
 from roadie.engine.errors import StepFailed
-from roadie.engine.process import RunningProcess
+from roadie.engine.process import RunningProcess, wait_interruptibly
 from roadie.engine.step import Step
 
 
@@ -52,7 +52,7 @@ class Service(Step[Deployment]):
         if process is None:
             return
         try:
-            status = process.wait()
+            status = wait_interruptibly(process)
         except KeyboardInterrupt:
             return
         if status == 0:
