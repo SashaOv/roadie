@@ -1,6 +1,7 @@
 """Steps whose value is the path of a file they build, and a directory walk."""
 
 import hashlib
+import os
 from pathlib import Path
 
 from roadie.engine.errors import RoadieError
@@ -12,12 +13,29 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def walk_files(directory: Path) -> list[Path]:
-    """Every file under `directory`.
+def link_target(path: Path) -> str:
+    """The target text of a symbolic link, which is not followed."""
+    try:
+        return os.readlink(path)
+    except OSError as error:
+        raise RoadieError(f"cannot read {path}: {error}") from error
 
-    Symbolic links are followed, a directory reached by several links counts
-    once, and empty directories do not count. An unreadable directory fails
-    with `cannot read <path>: <reason>`.
+
+def content_digest(path: Path) -> str:
+    """SHA-256 of a file. An unreadable file fails with `cannot read <path>: <reason>`."""
+    try:
+        return sha256(path)
+    except OSError as error:
+        raise RoadieError(f"cannot read {path}: {error}") from error
+
+
+def walk_files(directory: Path) -> list[Path]:
+    """Every file and symbolic link under `directory`.
+
+    Symbolic links are not followed, so a link to a directory is not
+    descended. A directory reached twice counts once, and empty directories
+    do not count. An unreadable directory fails with `cannot read <path>:
+    <reason>`.
     """
     files: list[Path] = []
     seen: set[Path] = set()
@@ -35,10 +53,10 @@ def walk_files(directory: Path) -> list[Path]:
         except OSError as error:
             raise RoadieError(f"cannot read {current}: {error}") from error
         for child in children:
-            if child.is_dir():
-                walk(child)
-            else:
+            if child.is_symlink() or not child.is_dir():
                 files.append(child)
+            else:
+                walk(child)
 
     walk(directory)
     return files

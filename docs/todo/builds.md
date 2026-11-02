@@ -21,8 +21,9 @@ builds, then the one planned build. Unplanned work is in
   `roadie` run).
 - 2026-10-29: `roadie <directory>` on a missing directory, and any run without
   git on `PATH`, print a `FileNotFoundError` traceback from
-  `find_project_root`. A `Files` directory with its permissions removed
-  builds without error.
+  `find_project_root`.
+- 2026-11-01: a file `Files` cannot read fails with `cannot read <path>:
+  <reason>`.
 - 2026-10-29: `uv version <v>` (uv 0.12.23) writes `[project] version` and
   creates or rewrites `uv.lock`; `uv version --frozen <v>` leaves the
   lockfile alone. `uv version --short` prints the version.
@@ -1275,7 +1276,7 @@ clause.
   goes. Tests cover reuse, a deleted, added or edited file rebuilding, a rebuild
   with identical content keeping the output fingerprint, and the not-a-directory
   failure.
-- [ ] **R15.2: Record links by target, and fail on an unreadable entry.** A
+- [x] **R15.2: Record links by target, and fail on an unreadable entry.** A
   symbolic link is recorded by its target text and not followed, so a link to a
   directory is not descended and a retargeted link changes the record. A file
   the walk cannot read fails with `cannot read <path>: <reason>`, the same

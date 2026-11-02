@@ -219,15 +219,17 @@ exist: <path>` before any step builds, also under `--dry`.
 `Files(*paths)` names files and directories, relative to the step's base
 directory. In a git work tree, a directory stands for the files
 `git ls-files --cached --others --exclude-standard` lists under it. Outside
-a work tree, a directory stands for every file under it, recursively:
-symbolic links are followed, a directory reached by several links counts
-once, and empty directories do not count. A file named explicitly counts
-even when it is ignored. A directory that cannot be read fails with
-`cannot read <path>: <reason>`; under git, `<reason>` is the warning
-`git ls-files` prints, because git skips an unreadable directory and exits
-0. The fingerprint covers each file's path, relative to the project root
-when inside it, and the SHA-256 of its content. A path that does not exist
-counts as missing, so creating it changes the fingerprint.
+a work tree, a directory stands for every file under it, recursively, and
+empty directories do not count. Symbolic links are not followed: a link is
+recorded by its target text, so retargeting it changes the fingerprint, and
+a link to a directory is not descended. A file named explicitly counts
+even when it is ignored. A directory or a file that cannot be read fails
+with `cannot read <path>: <reason>`; under git, `<reason>` for a directory
+is the warning `git ls-files` prints, because git skips an unreadable
+directory and exits 0. The fingerprint covers each file's path, relative to
+the project root when inside it, and the SHA-256 of its content, or the
+link's target text when the path is a symbolic link. A path that does not
+exist counts as missing, so creating it changes the fingerprint.
 
 ### Cargo packages
 
@@ -312,6 +314,21 @@ unwritten: Roadie prints a unified diff and fails with `generated file is
 stale: <destination>`. An untracked destination is written. If git cannot say
 whether the destination is tracked, the step fails with `cannot check
 whether <destination> is tracked: <git's message>`.
+
+### Directory step
+
+A directory step's value is the path of the directory it built. The record
+keeps that path, relative to the project root when inside it, and every
+file under the directory. A regular file is recorded by its path relative
+to the directory and the SHA-256 of its content. A symbolic link is recorded
+by its target text and is not followed, so a link to a directory is not
+descended and a retargeted link changes the record. Ignored files count;
+empty directories do not. The step is reused only while the directory still
+holds exactly that content. A file that cannot be read fails with `cannot
+read <path>: <reason>`. A build that returns a path that is not a directory
+fails with `<step> built <path>, which is not a directory`. The output
+fingerprint is a SHA-256 of that file record, so a rebuild with identical
+content leaves its consumers reusable.
 
 ### Deferred steps
 

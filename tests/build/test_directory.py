@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -152,3 +153,96 @@ def test_directory_step_rejects_a_path_that_is_not_a_directory(
     with pytest.raises(StepFailed) as error:
         execute([site])
     assert str(error.value) == f"site failed: site built {path}, which is not a directory"
+
+
+# (spec) Directory step
+def test_directory_records_a_link_by_its_target_and_does_not_follow_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    monkeypatch.chdir(root)
+    isolate_repo(monkeypatch, root)
+    built: list[str] = []
+
+    @dataclass(eq=False)
+    class Site(Directory):
+        def build(self, run: Run) -> Path:
+            built.append("site")
+            path = run.artifact(self, "")
+            path.mkdir(exist_ok=True)
+            (path / "kept.txt").write_bytes(b"kept")
+            outside = path.parent / "outside"
+            outside.mkdir(exist_ok=True)
+            secret = outside / "secret.txt"
+            if not secret.exists():
+                secret.write_bytes(b"secret")
+            nested = outside / "nested"
+            nested.mkdir(exist_ok=True)
+            inner = nested / "inner.txt"
+            if not inner.exists():
+                inner.write_bytes(b"inner")
+            for name in ("link", "dirlink"):
+                link = path / name
+                if link.is_symlink() or link.exists():
+                    link.unlink()
+            (path / "link").symlink_to(secret)
+            (path / "dirlink").symlink_to(nested, target_is_directory=True)
+            return path
+
+    site = Site()
+    site.name = site.variable = "site"
+    directory = execute([site])
+    assert isinstance(directory, Path)
+    record = json.loads((root / "target" / "roadie" / "build.record.json").read_text())
+    files = record["entries"]["site"]["value"]["files"]
+    assert [item["path"] for item in files] == ["dirlink", "kept.txt", "link"]
+    by_path = {item["path"]: item for item in files}
+    assert by_path["kept.txt"] == {"path": "kept.txt", "sha256": _sha(b"kept")}
+    assert by_path["link"] == {"path": "link", "target": os.readlink(directory / "link")}
+    assert by_path["dirlink"] == {
+        "path": "dirlink",
+        "target": os.readlink(directory / "dirlink"),
+    }
+
+    outside = directory.parent / "outside"
+    (outside / "secret.txt").write_bytes(b"changed")
+    (outside / "nested" / "inner.txt").write_bytes(b"changed")
+    execute([site])
+    assert built == ["site"]
+
+    (directory / "link").unlink()
+    (directory / "link").symlink_to(outside / "other.txt")
+    execute([site])
+    assert built == ["site", "site"]
+
+
+# (spec) Directory step
+def test_directory_unreadable_file_fails_with_cannot_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    monkeypatch.chdir(root)
+    isolate_repo(monkeypatch, root)
+
+    @dataclass(eq=False)
+    class Site(Directory):
+        def build(self, run: Run) -> Path:
+            path = run.artifact(self, "")
+            path.mkdir(exist_ok=True)
+            (path / "a.txt").write_bytes(b"a")
+            return path
+
+    site = Site()
+    site.name = site.variable = "site"
+    real = Path.read_bytes
+
+    def fail(self: Path) -> bytes:
+        if self.name == "a.txt":
+            raise OSError("denied")
+        return real(self)
+
+    monkeypatch.setattr(Path, "read_bytes", fail)
+    path = root / "target" / "roadie" / "site" / "a.txt"
+    with pytest.raises(StepFailed) as error:
+        execute([site])
+    assert str(error.value) == f"site failed: cannot read {path}: denied"

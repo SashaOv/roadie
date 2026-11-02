@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from roadie.build.path import sha256, walk_files
+from roadie.build.path import content_digest, link_target, walk_files
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import digest
 from roadie.engine.root import from_stored, to_stored
@@ -10,11 +10,13 @@ from roadie.engine.step import Step
 
 
 def _files(directory: Path) -> list[dict[str, str]]:
-    entries = [
-        {"path": path.relative_to(directory).as_posix(), "sha256": sha256(path)}
-        for path in walk_files(directory)
-        if path.is_file()
-    ]
+    entries: list[dict[str, str]] = []
+    for path in walk_files(directory):
+        relative = path.relative_to(directory).as_posix()
+        if path.is_symlink():
+            entries.append({"path": relative, "target": link_target(path)})
+        elif path.is_file():
+            entries.append({"path": relative, "sha256": content_digest(path)})
     entries.sort(key=lambda item: item["path"])
     return entries
 
@@ -24,13 +26,16 @@ class Directory(Step[Path]):
     """A step that builds a directory; its value is the directory's path.
 
     The record keeps the path, relative to the project root when inside it,
-    and the relative path and SHA-256 of every file under the directory.
-    Ignored files count; empty directories do not. The step is reused only
-    while the directory still holds exactly that content. A build that
-    returns a path that is not a directory fails with `<step> built <path>,
-    which is not a directory`. The output fingerprint is a SHA-256 of the
-    file record, so a rebuild with identical content leaves its consumers
-    reusable.
+    and every file under the directory: a regular file by its relative path
+    and SHA-256, a symbolic link by its target text. Symbolic links are not
+    followed, so a link to a directory is not descended and a retargeted
+    link changes the record. Ignored files count; empty directories do not.
+    The step is reused only while the directory still holds exactly that
+    content. A file that cannot be read fails with `cannot read <path>:
+    <reason>`. A build that returns a path that is not a directory fails
+    with `<step> built <path>, which is not a directory`. The output
+    fingerprint is a SHA-256 of the file record, so a rebuild with identical
+    content leaves its consumers reusable.
     """
 
     def encode(self, value: Path) -> object:

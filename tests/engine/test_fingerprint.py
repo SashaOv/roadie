@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from support import Value, execute, isolate_repo, needs_symlinks, write_build
+from support import Value, execute, isolate_repo, write_build
 
 import roadie.engine.fingerprint as fingerprints
 from roadie.build import Files, Input, RoadieError, Step
@@ -69,8 +69,9 @@ def test_step_fingerprint_covers_files_dependency_outputs_and_env(tmp_path: Path
 
 # (spec) Step fingerprints
 # (spec) Files input
-@needs_symlinks
-def test_step_fingerprint_follows_symlinks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_step_fingerprint_records_a_link_by_its_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = tmp_path.resolve()
     monkeypatch.chdir(root)
     with use_project_root(root):
@@ -90,6 +91,9 @@ def test_step_fingerprint_follows_symlinks(tmp_path: Path, monkeypatch: pytest.M
         step = Bundle(Files("dist"))
         original = fingerprint(step)
         outside.write_text("two")
+        assert fingerprint(step) == original
+        (bundle / "link.js").unlink()
+        (bundle / "link.js").symlink_to(root / "other.txt")
         assert fingerprint(step) != original
 
 

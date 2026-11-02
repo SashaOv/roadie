@@ -75,6 +75,73 @@ def test_directory_outside_a_work_tree_includes_every_file(tmp_path: Path) -> No
 
 
 # (spec) Files input
+def test_files_record_a_link_by_its_target_and_do_not_follow_it(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "kept.txt").write_bytes(b"kept")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_bytes(b"secret")
+    nested = outside / "nested"
+    nested.mkdir()
+    (nested / "inner.txt").write_bytes(b"inner")
+    (source / "link").symlink_to(outside / "secret.txt")
+    (source / "dirlink").symlink_to(nested, target_is_directory=True)
+    files = Files("src")
+    named = Files("src/link")
+    named_dir = Files("src/dirlink")
+    baseline = files.fingerprint(tmp_path)
+    named_baseline = named.fingerprint(tmp_path)
+    named_dir_baseline = named_dir.fingerprint(tmp_path)
+
+    (outside / "secret.txt").write_bytes(b"changed")
+    (nested / "inner.txt").write_bytes(b"changed")
+    assert files.fingerprint(tmp_path) == baseline
+    assert named.fingerprint(tmp_path) == named_baseline
+    assert named_dir.fingerprint(tmp_path) == named_dir_baseline
+
+    (source / "link").unlink()
+    (source / "link").symlink_to(outside / "other.txt")
+    assert files.fingerprint(tmp_path) != baseline
+    assert named.fingerprint(tmp_path) != named_baseline
+
+
+# (spec) Files input
+def test_files_in_a_work_tree_record_a_link_by_its_target(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    git_init(root)
+    source = root / "src"
+    source.mkdir()
+    outside = root.parent / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_bytes(b"secret")
+    (source / "link").symlink_to(outside / "secret.txt")
+    files = Files("src")
+    baseline = files.fingerprint(root)
+    (outside / "secret.txt").write_bytes(b"changed")
+    assert files.fingerprint(root) == baseline
+    (source / "link").unlink()
+    (source / "link").symlink_to(outside / "other.txt")
+    assert files.fingerprint(root) != baseline
+
+
+# (spec) Files input
+def test_unreadable_file_fails_with_cannot_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "a.txt").write_bytes(b"a")
+
+    def fail(self: Path) -> bytes:
+        raise OSError("denied")
+
+    monkeypatch.setattr(Path, "read_bytes", fail)
+    shown = Path(os.path.abspath(source / "a.txt"))
+    with pytest.raises(RoadieError) as error:
+        Files("src").fingerprint(tmp_path)
+    assert str(error.value) == f"cannot read {shown}: denied"
+
+
+# (spec) Files input
 @posix_only
 def test_unreadable_directory_outside_a_work_tree_fails_the_step(tmp_path: Path) -> None:
     hidden = tmp_path / "hidden"

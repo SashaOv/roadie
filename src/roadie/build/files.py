@@ -1,11 +1,10 @@
 """The `Files` input: files and directories a step reads."""
 
-import hashlib
 import os
 import subprocess
 from pathlib import Path
 
-from roadie.build.path import walk_files
+from roadie.build.path import content_digest, link_target, walk_files
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import Input, digest
 from roadie.engine.root import project_root
@@ -23,9 +22,11 @@ def _entry_key(path: Path, root: Path | None) -> str:
 
 
 def _file_mark(path: Path) -> str:
+    if path.is_symlink():
+        return link_target(path)
     if not path.is_file():
         return "missing"
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return content_digest(path)
 
 
 def _resolve(base_dir: Path, raw: str | Path) -> Path:
@@ -40,7 +41,9 @@ def listed_files(directory: Path) -> list[Path]:
 
     In a git work tree, the files `git ls-files --cached --others
     --exclude-standard` lists under it. Otherwise every file under it.
-    An unreadable directory fails with `cannot read <path>: <reason>`.
+    Symbolic links are not followed, so a link to a directory is not
+    descended. An unreadable directory fails with `cannot read <path>:
+    <reason>`.
     """
     root = _work_tree(directory)
     if root is None:
@@ -140,7 +143,9 @@ class Files(Input):
         entries: dict[str, str] = {}
         for raw in self.paths:
             path = _resolve(base_dir, raw)
-            if path.is_dir():
+            if path.is_symlink():
+                entries[_entry_key(path, root)] = _file_mark(path)
+            elif path.is_dir():
                 for child in listed_files(path):
                     entries[_entry_key(child, root)] = _file_mark(child)
             else:
