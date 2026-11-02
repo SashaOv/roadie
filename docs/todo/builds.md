@@ -971,7 +971,7 @@ dropped the backticks.
 
 ## R14: Roadie runs on Windows
 
-Status: planned, approved 2026-11-01
+Status: executed, pending author verification
 
 **Improvement.** Roadie's checks pass on Windows, and CI proves it on every
 push. A second run on Windows names the run it waits for, and a step that runs
@@ -1088,6 +1088,59 @@ failure this build removes.
 - [x] **R14.9: Add a Windows CI job.** `windows-latest` joins the matrix. The
   backlog's Windows item and the spec's "unverified until the Windows CI
   job" go.
+
+**Acceptance run (2026-11-01).** Commit `82269080ffcbf0e4aff5cc9c0b2154bd8a25d873`,
+tree `bbf3bac2fed8f4dda7dfb8804dc14d077d5126a2`. Host Windows-11-10.0.26200-SP0
+AMD64, uv 0.11.26, Python 3.14.3. Script
+`C:\Users\sasha\.local\share\roadie\r14-acceptance.py`, sha256
+`54da32d37a70e8812f0273a962cbda9ee0a82ec49a71722d4c9e098392f84e3b`. Log
+`C:\Users\sasha\.local\share\roadie\r14-acceptance.log`, sha256
+`c2df7ff400fb7273a279fc56fc67f8ea2030850ffae7dcdc2398ccd166f95659`.
+
+- `uv run ruff check`, `uv run mypy src build.py`, and
+  `uv run pytest -q --tb=line` on that commit: 294 passed, 16 skipped.
+- `uv run roadie checks` exited 0 (pytest reused in 4:31).
+- Adding `if sys.platform == "win32": pass` to `src/roadie/engine/run.py`
+  made `uv run ruff check` fail with TID251; the same line in
+  `src/roadie/system/` passed.
+- The interrupt tests under R14.6 cover Ctrl-C ending a run with `--jobs` 1
+  and 2 and stopping the step's program; the live Ctrl-C / `tasklist` clause
+  for a `cmd /c` wrapper was not observed in this run.
+
+**CI (2026-11-01).** `main` at R14.9 is pushed; CI run 41349688275 passed on
+`ubuntu-latest`, `macos-latest` and `windows-latest`. Discharges the CI
+clause.
+
+**Author action required at completion.** The author runs the Ctrl-C
+procedure below in a real Windows console (Windows Terminal or PowerShell,
+not through an agent, which has no console to send Ctrl-C to) and reports
+each result. Discharges the live Ctrl-C clause.
+
+The probe project is `~/.local/share/roadie/r14-ctrlc` (a git repository so
+it has a root): `build.py` defines `dev`, a `Service` that starts
+`cmd /c <venv python> server.py 8765 pids.txt`. That is three processes:
+`cmd.exe`, the venv's `python.exe` launcher and the real interpreter running
+the server. `server.py` records the last two in `pids.txt`, and `build.py`
+records `cmd.exe`. `check.py` asks `tasklist` about each PID and exits 1 if
+any is still running. A dry start, stopped with `taskkill`, showed all three
+running while up and gone afterwards.
+
+From the Roadie checkout, with `$probe = "$HOME\.local\share\roadie\r14-ctrlc"`:
+
+1. `uv run roadie -f $probe --jobs 1 dev`. Wait for `dev is up:
+   http://127.0.0.1:8765 (Ctrl-C to stop)`, then press Ctrl-C. Pass: the
+   prompt returns, and `uv run python $probe\check.py` prints `gone` for
+   `cmd.exe`, `parent` and `server` (exit 0).
+2. The same with `--jobs 2` (lines come prefixed with `[dev] `).
+3. `uv run roadie --clean`, then `uv run roadie checks`. When
+   `build pytest` appears, press Ctrl-C. Pass: the prompt returns within
+   about a second, and
+   `Get-CimInstance Win32_Process | ? CommandLine -match 'pytest|ruff check|mypy src' | select ProcessId, CommandLine`
+   prints nothing. Afterwards rerun `uv run roadie checks` to rebuild the
+   cleared state.
+
+Any failure: paste the console output and the `check.py` lines; it reopens
+R14 with a fix patch.
 
 ## Backlog
 
