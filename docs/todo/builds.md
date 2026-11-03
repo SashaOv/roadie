@@ -1162,7 +1162,7 @@ the review fix and R14.10, passed on `ubuntu-latest`, `macos-latest` and
 
 ## R15: A step builds a directory, and a changed directory is never replayed
 
-Status: executed, pending author verification
+Status: implemented 2026-11-02 (commits R15.*)
 
 **Improvement.** A step can build a directory, such as a bundler's output or a
 generated site, and Roadie treats that directory as one value. Roadie records
@@ -1337,6 +1337,10 @@ Command `uv run roadie checks`. Verdict: pass, with the CI clause open.
 CI on `ubuntu-latest`, `macos-latest`, and `windows-latest` is open. The
 author action above discharges it, and that push is also the Windows and
 Ubuntu link-test run.
+
+**Final CI (2026-11-02).** CI run 41556262112 on `29b7114` passed on
+`ubuntu-latest`, `macos-latest` and `windows-latest`. The link tests ran on all
+three; no Windows skip was needed.
 
 ## Backlog
 
