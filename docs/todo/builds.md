@@ -1162,7 +1162,7 @@ the review fix and R14.10, passed on `ubuntu-latest`, `macos-latest` and
 
 ## R15: A step builds a directory, and a changed directory is never replayed
 
-Status: planned, approved 2026-11-01
+Status: executed, pending author verification
 
 **Improvement.** A step can build a directory, such as a bundler's output or a
 generated site, and Roadie treats that directory as one value. Roadie records
@@ -1304,6 +1304,39 @@ clause.
   the acceptance check as a test that runs `roadie` as a subprocess in a
   temporary git project. It covers each clause the acceptance check lists and
   fails if a clause does not hold.
+
+**Acceptance run (2026-11-02).** Commit `facf035bc1519d82de5229df2a675d18bc4264aa`,
+tree `98925b2fc93d59dfb78653c83152a26c3250a049`. Host Darwin 25.6.0 arm64,
+uv 0.12.23, Python 3.13.13. Script
+`/Users/sasha/.local/share/roadie/r15-acceptance.py`, sha256
+`b70469d7226d36255eb59d232cb62698ef83542e2938f01666b85e10a7e89dbc`. Log
+`/Users/sasha/.local/share/roadie/r15-acceptance.log`, sha256
+`6a52c9cfbb24d6ff0d1f3e9fc3e5b05dbf595625847c0933f89925a7b62cec61`.
+Command `uv run roadie checks`. Verdict: pass, with the CI clause open.
+
+- `uv run ruff check` and `uv run mypy src build.py` passed. `uv run pytest
+  -q --tb=line`: 337 passed in 24.35s, none skipped.
+- `uv run roadie checks` exited 0. It reused ruff, mypy, pytest, and checks,
+  finishing in 0:00; those records match this tree. The direct pytest run
+  above is the observation of the suite.
+- The scenario test passed in that pytest run. It shows a first run building
+  the directory step and a second run building nothing; deleting or editing
+  one output file building it again; a rebuild with identical files leaving
+  the consumer reused; `Files('dist')` with `dist` ignored failing and naming
+  `dist`; a stale tracked file under `--locked` failing and naming the path;
+  and an untracked file being written.
+- Each of those behaviors has a test in the suite that passed. The run that
+  showed each test failing before its patch was that patch's verification,
+  not this run.
+- Link tests ran on this Darwin host, and nothing was skipped. They were not
+  run on Ubuntu or Windows. No Windows skip was added. Windows symbolic-link
+  verification waits for the author to push.
+- The scenario uses no live or external service. That clause has nothing
+  further to observe.
+
+CI on `ubuntu-latest`, `macos-latest`, and `windows-latest` is open. The
+author action above discharges it, and that push is also the Windows and
+Ubuntu link-test run.
 
 ## Backlog
 
