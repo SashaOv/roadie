@@ -378,7 +378,7 @@ def test_record_file_keeps_a_version_and_reuses_its_entries(
     built: list[str] = []
     execute([_counted("note", built)])
     record = json.loads((root / "target" / "roadie" / "build.record.json").read_text())
-    assert record["version"] == 1
+    assert record["version"] == 2
     assert set(record["entries"]) == {"note"}
     execute([_counted("note", built)])
     assert built == ["note"]
@@ -395,7 +395,7 @@ def test_record_of_another_version_is_rebuilt(
     execute([note])
     record = root / "target" / "roadie" / "build.record.json"
     payload = json.loads(record.read_text())
-    payload["version"] = 2
+    payload["version"] = 1
     record.write_text(json.dumps(payload))
     capsys.readouterr()
     execute([note])

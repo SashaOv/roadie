@@ -1453,7 +1453,7 @@ clause.
 - [x] **R16.1: Label a step in one place.** Replace the 27 copies of
   `step.name or type(step).__name__` with one `Step` helper. No behaviour
   change; the suite passes unchanged.
-- [ ] **R16.2: Sweep exactly the artifacts no record lists.** As decision 5.
+- [x] **R16.2: Sweep exactly the artifacts no record lists.** As decision 5.
   Tests: a recorded step's `.d.ts` artifact and an artifact with no suffix
   survive a due sweep; an unlisted file and a version-1 record's artifacts are
   deleted; a reused step keeps its entry's list. The spec's Records and

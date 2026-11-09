@@ -580,10 +580,12 @@ where `<directory>` is the build file's directory relative to the project
 root (none for the root itself; `_outside/<12 hex digits of a digest of the
 path>` when outside it). The file holds a format version and its entries,
 both read through a Pydantic model. Each entry maps a reusable variable to
-its step fingerprint, its output fingerprint, and its encoded value. A record
-of another version counts as empty, so its steps rebuild. A record that
-cannot be read counts as empty too, and Roadie prints `ignoring unreadable
-record <path>: <reason>`, so a damaged file never fails the run.
+its step fingerprint, its output fingerprint, its encoded value, and the
+names of the artifact files `run.artifact` returned while the step built. A
+reused step keeps those names. A record of another version counts as empty,
+so its steps rebuild. A record that cannot be read counts as empty too, and
+Roadie prints `ignoring unreadable record <path>: <reason>`, so a damaged
+file never fails the run.
 
 A successful step replaces its entry; entries of variables the build file no
 longer defines are dropped. A failed step writes nothing. The file is
@@ -593,17 +595,18 @@ written through a temporary file and renamed.
 
 `run.artifact(step, suffix)` returns
 `<root>/target/roadie/<directory>/<variable><suffix>`, with `<directory>` as
-for the step's record. A step without a variable uses
-`<ClassName>-<serial>`, a number unique to the step within the process.
+for the step's record, and notes that file's name for the step's record
+entry. A step without a variable uses `<ClassName>-<serial>`, a number
+unique to the step within the process.
 
 After a successful run, while the run still holds its lock, Roadie reads
 `<root>/target/roadie/swept`. When the timestamp is missing, Roadie writes it
 and does not sweep. When it is missing a timezone, cannot be read, or is
 older than 24 hours, Roadie sweeps and then writes it. A failed run does not
-sweep. The sweep deletes each artifact whose stem is not a variable in that
-directory's record, which includes every artifact of an unnamed step, and
-deletes each record directory whose build file no longer exists. The root
-directory is kept, along with the lock and the timestamp; only its record
-and artifacts go. A directory under `_outside` is kept, because the sweep
-cannot recover the build file's path; unreferenced artifacts there are still
-deleted.
+sweep. The sweep deletes each file in a record directory unless an entry
+lists its name, which includes every artifact of an unnamed step and every
+file of a record of another version, and deletes each record directory
+whose build file no longer exists. The root directory is kept, along with
+the lock and the timestamp; only its record and artifacts go. A directory
+under `_outside` is kept, because the sweep cannot recover the build file's
+path; a file no entry lists is still deleted.

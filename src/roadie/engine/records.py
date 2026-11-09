@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-RECORD_VERSION = 1
+RECORD_VERSION = 2
 _reported_unreadable: set[Path] = set()
 
 
@@ -16,6 +16,7 @@ class RecordEntry(BaseModel):
     fingerprint: str
     output: str
     value: Any
+    artifacts: list[str] = []
 
 
 class RecordFile(BaseModel):
@@ -67,7 +68,7 @@ _ROOT_FILES = {"run.lock", "swept"}
 
 # (spec) Artifacts
 def sweep_stale_state(root: Path) -> None:
-    """Drop unreferenced artifacts and dead record directories, at most daily."""
+    """Drop artifacts no record lists, and dead record directories, at most daily."""
     state = root / "target" / "roadie"
     if not state.is_dir():
         return
@@ -110,12 +111,14 @@ def _sweep_directory(root: Path, state: Path, directory: Path) -> None:
     if build is not None and not build.is_file():
         _drop_record(state, directory)
         return
-    names = set(load_record_at(directory / "build.record.json"))
+    listed: set[str] = set()
+    for entry in load_record_at(directory / "build.record.json").values():
+        listed.update(entry["artifacts"])
     for path in list(directory.iterdir()):
         if (
             path.is_file()
             and path.name not in {"build.record.json", *_ROOT_FILES}
-            and path.stem not in names
+            and path.name not in listed
         ):
             path.unlink()
 

@@ -49,6 +49,8 @@ class Run:
         self.locked = locked
         self.started_at = 0.0
         self.finish_reported = False
+        self._artifacts: dict[int, list[str]] = {}
+        self._artifact_lock = threading.Lock()
 
     # (spec) Step values
     def __getitem__[T](self, step: Step[T]) -> T:
@@ -64,7 +66,15 @@ class Run:
         stem = step.variable or f"{type(step).__name__}-{step.serial}"
         destination = root / "target" / "roadie" / artifact_dir(step.build_dir, root) / f"{stem}{suffix}"
         destination.parent.mkdir(parents=True, exist_ok=True)
+        with self._artifact_lock:
+            names = self._artifacts.setdefault(id(step), [])
+            if destination.name not in names:
+                names.append(destination.name)
         return destination
+
+    def _artifact_names(self, step: Step[Any]) -> list[str]:
+        with self._artifact_lock:
+            return list(self._artifacts.get(id(step), ()))
 
 
 def _report_run(run: Run) -> None:
@@ -582,7 +592,7 @@ def _kept(
             run._values[id(step)] = value
     step.report(value)
     output = _output_fingerprint(step, value, step_fingerprint)
-    _remember(step, step_fingerprint, output, value)
+    _remember(step, step_fingerprint, output, value, run=run, built=built)
     if elapsed is not None:
         report_built(step, elapsed)
     if id(step) in requested and (
@@ -709,19 +719,38 @@ def _matching(step: Step[Any], step_fingerprint: str) -> dict[str, Any] | None:
 
 
 # (spec) Records
-def _remember(step: Step[Any], step_fingerprint: str, output: str, value: object) -> None:
+def _remember(
+    step: Step[Any],
+    step_fingerprint: str,
+    output: str,
+    value: object,
+    *,
+    run: Run,
+    built: bool,
+) -> None:
     if not _reusable(step):
         return
     root = project_root()
     with _records:
         records = load_records(step.build_dir, root)
+        assert step.variable is not None
+        previous = records.get(step.variable)
         if step.build_variables is not None:
             records = {key: item for key, item in records.items() if key in step.build_variables}
-        assert step.variable is not None
+        if built:
+            artifacts = run._artifact_names(step)
+        else:
+            stored = previous.get("artifacts") if isinstance(previous, dict) else None
+            artifacts = (
+                [name for name in stored if isinstance(name, str)]
+                if isinstance(stored, list)
+                else []
+            )
         records[step.variable] = {
             "fingerprint": step_fingerprint,
             "output": output,
             "value": step.encode(value),
+            "artifacts": artifacts,
         }
         save_records(step.build_dir, records, root)
 
