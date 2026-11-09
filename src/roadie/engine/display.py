@@ -28,7 +28,7 @@ def format_elapsed(seconds: float) -> str:
 def report_built(step: Step[Any], elapsed: float) -> None:
     """Print `built <name> in <m:ss>` after a step that keeps a record builds."""
     sys.stdout.flush()
-    print(f"built {step.name or type(step).__name__} in {format_elapsed(elapsed)}", flush=True)
+    print(f"built {step._label()} in {format_elapsed(elapsed)}", flush=True)
 
 
 def _call(result: Step[Any]) -> str:

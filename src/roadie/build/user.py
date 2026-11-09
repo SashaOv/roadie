@@ -77,7 +77,7 @@ class UserTask(Tests):
         return [self.instructions, *self.checks], named
 
     def build(self, run: "Run") -> TestResults:
-        label = self.name or type(self).__name__
+        label = self._label()
         if not sys.stdin.isatty():
             raise StepFailed(label, f"{label} needs the user at a terminal")
         print(self.instructions, flush=True)
@@ -139,7 +139,7 @@ class UserApproval(Step[None]):
         return fingerprint
 
     def build(self, run: "Run") -> None:
-        label = self.name or type(self).__name__
+        label = self._label()
         if not sys.stdin.isatty():
             raise StepFailed(label, f"{label} needs the user at a terminal")
         while True:

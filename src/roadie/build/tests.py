@@ -38,7 +38,7 @@ class Tests(Step[TestResults]):
             reason = "\n".join(
                 f"{failure.name}: {failure.message}" for failure in value.failures
             )
-            raise StepFailed(self.name or type(self).__name__, reason)
+            raise StepFailed(self._label(), reason)
 
     def encode(self, value: TestResults) -> object:
         return {"messages": list(value.messages)}

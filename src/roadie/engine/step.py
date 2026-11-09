@@ -144,6 +144,10 @@ class Step[T](ABC):
     def resolve(self, path: str | Path) -> Path:
         return (self.base_dir / path).resolve()
 
+    def _label(self) -> str:
+        """Return the step's name, or its class name when it has none."""
+        return self.name or type(self).__name__
+
     def dependencies(self) -> Iterator["Step[Any]"]:
         for value in self.attributes().values():
             if isinstance(value, Step):
@@ -231,9 +235,7 @@ class Step[T](ABC):
                 text=True,
             )
         except OSError as error:
-            raise StepFailed(
-                self.name or type(self).__name__, _cannot_run(args[0], error)
-            ) from error
+            raise StepFailed(self._label(), _cannot_run(args[0], error)) from error
         track_process(process, session=False)
         readers: list[threading.Thread] = []
         stdout_parts: list[str] = []
@@ -275,7 +277,7 @@ class Step[T](ABC):
             detail = (completed.stderr or "").strip()[-2000:]
             reason = f"{shlex.join(completed.args)} exited with status {completed.returncode}"
             raise StepFailed(
-                self.name or type(self).__name__,
+                self._label(),
                 f"{reason}: {detail}" if detail else reason,
             )
 
@@ -318,9 +320,7 @@ class Step[T](ABC):
                 health_path=health_path,
             )
         except OSError as error:
-            raise StepFailed(
-                self.name or type(self).__name__, _cannot_run(args[0], error)
-            ) from error
+            raise StepFailed(self._label(), _cannot_run(args[0], error)) from error
 
     def _command_env(self, environment: Mapping[str, str] | None) -> dict[str, str]:
         # Process environment, then the step's settings, then env files.
@@ -376,5 +376,4 @@ def reject_reserved(step: Step[Any]) -> None:
 
 
 def _raise_reserved(step: Step[Any], name: str) -> None:
-    label = step.name or type(step).__name__
-    raise RoadieError(f"{label} attribute {name} is reserved by Roadie")
+    raise RoadieError(f"{step._label()} attribute {name} is reserved by Roadie")

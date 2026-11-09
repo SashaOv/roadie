@@ -1450,7 +1450,7 @@ clause.
 
 ### Patches
 
-- [ ] **R16.1: Label a step in one place.** Replace the 27 copies of
+- [x] **R16.1: Label a step in one place.** Replace the 27 copies of
   `step.name or type(step).__name__` with one `Step` helper. No behaviour
   change; the suite passes unchanged.
 - [ ] **R16.2: Sweep exactly the artifacts no record lists.** As decision 5.

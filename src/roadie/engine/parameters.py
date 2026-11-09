@@ -89,7 +89,7 @@ def bind_parameters(
     for step_id, own in values.own.items():
         step = steps_by_id[step_id]
         names = parameter_names(step)
-        label = step.name or type(step).__name__
+        label = step._label()
         for name in own:
             if name not in names:
                 if names:
@@ -101,7 +101,7 @@ def bind_parameters(
     for step in steps:
         slot: dict[int, str | None] = {}
         own = values.own.get(id(step), {})
-        label = step.name or type(step).__name__
+        label = step._label()
         for param in found[id(step)]:
             if param.name in own:
                 slot[id(param)] = own[param.name]

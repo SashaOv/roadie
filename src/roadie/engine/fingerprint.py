@@ -41,7 +41,7 @@ def _fingerprint(
         key if isinstance(key, int) else id(key): output
         for key, output in (outputs or {}).items()
     }
-    label = step.name or type(step).__name__
+    label = step._label()
     dependency_hashes: dict[str, str] = {}
     for name, dependency in dependencies.items():
         try:
@@ -82,7 +82,7 @@ def _classify(
     if _plain(value):
         attributes[name] = _attribute_text(value)
         return
-    label = step.name or type(step).__name__
+    label = step._label()
     raise RoadieError(f"{label} attribute {name} must be a plain value, an input, or a step")
 
 

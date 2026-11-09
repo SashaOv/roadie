@@ -145,6 +145,6 @@ class Directory(Step[Path]):
 
     def _listing(self, value: Path) -> list[dict[str, str]]:
         if not value.is_dir():
-            label = self.name or type(self).__name__
+            label = self._label()
             raise RoadieError(f"{label} built {value}, which is not a directory")
         return _files(value)

@@ -146,7 +146,7 @@ def _one_requested(targets: list[Step[Any]]) -> None:
             limited.append(step)
     if len(limited) < 2:
         return
-    labels = [step.name or type(step).__name__ for step in limited]
+    labels = [step._label() for step in limited]
     if len(labels) == 2:
         shown = f"{labels[0]} and {labels[1]}"
     else:

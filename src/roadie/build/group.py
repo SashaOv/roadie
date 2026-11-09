@@ -28,7 +28,7 @@ class Group(Step[tuple[object, ...]]):
     def build(self, run: "Run") -> tuple[object, ...]:
         values = tuple(run[step] for step in self.steps)
         if self.steps and all(id(step) in run.reused for step in self.steps):
-            print(f"reused {self.name or type(self).__name__}", flush=True)
+            print(f"reused {self._label()}", flush=True)
         return values
 
     def call_arguments(self) -> tuple[list[object], dict[str, object]]:

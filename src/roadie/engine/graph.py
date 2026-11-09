@@ -55,7 +55,7 @@ class Graph:
 
         def visit(result: Step[Any]) -> None:
             if any(item is result for item in visiting):
-                cycle = " -> ".join(item.name or type(item).__name__ for item in (*visiting, result))
+                cycle = " -> ".join(item._label() for item in (*visiting, result))
                 raise RoadieError(f"steps depend on each other: {cycle}")
             if id(result) in seen:
                 return
@@ -342,7 +342,7 @@ class _Included(Step[tuple[object, ...]]):
             raise RoadieError(f"{self._path} marks no default result")
         values = tuple(run[step] for step in self.steps)
         if all(id(step) in run.reused for step in self.steps):
-            print(f"reused {self.name or type(self).__name__}", flush=True)
+            print(f"reused {self._label()}", flush=True)
         return values
 
     def call_arguments(self) -> tuple[list[object], dict[str, object]]:

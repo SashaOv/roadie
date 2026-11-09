@@ -46,7 +46,7 @@ class Service(Step[Deployment]):
         return fingerprint
 
     def serve(self, value: Deployment) -> None:
-        name = self.name or type(self).__name__
+        name = self._label()
         print(f"{name} is up: {getattr(value, 'url', '')} (Ctrl-C to stop)", flush=True)
         process = getattr(value, "process", None)
         if process is None:

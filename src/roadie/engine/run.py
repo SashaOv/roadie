@@ -54,7 +54,7 @@ class Run:
     def __getitem__[T](self, step: Step[T]) -> T:
         if id(step) not in self._values:
             raise RoadieError(
-                f"{step.name or type(step).__name__} is not available in this run"
+                f"{step._label()} is not available in this run"
             )
         return cast(T, self._values[id(step)])
 
@@ -182,7 +182,7 @@ def _run_steps(
             else:
                 for step in steps:
                     if step.deferred and id(step) not in requested and id(step) not in started:
-                        name = step.name or type(step).__name__
+                        name = step._label()
                         print(f"not started {name}: no step that takes it runs", flush=True)
             if dry:
                 return None
@@ -247,7 +247,7 @@ def _schedule(
                         raise RoadieError("cannot schedule the plan")
                     return
                 running.add(id(step))
-            token = set_prefix(step.name or type(step).__name__) if jobs > 1 else None
+            token = set_prefix(step._label()) if jobs > 1 else None
             try:
                 try:
                     _execute_step(
@@ -279,11 +279,11 @@ def _schedule(
                     failure = (
                         error
                         if isinstance(error, StepFailed)
-                        else StepFailed(step.name or type(step).__name__, _reason(error))
+                        else StepFailed(step._label(), _reason(error))
                     )
                     with schedule:
                         names = [
-                            item.name or type(item).__name__
+                            item._label()
                             for item in steps
                             if id(item) in running and item is not step
                         ]
@@ -431,7 +431,7 @@ def _execute_step(
     except BaseException as error:
         if interrupt_requested():
             raise KeyboardInterrupt from error
-        raise StepFailed(step.name or type(step).__name__, _reason(error)) from error
+        raise StepFailed(step._label(), _reason(error)) from error
 
 
 def _run_one(
@@ -468,7 +468,7 @@ def _run_one(
         value = step.decode(record["value"])
         with schedule:
             run.reused.add(id(step))
-        print(f"reused {step.name or type(step).__name__}", flush=True)
+        print(f"reused {step._label()}", flush=True)
         _value, output = _kept(
             step, run, live, value, built=False,
             step_fingerprint=step_fingerprint, requested=requested, run_lock=run_lock,
@@ -652,7 +652,7 @@ def _start_one(
             raise
         except BaseException as error:
             raise StepFailed(
-                dependency.name or type(dependency).__name__, _reason(error)
+                dependency._label(), _reason(error)
             ) from error
         if elapsed is not None:
             report_built(dependency, elapsed)
@@ -748,7 +748,7 @@ def _teardown(expired: list[tuple[Step[Any], object]]) -> None:
         except Exception as error:  # noqa: BLE001 — finish releasing the other steps
             errors.append(
                 StepFailed(
-                    step.name or type(step).__name__, f"teardown: {_reason(error)}"
+                    step._label(), f"teardown: {_reason(error)}"
                 )
             )
     if errors:
