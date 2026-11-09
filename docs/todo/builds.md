@@ -1477,7 +1477,7 @@ clause.
   `Directory`, their docstrings, the spec's Generated files and Directory step
   sections, and the tests. A test shows `output=` fails as an unknown
   argument. The backlog item goes.
-- [ ] **R16.6: Name what Ctrl-C stops.** Decision 6. Tests raise the interrupt
+- [x] **R16.6: Name what Ctrl-C stops.** Decision 6. Tests raise the interrupt
   with `_thread.interrupt_main()` with `--jobs` 1 and 2 and check the line for
   a running step, a live service, and neither. The spec's Teardown section
   states the line, and the backlog item goes.

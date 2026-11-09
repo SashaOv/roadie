@@ -29,6 +29,7 @@ from roadie.engine.process import (
     interrupt_requested,
     request_stop,
     reset_interrupt,
+    set_before_stop,
 )
 from roadie.engine.records import (
     artifact_dir,
@@ -151,60 +152,94 @@ def _run_steps(
         for step in steps
     }
     guards = {id(step): threading.Lock() for step in steps if step.deferred}
-    schedule = threading.Condition()
+    schedule = threading.Condition(threading.RLock())
     reset_interrupt()
+    announced = False
+    announce_lock = threading.RLock()
+
+    def announce_interrupt() -> None:
+        nonlocal announced
+        with announce_lock:
+            if announced:
+                return
+            announced = True
+            with schedule:
+                running_now = set(running)
+                live_now = {id(step) for step in live}
+                names = [step._label() for step in steps if id(step) in running_now]
+                names.extend(
+                    step._label()
+                    for step in steps
+                    if id(step) in live_now
+                    and id(step) not in running_now
+                    and type(step).serve is not Step.serve
+                )
+        line = f"interrupted: stopping {', '.join(names)}" if names else "interrupted"
+        with unprefixed():
+            print(line, flush=True)
+
     succeeded = False
-    with run_scope(), interrupt_on_terminate():
-        bound = None
-        try:
-            bound = bind_parameters(
-                steps,
-                parameters if parameters is not None else ParameterValues({}, {}),
-            )
-            value = _schedule(
-                steps,
-                run=run,
-                live=live,
-                outputs=outputs,
-                started=started,
-                marks=marks,
-                finished=finished,
-                running=running,
-                failures=failures,
-                interrupted=interrupted,
-                prerequisites=prerequisites,
-                blockers=blockers,
-                guards=guards,
-                schedule=schedule,
-                requested=requested,
-                run_lock=run_lock,
-                dry=dry,
-                jobs=jobs,
-                leading=leading,
-            )
-            if interrupted:
-                raise KeyboardInterrupt
-            if failures:
-                raise failures[0]
-            if dry:
-                for step in steps:
-                    print(f"{format_step(step)}  # {marks[id(step)]}", flush=True)
-            else:
-                for step in steps:
-                    if step.deferred and id(step) not in requested and id(step) not in started:
-                        name = step._label()
-                        print(f"not started {name}: no step that takes it runs", flush=True)
-            if dry:
-                return None
-            succeeded = True
-        finally:
-            if not dry:
-                with schedule:
-                    expired = _take_live(run, live)
-                _teardown(expired)
-            if bound is not None:
-                reset_parameters(bound)
-            reset_interrupt()
+    previous_before_stop = set_before_stop(announce_interrupt)
+    try:
+        with run_scope(), interrupt_on_terminate():
+            bound = None
+            try:
+                bound = bind_parameters(
+                    steps,
+                    parameters if parameters is not None else ParameterValues({}, {}),
+                )
+                value = _schedule(
+                    steps,
+                    run=run,
+                    live=live,
+                    outputs=outputs,
+                    started=started,
+                    marks=marks,
+                    finished=finished,
+                    running=running,
+                    failures=failures,
+                    interrupted=interrupted,
+                    prerequisites=prerequisites,
+                    blockers=blockers,
+                    guards=guards,
+                    schedule=schedule,
+                    requested=requested,
+                    run_lock=run_lock,
+                    dry=dry,
+                    jobs=jobs,
+                    leading=leading,
+                )
+                if interrupted:
+                    raise KeyboardInterrupt
+                if failures:
+                    raise failures[0]
+                if dry:
+                    for step in steps:
+                        print(f"{format_step(step)}  # {marks[id(step)]}", flush=True)
+                else:
+                    for step in steps:
+                        if step.deferred and id(step) not in requested and id(step) not in started:
+                            name = step._label()
+                            print(f"not started {name}: no step that takes it runs", flush=True)
+                if dry:
+                    return None
+                succeeded = True
+            except KeyboardInterrupt:
+                announce_interrupt()
+                raise
+            finally:
+                if not dry:
+                    with schedule:
+                        expired = _take_live(run, live)
+                    _teardown(expired)
+                if bound is not None:
+                    reset_parameters(bound)
+                reset_interrupt()
+    except KeyboardInterrupt:
+        announce_interrupt()
+        raise
+    finally:
+        set_before_stop(previous_before_stop)
     if succeeded:
         _report_run(run)
     return value

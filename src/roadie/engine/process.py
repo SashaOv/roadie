@@ -9,7 +9,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -31,6 +31,7 @@ _inherit_stdin: ContextVar[bool] = ContextVar("roadie_inherit_stdin", default=Tr
 _tracked: dict[int, tuple[subprocess.Popen[Any], bool]] = {}
 _tracked_lock = threading.Lock()
 _interrupt = threading.Event()
+_before_stop: Callable[[], None] | None = None
 _pumps: dict[int, list[threading.Thread]] = {}
 
 _COMMAND_NAME_WORDS = 3
@@ -296,8 +297,24 @@ def reset_interrupt() -> None:
     _interrupt.clear()
 
 
+def set_before_stop(callback: Callable[[], None] | None) -> Callable[[], None] | None:
+    """Run `callback` once, before an interrupt stops anything. Returns the previous one."""
+    global _before_stop
+    previous = _before_stop
+    _before_stop = callback
+    return previous
+
+
+def note_interrupt() -> None:
+    """Tell the active run that an interrupt has arrived, before anything is stopped."""
+    callback = _before_stop
+    if callback is not None:
+        callback()
+
+
 def request_stop() -> None:
     """Ask running steps to stop, and signal the programs they are running."""
+    note_interrupt()
     _interrupt.set()
     stop_tracked_processes()
 

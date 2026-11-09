@@ -7,10 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from support import execute, write_build
+from support import FakeDeployment, execute, write_build
 
 from roadie import cli
-from roadie.build import Step
+from roadie.build import Service, Step
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.inputs import run_state
 from roadie.engine.process import available_port
@@ -489,3 +489,84 @@ def test_an_interrupt_stops_the_program_a_step_is_running(tmp_path: Path, jobs: 
         time.sleep(0.05)
     else:
         pytest.fail(f"child {pid} survived the interrupt")
+
+
+def _interrupt_when_pidfile_appears(pidfile: Path) -> None:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if pidfile.exists() and pidfile.read_text().strip():
+            _thread.interrupt_main()
+            return
+        time.sleep(0.05)
+
+
+def _sleep_until_stopped(pidfile: Path) -> str:
+    return (
+        "import os, time\n"
+        "from pathlib import Path\n"
+        f"Path({str(pidfile)!r}).write_text(str(os.getpid()))\n"
+        "time.sleep(60)\n"
+    )
+
+
+# (spec) Teardown
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_an_interrupt_names_the_running_step(
+    tmp_path: Path, jobs: int, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path.resolve()
+    pidfile = root / "child.pid"
+
+    class Note(Step[None]):
+        def build(self, run: Run) -> None:
+            self._cmd(sys.executable, "-c", _sleep_until_stopped(pidfile))
+
+    threading.Thread(target=_interrupt_when_pidfile_appears, args=(pidfile,), daemon=True).start()
+    with pytest.raises(KeyboardInterrupt):
+        execute([_named(Note(), "note")], root=root, jobs=jobs)
+    assert "interrupted: stopping note" in capsys.readouterr().out.splitlines()
+
+
+# (spec) Teardown
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_an_interrupt_names_a_live_service(
+    tmp_path: Path, jobs: int, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path.resolve()
+    pidfile = root / "child.pid"
+
+    class Api(Service):
+        def build(self, run: Run) -> FakeDeployment:
+            return FakeDeployment()
+
+    @dataclass(eq=False)
+    class Note(Step[None]):
+        api: Api
+
+        def build(self, run: Run) -> None:
+            assert run[self.api] is not None
+            self._cmd(sys.executable, "-c", _sleep_until_stopped(pidfile))
+
+    api = _named(Api(), "api")
+    note = _named(Note(api), "note")
+    threading.Thread(target=_interrupt_when_pidfile_appears, args=(pidfile,), daemon=True).start()
+    with pytest.raises(KeyboardInterrupt):
+        execute([api, note], root=root, jobs=jobs)
+    assert "interrupted: stopping note, api" in capsys.readouterr().out.splitlines()
+
+
+# (spec) Teardown
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_an_interrupt_with_nothing_running_says_interrupted(
+    tmp_path: Path, jobs: int, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class Note(Step[None]):
+        def build(self, run: Run) -> None:
+            return None
+
+        def teardown(self, value: None) -> None:
+            _thread.interrupt_main()
+
+    with pytest.raises(KeyboardInterrupt):
+        execute([_named(Note(), "note")], root=tmp_path, jobs=jobs)
+    assert "interrupted" in capsys.readouterr().out.splitlines()

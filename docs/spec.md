@@ -396,8 +396,12 @@ torn down in reverse build order. A reused step is torn down with its
 restored value.
 
 When a step fails, or the run is interrupted by Ctrl-C or SIGTERM, every step
-still live is torn down in reverse build order. Ctrl-C and SIGTERM stop the
-programs the steps are running, then wait for those steps to finish. A
+still live is torn down in reverse build order. On Ctrl-C or SIGTERM, Roadie
+prints `interrupted: stopping <names>` once, unprefixed, before stopping
+anything. `<names>` are the running steps in plan order, then the live
+services not among them. With none, it prints `interrupted`. Ctrl-C and
+SIGTERM stop the programs the steps are running, then wait for those steps
+to finish. A
 teardown that fails does not stop the others from being torn down. The first teardown failure fails
 the run with `<name> failed: teardown: <reason>` and the others are printed
 to standard error; when the run is already failing, all are printed and the

@@ -8,9 +8,6 @@ bullet, except the input-enforcement design, which is moved whole.
 - Enforce declared inputs (the design below).
 - A project-root override (`config(root=...)`) for a project whose root is not
   its git top level.
-- On Ctrl-C or SIGTERM, print `interrupted: stopping <names>` once, naming
-  the running steps and live services being stopped, as a failure prints
-  `waiting for <names>`.
 - A cargo-nextest test step that reads the runner's JUnit report into
   `TestResults`.
 - `Release` fails when a tracked version file (`Cargo.toml`, `pyproject.toml`,

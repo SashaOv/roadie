@@ -29,6 +29,7 @@ from roadie.engine.prefix import current_prefix, output_streams, read_lines
 from roadie.engine.process import (
     RunningProcess,
     interrupt_requested,
+    note_interrupt,
     track_process,
     untrack_process,
     wait_interruptibly,
@@ -263,6 +264,7 @@ class Step[T](ABC):
                 stdout = "".join(stdout_parts) if capture_output else None
                 stderr = "".join(stderr_parts)
             except KeyboardInterrupt:
+                note_interrupt()
                 if process.poll() is None:
                     process.terminate()
                 process.wait()
