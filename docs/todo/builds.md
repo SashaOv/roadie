@@ -118,6 +118,19 @@ builds, then the one planned build. Unplanned work is in
   `KeyboardInterrupt` after 10.0 s, while `join(0.1)` in a loop raised it
   after 1.0 s. With `--jobs` above 1 the main thread waits in `join()`
   (`engine/run.py`, `execute`), so Ctrl-C waits for every running step.
+- 2026-11-02: the sweep keeps an artifact when its `Path.stem` is a recorded
+  variable (`engine/records.py`, `_sweep_directory`). `Path("web_schema.d.ts").stem`
+  is `web_schema.d`, so a sweep deletes the `.d.ts` artifact of Niva's
+  recorded `web_schema` step (`jammer/ops/jammer_build/steps.py`, `WebSchema`).
+- 2026-11-02: Niva (`9cfc3d7`) binds every step it builds to a variable; its
+  `cargo_check` helper returns one `Check` over a tuple of packages, so a
+  change in one package reruns the check for all of them.
+- 2026-11-02: in a scratch pnpm workspace (pnpm 10.33.0, Node 24.12.0),
+  `pnpm ls -r --json --depth -1` lists each project's `name` and absolute
+  `path` before `pnpm install`, with no dependencies. `--depth 0
+  --only-projects` lists workspace dependencies (`"version": "link:../core"`)
+  only after install. Run outside any workspace, it prints one JSON array per
+  `package.json` found below the working directory.
 
 --- Implemented / Next ---
 
@@ -1341,6 +1354,136 @@ Ubuntu link-test run.
 **Final CI (2026-11-02).** CI run 41556262112 on `29b7114` passed on
 `ubuntu-latest`, `macos-latest` and `windows-latest`. The link tests ran on all
 three; no Windows skip was needed.
+
+## R16: Every step has a name, and Roadie's output says what matters
+
+Status: planned, approved 2026-11-08
+
+**Improvement.** A step that no variable holds, such as `Copy(Emitter())`'s
+emitter or each member of `Group(*(Check(...) for package in PACKAGES))`, takes
+a name derived from the variable that reaches it: `copy.source`, `checks[2]`.
+Roadie records and reuses it under that name, so a change in one package reruns
+that package's step alone, and output, `--dry` and failures name it instead of
+its class. The daily sweep deletes exactly the artifacts no record lists, so it
+no longer deletes a recorded step's `.d.ts` file (Facts, 2026-11-02). Ctrl-C and
+SIGTERM print `interrupted: stopping <names>`, naming what they stop. A
+program whose output a step captures as data, such as `cargo
+--message-format=json` under `RustBinary` or a `gh ... --json` query, no longer
+floods the console. `File` and `Directory` take `copy_to` instead of `output`,
+which says what the parameter does: copy the built value into the source tree.
+
+Today an unnamed step is never reused (`engine/run.py`, `_reusable` requires a
+variable), prints its class name, and keeps its artifacts under
+`<Class>-<serial>`, which the next sweep deletes. `_cmd(capture_output=True)`
+prints standard output as it arrives and also returns it, so every `RustBinary`
+build prints each cargo JSON message, and Niva's `OpenApi` prints its whole
+OpenAPI document.
+
+**Decisions for the checkpoint.**
+
+1. A derived name is the variable followed by the path to the step, read from
+   the arguments `--dry` shows: positional argument `i` adds `[i]`, keyword
+   argument `k` adds `.k`, and element `i` of a tuple keyword argument adds
+   `.k[i]`. Nested steps add a segment per level (`copy.source.source`). A
+   dependency that the arguments do not show is reached by attribute name the
+   same way. The derived name of a step in an included file takes that file's
+   `<directory>:` prefix, as its variables do. A variable is an identifier, so
+   a derived name never equals one.
+2. A step reachable from several variables takes its name from the first one
+   the build file binds, walking depth-first in argument order. Loading
+   finishes an included file first, so its steps keep its names.
+3. A derived step's record and artifacts live with the build file whose
+   variable names it. Entries for derived names count as the file's own when
+   the record drops entries the file no longer defines.
+4. Every step in a plan is reachable from a variable, so it has a name. The
+   spec's "or its class name when it has none" clauses, and the
+   `<ClassName>-<serial>` artifact stem, go. One `Step` helper gives a
+   step's label for the code paths that still meet a step outside a loaded
+   build file (unit tests).
+5. `run.artifact` notes each file name it returns, and the record entry keeps
+   those names. The sweep deletes a file in a record directory unless an entry
+   lists it. Record format version 2 replaces version 1, so every step builds
+   once after the upgrade, as the Records section states for a record of
+   another version.
+6. On Ctrl-C or SIGTERM during a run or while a result is served, Roadie prints
+   `interrupted: stopping <names>` once, unprefixed, before stopping anything.
+   `<names>` are the running steps in plan order, then the live services not
+   among them. With none, it prints `interrupted`. The exit status stays 130.
+7. `_cmd(capture_output=True)` returns standard output and does not print it.
+   `show_output=True` also prints it as it arrives, prefixed as now; `Check`
+   and `Pytest` pass both, since their program's output is what the user
+   reads. Standard error is shown as it arrives either way, and a failure
+   still quotes its last 2000 characters.
+8. `File(output=...)` and `Directory(output=...)` become `copy_to=...`, with
+   no alias: `output=` fails as an unknown argument. The attribute's name is
+   part of the fingerprint, so those steps would rebuild once; the record
+   format change of decision 5 rebuilds every step once anyway. Niva passes
+   `output=` five times (`jammer/build.py`, lines 47–52) and changes them when
+   it upgrades.
+
+Not in this build: the project-root override, the nextest step, the input kinds
+enforcement of declared inputs, and the `Release` check for unlisted version
+files, which needs its own decisions (backlog). Niva's `cargo_check` stays as
+it is; splitting it per package is Niva's change once it upgrades.
+
+**Acceptance check.**
+
+- `uv run roadie checks` passes, and CI passes on `ubuntu-latest`,
+  `macos-latest` and `windows-latest`.
+- The scenario in R16.7 runs the real `roadie` command as a subprocess in a
+  temporary git project and asserts on its output. The build file binds
+  `copy = Copy(Emit(...), copy_to=...)`, a `File` subclass, and `checks =
+  Group(*(Check(...) for each of three files))`; `Emit` captures a program's
+  output. It shows: a first run prints `build copy.source = Emit(...)` and
+  `build checks[0] = ...`; a second run reuses every step and builds nothing;
+  editing the file `checks[1]` reads builds `checks[1]` alone; `--dry` shows
+  `checks[1] = Check(...)  # run` after that edit; the program `Emit` captures
+  does not appear in the output; the copied file is written. On POSIX, SIGTERM during a
+  slow step prints `interrupted: stopping <name>` and exits 130.
+- Each behaviour change is covered by a test that fails before its patch.
+- Nothing here is a live or external effect: the suite and the CLI scenario are
+  the whole check.
+
+**Author action required at completion.** Push `main` and confirm CI passes on
+all three platforms, or authorize the executor to push. Discharges the CI
+clause.
+
+### Patches
+
+- [ ] **R16.1: Label a step in one place.** Replace the 27 copies of
+  `step.name or type(step).__name__` with one `Step` helper. No behaviour
+  change; the suite passes unchanged.
+- [ ] **R16.2: Sweep exactly the artifacts no record lists.** As decision 5.
+  Tests: a recorded step's `.d.ts` artifact and an artifact with no suffix
+  survive a due sweep; an unlisted file and a version-1 record's artifacts are
+  deleted; a reused step keeps its entry's list. The spec's Records and
+  Artifacts sections state the list and the rule.
+- [ ] **R16.3: Name inline and loop-built steps from the variable that reaches
+  them.** Decisions 1–4, in `engine/graph.py`, with reuse, records, artifacts,
+  `--dry` and every message following the name. Tests cover a keyword path, a
+  positional path, a tuple keyword path, a nested path, a step shared by two
+  variables, a step in an included file, a hidden dependency named by
+  attribute, reuse of each, and a rebuild of one loop member leaving the others
+  reused. The spec's Results section defines derived names, the class-name
+  fallbacks go, and the backlog's "Reuse unnamed steps" item and the user
+  manual's "never reused" line go.
+- [ ] **R16.4: Capture a command's output without printing it.** Decision 7.
+  Tests: a captured command's standard output is returned and not printed,
+  with `--jobs` 1 and 2; with `show_output=True` it is both; standard error
+  is shown in both modes; a failing captured command still quotes standard
+  error; a `RustBinary` build prints no cargo JSON. The `_cmd` docstring
+  states both flags, and the backlog item goes.
+- [ ] **R16.5: Rename output to copy_to.** Decision 8, in `File`,
+  `Directory`, their docstrings, the spec's Generated files and Directory step
+  sections, and the tests. A test shows `output=` fails as an unknown
+  argument. The backlog item goes.
+- [ ] **R16.6: Name what Ctrl-C stops.** Decision 6. Tests raise the interrupt
+  with `_thread.interrupt_main()` with `--jobs` 1 and 2 and check the line for
+  a running step, a live service, and neither. The spec's Teardown section
+  states the line, and the backlog item goes.
+- [ ] **R16.7: Run the naming scenario through the CLI.** Add the acceptance
+  scenario as a test that runs `roadie` as a subprocess in a temporary git
+  project. Its SIGTERM clause is marked POSIX-only with the R14 marker.
 
 ## Backlog
 
