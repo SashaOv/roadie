@@ -71,6 +71,7 @@ class Pytest(Tests):
             f"--junitxml={report}",
             *self.args,
             capture_output=True,
+            show_output=True,
             check=False,
         )
         if completed.returncode not in (0, 1):

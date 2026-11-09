@@ -86,6 +86,85 @@ def test_start_cmd_reports_early_exit() -> None:
 
 
 # (spec) Step helpers
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_captured_stdout_is_returned_and_not_printed(
+    jobs: int, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class Command(Step[str]):
+        def build(self, run: Run) -> str:
+            completed = self._cmd(
+                sys.executable,
+                "-c",
+                "import sys\nprint('secret' + '-out')\nsys.stderr.write('visible' + '-err\\n')",
+                capture_output=True,
+            )
+            return completed.stdout or ""
+
+    step = Command()
+    step.name = "tool"
+    assert execute([step], root=tmp_path, jobs=jobs) == "secret-out\n"
+    captured = capsys.readouterr()
+    shown = captured.out + captured.err
+    assert "secret-out" not in shown
+    assert "visible-err" in shown
+    if jobs > 1:
+        assert "[tool] visible-err" in shown
+
+
+# (spec) Step helpers
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_show_output_prints_captured_stdout_and_stderr(
+    jobs: int, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class Command(Step[str]):
+        def build(self, run: Run) -> str:
+            completed = self._cmd(
+                sys.executable,
+                "-c",
+                "import sys\nprint('secret' + '-out')\nsys.stderr.write('visible' + '-err\\n')",
+                capture_output=True,
+                show_output=True,
+            )
+            return completed.stdout or ""
+
+    step = Command()
+    step.name = "tool"
+    assert execute([step], root=tmp_path, jobs=jobs) == "secret-out\n"
+    shown = capsys.readouterr()
+    output = shown.out + shown.err
+    assert "secret-out" in output
+    assert "visible-err" in output
+    if jobs > 1:
+        assert "[tool] secret-out" in output
+        assert "[tool] visible-err" in output
+
+
+# (spec) Step helpers
+def test_a_failing_captured_command_quotes_stderr(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class Command(Step[None]):
+        def build(self, run: Run) -> None:
+            self._cmd(
+                sys.executable,
+                "-c",
+                "import sys\nprint('hidden' + '-out')\nsys.stderr.write('boom' + '-err')\nsys.exit(3)",
+                capture_output=True,
+            )
+
+    step = Command()
+    step.name = "tool"
+    with pytest.raises(StepFailed, match="boom-err") as error:
+        execute([step], root=tmp_path)
+    message = str(error.value)
+    assert "exited with status 3" in message
+    assert "hidden-out" not in message
+    shown = capsys.readouterr()
+    assert "boom-err" in shown.out + shown.err
+    assert "hidden-out" not in shown.out + shown.err
+
+
+# (spec) Step helpers
 def test_commands_run_in_the_steps_base_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     isolate_repo(monkeypatch, tmp_path)

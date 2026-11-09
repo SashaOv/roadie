@@ -1,5 +1,8 @@
 import json
+import os
+import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -308,6 +311,50 @@ def test_rust_binary_picks_executable_from_captured_cargo_json(
     assert captured == [
         ("cargo", "build", "--locked", "-p", package, "--message-format=json")
     ]
+
+
+# (spec) Step kinds
+# (spec) Step helpers
+def test_a_rust_binary_build_prints_no_cargo_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    executable = root / "app"
+    executable.write_bytes(b"binary")
+    executable.chmod(0o755)
+    line = json.dumps(
+        {
+            "reason": "compiler-artifact",
+            "package_id": "path+file:///tmp/app#app@0.1.0",
+            "target": {"kind": ["bin"]},
+            "executable": str(executable),
+        }
+    )
+    script = root / "emit_json.py"
+    script.write_text(f"print({line!r})\n")
+    bin_dir = root / "bin"
+    bin_dir.mkdir()
+    if is_posix:
+        launcher = bin_dir / "cargo"
+        launcher.write_text(
+            "#!/bin/sh\n"
+            f"exec {shlex.quote(sys.executable)} {shlex.quote(str(script))}\n"
+        )
+        launcher.chmod(0o755)
+    else:
+        launcher = bin_dir / "cargo.cmd"
+        launcher.write_text(f'@"{sys.executable}" "{script}" %*\r\n')
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
+    monkeypatch.setattr(
+        "roadie.build.rust.CargoPackage.fingerprint",
+        lambda self, base_dir: "package:app",
+    )
+    step = RustBinary(CargoPackage("app"))
+    step.name = step.variable = "app"
+    copied = execute([step], root=root)
+    assert copied.read_bytes() == b"binary"
+    assert "compiler-artifact" not in capsys.readouterr().out
 
 
 # (spec) Step kinds

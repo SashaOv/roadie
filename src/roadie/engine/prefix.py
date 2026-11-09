@@ -111,9 +111,10 @@ def read_lines(
     prefix: str,
     parts: list[str],
     *,
+    echo: bool = True,
     daemon: bool = False,
 ) -> threading.Thread:
-    """Append each line from `pull` to `parts`, and print it live on `stream`."""
+    """Append each line from `pull` to `parts`, and print it live unless `echo` is false."""
     sink = current_sink()
 
     def run() -> None:
@@ -122,6 +123,8 @@ def read_lines(
             if line == "":
                 return
             parts.append(line)
+            if not echo:
+                continue
             if sink is not None:
                 sink.emit(stream, prefix, line)
             else:

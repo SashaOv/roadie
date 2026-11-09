@@ -1467,7 +1467,7 @@ clause.
   reused. The spec's Results section defines derived names, the class-name
   fallbacks go, and the backlog's "Reuse unnamed steps" item and the user
   manual's "never reused" line go.
-- [ ] **R16.4: Capture a command's output without printing it.** Decision 7.
+- [x] **R16.4: Capture a command's output without printing it.** Decision 7.
   Tests: a captured command's standard output is returned and not printed,
   with `--jobs` 1 and 2; with `show_output=True` it is both; standard error
   is shown in both modes; a failing captured command still quotes standard

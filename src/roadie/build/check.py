@@ -39,7 +39,9 @@ class Check(Tests):
         )
 
     def build(self, run: "Run") -> TestResults:
-        completed = self._cmd(*self.command, capture_output=True, check=False)
+        completed = self._cmd(
+            *self.command, capture_output=True, show_output=True, check=False
+        )
         if completed.returncode == 0:
             return TestResults()
         output = f"{completed.stdout or ''}{completed.stderr or ''}"

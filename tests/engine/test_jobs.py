@@ -85,7 +85,7 @@ def test_parallel_output_prefixes_each_line(tmp_path: Path, capsys: pytest.Captu
 
 
 # (spec) Parallel steps
-def test_captured_output_is_prefixed_and_returned(
+def test_captured_output_is_returned_and_not_printed(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     class Note(Step[str]):
@@ -93,17 +93,17 @@ def test_captured_output_is_prefixed_and_returned(
             completed = self._cmd(
                 sys.executable,
                 "-c",
-                "print('from-prog', flush=True)",
+                "print('from' + '-prog', flush=True)",
                 capture_output=True,
             )
             return completed.stdout or ""
 
     assert execute([_named(Note(), "note")], root=tmp_path, jobs=2) == "from-prog\n"
-    assert "[note] from-prog" in capsys.readouterr().out.splitlines()
+    assert "from-prog" not in capsys.readouterr().out
 
 
 # (spec) Parallel steps
-def test_one_job_shows_program_output_unprefixed(
+def test_one_job_shows_stderr_unprefixed_and_hides_captured_stdout(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     class Note(Step[str]):
@@ -111,14 +111,14 @@ def test_one_job_shows_program_output_unprefixed(
             completed = self._cmd(
                 sys.executable,
                 "-c",
-                "import sys; print('from-prog', flush=True); print('warn', file=sys.stderr)",
+                "import sys; print('from' + '-prog', flush=True); print('warn', file=sys.stderr)",
                 capture_output=True,
             )
             return completed.stdout or ""
 
     assert execute([_named(Note(), "note")], root=tmp_path, jobs=1) == "from-prog\n"
     shown = capsys.readouterr()
-    assert "from-prog" in shown.out.splitlines()
+    assert "from-prog" not in shown.out
     assert shown.err.splitlines() == ["warn"]
 
 

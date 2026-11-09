@@ -205,6 +205,7 @@ class Step[T](ABC):
         self,
         *args: str,
         capture_output: bool = False,
+        show_output: bool = False,
         environment: Mapping[str, str] | None = None,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
@@ -212,15 +213,17 @@ class Step[T](ABC):
 
         Its environment is the process environment, then `environment`, then
         the step's environment files, then `ROADIE_RUN_PID` set to this
-        process's PID. It inherits standard input. Standard output and
-        standard error are shown as they arrive, each line prefixed with
-        `[<name>] ` when the run uses more than one job. With
-        `capture_output`, standard output is also returned, unprefixed.
-        Unless `check` is false, a non-zero exit fails the step with
-        `<name> failed: <command> exited with status <n>: <last 2000
-        characters of standard error>`. A command that cannot start fails
-        with `<name> failed: cannot run <program>: <reason>`, where
-        `<reason>` is the error's text without its filename.
+        process's PID. It inherits standard input. Standard error is shown
+        as it arrives, each line prefixed with `[<name>] ` when the run uses
+        more than one job. Standard output is shown the same way, unless
+        `capture_output` is set: then it is returned, unprefixed, and not
+        printed. `show_output` prints that captured output as it arrives,
+        with the same prefix, and still returns it. Unless `check` is false,
+        a non-zero exit fails the step with `<name> failed: <command>
+        exited with status <n>: <last 2000 characters of standard error>`.
+        A command that cannot start fails with `<name> failed: cannot run
+        <program>: <reason>`, where `<reason>` is the error's text without
+        its filename.
         """
         print("+", shlex.join(args), flush=True)
         prefix = current_prefix()
@@ -244,7 +247,15 @@ class Step[T](ABC):
             assert process.stderr is not None
             readers.append(read_lines(process.stderr.readline, err, prefix, stderr_parts))
             if process.stdout is not None:
-                readers.append(read_lines(process.stdout.readline, out, prefix, stdout_parts))
+                readers.append(
+                    read_lines(
+                        process.stdout.readline,
+                        out,
+                        prefix,
+                        stdout_parts,
+                        echo=not capture_output or show_output,
+                    )
+                )
             try:
                 wait_interruptibly(process)
                 for reader in readers:
