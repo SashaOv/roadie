@@ -15,6 +15,13 @@ bullet, except the input-enforcement design, which is moved whole.
   `waiting for <names>`.
 - A cargo-nextest test step that reads the runner's JUnit report into
   `TestResults`.
+- Rename `output` to `copy_to` on `File` and `Directory`: the parameter
+  copies the built value into the source tree.
+- Let `_cmd(capture_output=True)` return standard output without printing it,
+  or cap the printed length: a step that reads `gh run view --json jobs`
+  prints the whole JSON as one line of thousands of characters.
+- `Release` fails when a tracked version file (`Cargo.toml`, `pyproject.toml`,
+  `package.json`) with its own static version is not among its sources.
 
 ## User manual
 
