@@ -1,9 +1,20 @@
 import json
+import signal
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
-from support import execute, isolate_repo, plan_names, run_cli, write_build
+from support import (
+    execute,
+    git_init,
+    isolate_repo,
+    plan_names,
+    posix_only,
+    run_cli,
+    write_build,
+)
 
 from roadie.engine.graph import load
 
@@ -196,3 +207,136 @@ def test_rebuilding_one_loop_member_reuses_the_others(
     assert "reused checks[2]" in output
     assert "build checks[0]" not in output
     assert "build checks[2]" not in output
+
+
+def _roadie() -> Path:
+    parent = Path(sys.executable).parent
+    for name in ("roadie", "roadie.exe"):
+        candidate = parent / name
+        if candidate.is_file():
+            return candidate
+    raise AssertionError(f"roadie is not installed next to {sys.executable}")
+
+
+def _scenario_source(ready: Path) -> str:
+    program = repr(sys.executable)
+    pause = repr(
+        "from pathlib import Path; import time; "
+        f"Path({str(ready)!r}).write_text('ready'); time.sleep(60)"
+    )
+    return f"""\
+from dataclasses import dataclass
+
+@dataclass(eq=False)
+class Emit(Step[str]):
+    def build(self, run):
+        completed = self._cmd({program}, "-c", "print('secret' + '-out')", capture_output=True)
+        return (completed.stdout or "").strip()
+
+@dataclass(eq=False)
+class Copy(File):
+    source: Step
+    def build(self, run):
+        path = run.artifact(self, ".txt")
+        path.write_text(run[self.source] + "\\n")
+        return path
+
+@dataclass(eq=False)
+class Slow(Step[None]):
+    def build(self, run):
+        self._cmd({program}, "-c", {pause})
+
+copy = Copy(Emit(), copy_to="copied.txt")
+checks = Group(*(
+    Check({program}, "-c", "pass", inputs=Files(name))
+    for name in ("a.txt", "b.txt", "c.txt")
+))
+slow = Slow()
+"""
+
+
+def _project_scenario(root: Path) -> Path:
+    git_init(root)
+    for name in ("a.txt", "b.txt", "c.txt"):
+        (root / name).write_text(name + "\n")
+    write_build(root, _scenario_source(root / "slow.ready"))
+    return root / "slow.ready"
+
+
+def _cli(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(_roadie()), "--jobs", "1", "-f", str(root), *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+# (spec) Results
+# (spec) Reusing a step
+# (spec) Dry run output
+# (spec) Generated files
+def test_the_naming_scenario_runs_through_the_roadie_command(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+    _project_scenario(root)
+    first = _cli(root, "copy", "checks")
+    assert first.returncode == 0, first.stderr
+    assert "build copy.source = Emit()" in first.stdout
+    assert "build checks[0] = Check(" in first.stdout
+    assert "secret-out" not in first.stdout
+    assert "secret-out" not in first.stderr
+    assert (root / "copied.txt").read_text() == "secret-out\n"
+
+    second = _cli(root, "copy", "checks")
+    assert second.returncode == 0, second.stderr
+    assert not any(line.startswith("build ") for line in second.stdout.splitlines())
+    for name in ("copy.source", "copy", "checks[0]", "checks[1]", "checks[2]", "checks"):
+        assert f"reused {name}" in second.stdout
+
+    (root / "b.txt").write_text("changed\n")
+    dry = _cli(root, "--dry", "copy", "checks")
+    assert dry.returncode == 0, dry.stderr
+    assert any(
+        line.startswith("checks[1] = Check(") and line.endswith("  # run")
+        for line in dry.stdout.splitlines()
+    )
+
+    edited = _cli(root, "copy", "checks")
+    assert edited.returncode == 0, edited.stderr
+    assert "build checks[1] = Check(" in edited.stdout
+    assert "build checks[0]" not in edited.stdout
+    assert "build checks[2]" not in edited.stdout
+    assert "build copy" not in edited.stdout
+    assert "reused checks[0]" in edited.stdout
+    assert "reused checks[2]" in edited.stdout
+
+
+# (spec) Teardown
+@posix_only
+def test_sigterm_during_a_slow_step_names_it_and_exits_130(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+    ready = _project_scenario(root)
+    process = subprocess.Popen(
+        [str(_roadie()), "--jobs", "1", "-f", str(root), "slow"],
+        cwd=root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not ready.is_file():
+            if process.poll() is not None:
+                out, err = process.communicate()
+                pytest.fail(f"slow step exited early ({process.returncode}): {out}{err}")
+            time.sleep(0.05)
+        assert ready.is_file()
+        process.send_signal(signal.SIGTERM)
+        out, err = process.communicate(timeout=10)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate()
+    assert process.returncode == 130, err
+    assert "interrupted: stopping slow" in out.splitlines()

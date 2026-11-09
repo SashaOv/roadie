@@ -1481,7 +1481,7 @@ clause.
   with `_thread.interrupt_main()` with `--jobs` 1 and 2 and check the line for
   a running step, a live service, and neither. The spec's Teardown section
   states the line, and the backlog item goes.
-- [ ] **R16.7: Run the naming scenario through the CLI.** Add the acceptance
+- [x] **R16.7: Run the naming scenario through the CLI.** Add the acceptance
   scenario as a test that runs `roadie` as a subprocess in a temporary git
   project. Its SIGTERM clause is marked POSIX-only with the R14 marker.
 
