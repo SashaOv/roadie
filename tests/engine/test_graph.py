@@ -42,7 +42,7 @@ def test_default_result_is_the_last_step_called_not_the_last_variable(
     graph = load(tmp_path)
 
     assert graph.result().package == CargoPackage("second")
-    assert plan_names(tmp_path, "api") == [None, "api"]
+    assert plan_names(tmp_path, "api") == ["api[0]", "api"]
 
 
 # (spec) Command line
@@ -166,7 +166,7 @@ def test_include_names_results_by_directory_and_loads_each_file_once(
         ")\n",
     )
 
-    assert plan_names(tmp_path) == ["module:server", "module:api", None, "fuzzed"]
+    assert plan_names(tmp_path) == ["module:server", "module:api", "fuzzed[1]", "fuzzed"]
 
 
 # (spec) Including build files

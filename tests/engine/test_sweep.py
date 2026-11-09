@@ -90,7 +90,7 @@ def test_sweep_drops_unnamed_artifacts_and_dead_build_directories(
     (outside / "orphan.txt").write_text("drop")
 
     execute([_note(), unnamed])
-    assert not (state / f"Scratch-{unnamed.serial}.txt").exists()
+    assert not (state / "scratch.txt").exists()
     assert not services.exists()
     assert (outside / "kept.txt").is_file()
     assert not (outside / "orphan.txt").exists()

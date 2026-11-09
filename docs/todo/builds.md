@@ -1458,7 +1458,7 @@ clause.
   survive a due sweep; an unlisted file and a version-1 record's artifacts are
   deleted; a reused step keeps its entry's list. The spec's Records and
   Artifacts sections state the list and the rule.
-- [ ] **R16.3: Name inline and loop-built steps from the variable that reaches
+- [x] **R16.3: Name inline and loop-built steps from the variable that reaches
   them.** Decisions 1–4, in `engine/graph.py`, with reuse, records, artifacts,
   `--dry` and every message following the name. Tests cover a keyword path, a
   positional path, a tuple keyword path, a nested path, a step shared by two

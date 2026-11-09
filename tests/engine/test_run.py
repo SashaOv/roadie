@@ -188,7 +188,7 @@ def test_run_artifact_uses_the_build_directory_and_variable(tmp_path: Path) -> N
         assert len(copied.parent.name) == 12
         assert copied.name == "api.yaml"
         unnamed = Value("loose")
-        assert run.artifact(unnamed, ".txt") == tmp_path / "target" / "roadie" / f"Value-{unnamed.serial}.txt"
+        assert run.artifact(unnamed, ".txt") == tmp_path / "target" / "roadie" / "Value.txt"
 
 
 # (spec) Step values
@@ -207,14 +207,15 @@ def test_run_releases_values_at_end() -> None:
 
 
 # (spec) Artifacts
-def test_unnamed_steps_of_one_class_get_distinct_artifacts(tmp_path: Path) -> None:
+def test_an_artifact_is_named_by_the_step_variable(tmp_path: Path) -> None:
     with use_project_root(tmp_path):
         first, second = Value("first"), Value("second")
+        first.variable = "first"
+        second.variable = "second"
         run = Run()
         one, two = run.artifact(first, ".txt"), run.artifact(second, ".txt")
-        assert one != two
-        assert one.name == f"Value-{first.serial}.txt"
-        assert two.name == f"Value-{second.serial}.txt"
+        assert one.name == "first.txt"
+        assert two.name == "second.txt"
 
 
 # (spec) Reusing a step

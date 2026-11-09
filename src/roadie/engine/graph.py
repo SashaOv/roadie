@@ -211,14 +211,7 @@ def _load(session: _Session, build_file: Path) -> Graph:
         raise RoadieError(f"{build_file} defines no results")
 
     prefix = _prefix(session.root, directory)
-    names = frozenset(results)
-    for name, result in results.items():
-        # An included step keeps the variable from the file that defined it.
-        if result.variable is None:
-            result.variable = name
-            result.build_variables = names
-        if result.name is None:
-            result.name = f"{prefix}{name}"
+    _name_steps(results, prefix=prefix, directory=directory)
     graph = Graph(
         path=build_file,
         results=results,
@@ -347,6 +340,76 @@ class _Included(Step[tuple[object, ...]]):
 
     def call_arguments(self) -> tuple[list[object], dict[str, object]]:
         return list(self.steps), {}
+
+
+def _name_steps(
+    results: Mapping[str, Step[Any]],
+    *,
+    prefix: str,
+    directory: Path,
+) -> None:
+    """Name every step a result reaches, and keep derived names with this file."""
+    owned: list[Step[Any]] = []
+    owned_ids: set[int] = set()
+    names: set[str] = set(results)
+
+    def own(step: Step[Any], variable: str) -> None:
+        step.variable = variable
+        step.name = f"{prefix}{variable}"
+        step.build_dir = directory
+        if id(step) not in owned_ids:
+            owned.append(step)
+            owned_ids.add(id(step))
+        names.add(variable)
+
+    for variable, result in results.items():
+        # An included step keeps the name from the file that defined it.
+        if result.variable is None:
+            own(result, variable)
+        elif result.name is None:
+            result.name = f"{prefix}{variable}"
+
+    seen: set[int] = set()
+
+    def walk(step: Step[Any]) -> None:
+        if id(step) in seen or step.variable is None:
+            return
+        seen.add(id(step))
+        base = step.variable
+        shown: set[int] = set()
+        positional, named = step.call_arguments()
+        for index, value in enumerate(positional):
+            _reach(value, f"{base}[{index}]", shown)
+        for key, value in named.items():
+            if isinstance(value, tuple):
+                for index, item in enumerate(value):
+                    _reach(item, f"{base}.{key}[{index}]", shown)
+            else:
+                _reach(value, f"{base}.{key}", shown)
+        for key, value in step.attributes().items():
+            if isinstance(value, tuple):
+                for index, item in enumerate(value):
+                    if isinstance(item, Step) and id(item) not in shown:
+                        _reach(item, f"{base}.{key}[{index}]", shown)
+            elif isinstance(value, Step) and id(value) not in shown:
+                _reach(value, f"{base}.{key}", shown)
+
+    def _reach(value: object, path: str, shown: set[int]) -> None:
+        if not isinstance(value, Step):
+            return
+        shown.add(id(value))
+        if value.name is None:
+            own(value, path)
+        if id(value) in owned_ids:
+            walk(value)
+
+    for result in results.values():
+        if id(result) in owned_ids:
+            walk(result)
+
+    bound = frozenset(names)
+    for step in owned:
+        step.build_variables = bound
 
 
 def _prefix(root: Path, directory: Path) -> str:

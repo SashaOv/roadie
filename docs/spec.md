@@ -167,6 +167,20 @@ A build file that binds no step fails with `<path> defines no results`.
 
 A result's name is the name of the **variable** the result is assigned to. When used in messages, the name is prefixed with `<directory>:` if the build file is not the root build file. If relative file paths used in the build file (most cases), they are resolved relative to the build file in which they are resolved.
 
+A step that no variable holds takes a derived name from the first variable
+that reaches it. The build file's variables are walked in the order it binds
+them, depth-first in the order of the arguments `--dry` shows. Positional
+argument `i` adds `[i]`, keyword argument `k` adds `.k`, and element `i` of
+a tuple keyword argument adds `.k[i]`. A nested step adds a segment per
+level (`copy.source.source`). A dependency the arguments do not show is
+reached by its attribute name the same way. A later variable leaves the
+name the first one gave. A step in an included file keeps the name that
+file gave it, including the `<directory>:` prefix. A derived name is not an
+identifier, so it never equals a variable. The step's record and artifacts
+live with the build file whose variable names it, and a derived name counts
+as one of that file's entries when a record drops entries the file no
+longer defines.
+
 ### Including build files
 
 `include(path)` loads a build file and returns a step that stands for that
@@ -370,8 +384,8 @@ A run builds up to `--jobs` steps at once. `--jobs` defaults to the number of
 CPUs Roadie may use (`os.process_cpu_count()`), or 1 when that count is
 unavailable. With `--jobs` above 1, each line a step prints, and each line of
 output from the programs its `_cmd` and `_start_cmd` run, is printed as it
-arrives, prefixed with `[<name>] `, where `<name>` is the step's name or its
-class name when it has none, and lines of different steps are not mixed. With
+arrives, prefixed with `[<name>] `, where `<name>` is the step's name, and lines of
+different steps are not mixed. With
 `--jobs` 1, output is unprefixed.
 
 ### Teardown
@@ -392,9 +406,9 @@ original failure stands.
 ### Failures
 
 An exception raised while Roadie fingerprints, builds, publishes, reports,
-records or serves a step fails the run with `<name> failed: <reason>`, where `<name>` is the step's name, or its class name when
-it has none, and `<reason>` is the exception's message, or its class name
-when the message is empty. A string passed to `SystemExit` is its own reason.
+records or serves a step fails the run with `<name> failed: <reason>`, where
+`<name>` is the step's name, and `<reason>` is the exception's message, or
+its class name when the message is empty. A string passed to `SystemExit` is its own reason.
 An interrupt is not a failure. When a step fails, no new step starts. Roadie
 lets the steps still running finish, then fails the run with the first
 failure. When any are still running it prints `waiting for <names>` once,
@@ -430,18 +444,17 @@ requested result whose kind serves. A class that sets `once_per_run`, as
 
 ### Reusing a step
 
-A step is reusable when it is bound to a variable of a build file and its
-kind keeps a record and allows reuse. Roadie reuses a reusable step when its
-record has the same fingerprint and the step's kind accepts the recorded
-value. It prints `reused <name>`, and the step's value is restored from the
-record.
+A step is reusable when a build file names it, by a variable or a derived
+name, and its kind keeps a record and allows reuse. Roadie reuses a
+reusable step when its record has the same fingerprint and the step's kind
+accepts the recorded value. It prints `reused <name>`, and the step's value
+is restored from the record.
 
 Before a step that keeps a record builds, Roadie prints
-`build <name> = <Class>(<arguments>)`, or `build <Class>(<arguments>)` when
-the step has no name, with the same arguments `--dry` shows. A deferred step
-prints that line when it starts. After that step finishes building, Roadie
-prints `built <name> in <m:ss>`, or `built <Class> in <m:ss>` when the step
-has no name. `<m:ss>` is whole minutes and two digits of seconds, rounded
+`build <name> = <Class>(<arguments>)`, with the same arguments `--dry`
+shows. A deferred step prints that line when it starts. After that step
+finishes building, Roadie prints `built <name> in <m:ss>`. `<m:ss>` is
+whole minutes and two digits of seconds, rounded
 down. A deferred step's duration is its start. With `--jobs` above 1 the
 `built` line is prefixed like the step's other lines. A reused step prints
 only `reused <name>`. A step that keeps no record, such as a group, prints
@@ -568,10 +581,9 @@ A step's fingerprint is a SHA-256 digest of:
 
 `--dry` prints one line per step in plan order:
 `<name> = <Class>(<arguments>)  # reuse` for a marked step, `# run` for any
-other, without `<name> = ` for a step with no name. `<arguments>` are the
-step's call arguments: by default every attribute that is not `None`, as
-`name=value`. A group shows its members positionally. A step argument is
-shown by its name, or as its own call when it has none.
+other. `<arguments>` are the step's call arguments: by default every
+attribute that is not `None`, as `name=value`. A group shows its members
+positionally. A step argument is shown by its name.
 
 ### Records
 
@@ -579,25 +591,24 @@ A build file's record is `<root>/target/roadie/<directory>/build.record.json`,
 where `<directory>` is the build file's directory relative to the project
 root (none for the root itself; `_outside/<12 hex digits of a digest of the
 path>` when outside it). The file holds a format version and its entries,
-both read through a Pydantic model. Each entry maps a reusable variable to
-its step fingerprint, its output fingerprint, its encoded value, and the
+both read through a Pydantic model. Each entry maps a variable or derived
+name to its step fingerprint, its output fingerprint, its encoded value, and the
 names of the artifact files `run.artifact` returned while the step built. A
 reused step keeps those names. A record of another version counts as empty,
 so its steps rebuild. A record that cannot be read counts as empty too, and
 Roadie prints `ignoring unreadable record <path>: <reason>`, so a damaged
 file never fails the run.
 
-A successful step replaces its entry; entries of variables the build file no
-longer defines are dropped. A failed step writes nothing. The file is
-written through a temporary file and renamed.
+A successful step replaces its entry; entries the build file no longer
+defines, whether a variable or a derived name, are dropped. A failed step
+writes nothing. The file is written through a temporary file and renamed.
 
 ### Artifacts
 
 `run.artifact(step, suffix)` returns
 `<root>/target/roadie/<directory>/<variable><suffix>`, with `<directory>` as
 for the step's record, and notes that file's name for the step's record
-entry. A step without a variable uses `<ClassName>-<serial>`, a number
-unique to the step within the process.
+entry. `<variable>` is the step's variable or its derived name.
 
 After a successful run, while the run still holds its lock, Roadie reads
 `<root>/target/roadie/swept`. When the timestamp is missing, Roadie writes it

@@ -63,7 +63,7 @@ class Run:
     # (spec) Artifacts
     def artifact(self, step: Step[Any], suffix: str) -> Path:
         root = project_root()
-        stem = step.variable or f"{type(step).__name__}-{step.serial}"
+        stem = step.variable or step._label()
         destination = root / "target" / "roadie" / artifact_dir(step.build_dir, root) / f"{stem}{suffix}"
         destination.parent.mkdir(parents=True, exist_ok=True)
         with self._artifact_lock:

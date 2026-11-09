@@ -8,8 +8,6 @@ bullet, except the input-enforcement design, which is moved whole.
 - Enforce declared inputs (the design below).
 - A project-root override (`config(root=...)`) for a project whose root is not
   its git top level.
-- Reuse unnamed steps: an inline or loop-built step takes a derived identity,
-  its consumer's variable and the path to it (`copy.source`, `checks[2]`).
 - On Ctrl-C or SIGTERM, print `interrupted: stopping <names>` once, naming
   the running steps and live services being stopped, as a failure prints
   `waiting for <names>`.
@@ -32,8 +30,6 @@ Guidance taken out of the spec because it follows from the rules.
   an empty one.
 - A rebuilt `File` whose content is unchanged leaves its consumers reusable.
 - A Python upgrade reruns every step: the code hash covers `abc` and `typing`.
-- An inline step, as in `Copy(Emitter())`, is never reused; bind it to a
-  variable.
 - A requested service keeps the terminal's standard input, so a dev server
   can read keystrokes.
 - A failed `Tests` step records nothing, so failures are never replayed.
