@@ -1357,7 +1357,7 @@ three; no Windows skip was needed.
 
 ## R16: Every step has a name, and Roadie's output says what matters
 
-Status: planned, approved 2026-11-08
+Status: executed, pending author verification
 
 **Improvement.** A step that no variable holds, such as `Copy(Emitter())`'s
 emitter or each member of `Group(*(Check(...) for package in PACKAGES))`, takes
@@ -1484,6 +1484,38 @@ clause.
 - [x] **R16.7: Run the naming scenario through the CLI.** Add the acceptance
   scenario as a test that runs `roadie` as a subprocess in a temporary git
   project. Its SIGTERM clause is marked POSIX-only with the R14 marker.
+
+**Acceptance run (2026-11-09).** Commit `ce7cb0241a5e9a54f2618f2e98ca8a7e9ad80245`,
+tree `06ad75b9fada005592e7cab833b808d4cb00b594`. Host Darwin 25.6.0 arm64,
+uv 0.12.23, Python 3.13.13. Script
+`/Users/sasha/.local/share/roadie/r16-acceptance.py`, sha256
+`818a04a725ab1528af7686f14feb1836ccd7d7526d045eb825682e2eca6dbab1`. Log
+`/Users/sasha/.local/share/roadie/r16-acceptance.log`, sha256
+`2e9bb4c563335f13e7ef109090b76477501f230758d07e66dff87dcd9a79ba66`.
+Command `uv run roadie checks`. Verdict: pass, with the CI clause open.
+
+- `uv run ruff check` and `uv run mypy src build.py` passed. `uv run pytest
+  -q --tb=line`: 358 passed in 31.89s, none skipped.
+- `uv run roadie checks` exited 0. It built ruff, mypy, and pytest on this
+  tree and finished in 0:29. The pytest check reported 358 passed in 29.21s.
+  The direct pytest run above is the observation of the suite.
+- The scenario test passed in that pytest run. A first run prints `build
+  copy.source = Emit()` and `build checks[0] = Check(`, the program `Emit`
+  captures does not appear, and `copied.txt` is written. A second run reuses
+  every step and builds nothing. After `b.txt` is edited, `--dry` shows
+  `checks[1] = Check(  # run`, and the next run builds `checks[1]` alone.
+- On this Darwin host the POSIX SIGTERM clause ran: during the slow step the
+  command printed `interrupted: stopping slow` and exited 130. It was not run
+  on Ubuntu or Windows.
+- Each behaviour change has a test in the suite that passed. The run that
+  showed each test failing before its patch was that patch's verification,
+  not this run.
+- The scenario uses no live or external service. That clause has nothing
+  further to observe.
+
+CI on `ubuntu-latest`, `macos-latest`, and `windows-latest` is open. The
+author action above discharges it: push `main` and confirm CI passes on all
+three platforms, or authorize the executor to push.
 
 ## Backlog
 

@@ -1,6 +1,4 @@
 import json
-import os
-import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -333,19 +331,17 @@ def test_a_rust_binary_build_prints_no_cargo_json(
     )
     script = root / "emit_json.py"
     script.write_text(f"print({line!r})\n")
-    bin_dir = root / "bin"
-    bin_dir.mkdir()
-    if is_posix:
-        launcher = bin_dir / "cargo"
-        launcher.write_text(
-            "#!/bin/sh\n"
-            f"exec {shlex.quote(sys.executable)} {shlex.quote(str(script))}\n"
-        )
-        launcher.chmod(0o755)
-    else:
-        launcher = bin_dir / "cargo.cmd"
-        launcher.write_text(f'@"{sys.executable}" "{script}" %*\r\n')
-    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
+    # CreateProcess resolves `cargo` to `cargo.exe` and never runs `cargo.cmd`,
+    # so the stand-in is the Python script, whatever platform finds `cargo`.
+    real_popen = subprocess.Popen
+
+    def popen(args: object, *pargs: object, **kwargs: object) -> subprocess.Popen[str]:
+        command = list(args) if isinstance(args, (list, tuple)) else [args]
+        if command and command[0] == "cargo":
+            command = [sys.executable, str(script), *command[1:]]
+        return real_popen(command, *pargs, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("roadie.engine.step.subprocess.Popen", popen)
     monkeypatch.setattr(
         "roadie.build.rust.CargoPackage.fingerprint",
         lambda self, base_dir: "package:app",
