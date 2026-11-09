@@ -13,8 +13,6 @@ bullet, except the input-enforcement design, which is moved whole.
   `waiting for <names>`.
 - A cargo-nextest test step that reads the runner's JUnit report into
   `TestResults`.
-- Rename `output` to `copy_to` on `File` and `Directory`: the parameter
-  copies the built value into the source tree.
 - `Release` fails when a tracked version file (`Cargo.toml`, `pyproject.toml`,
   `package.json`) with its own static version is not among its sources.
 

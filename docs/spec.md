@@ -315,8 +315,8 @@ reused, and its output fingerprint.
 
 ### Generated files
 
-A file step with `output` publishes its built file after it builds: the
-destination is `output` resolved from the step's base directory, and the
+A file step with `copy_to` publishes its built file after it builds: the
+destination is `copy_to` resolved from the step's base directory, and the
 step's value becomes the destination. A destination whose content already
 equals the built file is left alone. A tracked destination also counts as
 unchanged when `git hash-object --path=<destination>` of the destination and
@@ -346,7 +346,7 @@ fails with `<step> built <path>, which is not a directory`. The output
 fingerprint is a SHA-256 of that file record, so a rebuild with identical
 content leaves its consumers reusable.
 
-With `output`, the built directory is published to `output` resolved from
+With `copy_to`, the built directory is published to `copy_to` resolved from
 the step's base directory, and the step's value becomes the destination.
 Each file is compared as a generated file is, so `core.autocrlf` does not
 make a tracked file look stale. An identical file is left alone. Otherwise

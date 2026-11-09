@@ -20,17 +20,17 @@ if TYPE_CHECKING:
 class File(PathStep):
     """A step that builds a file; its value is the file's path.
 
-    With `output`, the built file is published as a generated file. The output
-    fingerprint is the SHA-256 of the file, so a rebuilt file with unchanged
-    content leaves its consumers reusable.
+    With `copy_to`, the built file is published as a generated file. The
+    output fingerprint is the SHA-256 of the file, so a rebuilt file with
+    unchanged content leaves its consumers reusable.
     """
 
-    output: str | Path | None = None
+    copy_to: str | Path | None = None
 
     def publish(self, run: "Run", value: Path) -> Path:
-        if self.output is None:
+        if self.copy_to is None:
             return value
-        destination = self.resolve(self.output)
+        destination = self.resolve(self.copy_to)
         content = value.read_bytes()
         previous = destination.read_bytes() if destination.exists() else None
         if previous == content:

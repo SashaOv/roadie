@@ -68,7 +68,7 @@ class Directory(Step[Path]):
     fingerprint is a SHA-256 of the file record, so a rebuild with identical
     content leaves its consumers reusable.
 
-    With `output`, the built directory is published to `output` resolved
+    With `copy_to`, the built directory is published to `copy_to` resolved
     from the base directory. Each file is compared as a generated file is.
     A tracked file the build no longer produces is removed; an untracked
     file in the destination is kept. Under `--locked`, a tracked file that
@@ -76,7 +76,7 @@ class Directory(Step[Path]):
     and one line per changed path, and nothing is written.
     """
 
-    output: str | Path | None = None
+    copy_to: str | Path | None = None
 
     def encode(self, value: Path) -> object:
         return {"path": to_stored(value), "files": self._listing(value)}
@@ -100,9 +100,9 @@ class Directory(Step[Path]):
         return digest(self._listing(value))
 
     def publish(self, run: "Run", value: Path) -> Path:
-        if self.output is None:
+        if self.copy_to is None:
             return value
-        destination = self.resolve(self.output)
+        destination = self.resolve(self.copy_to)
         if destination.exists() and not destination.is_dir():
             destination.mkdir(parents=True, exist_ok=True)
         built = [

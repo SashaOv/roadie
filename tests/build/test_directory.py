@@ -259,7 +259,7 @@ def _site(text: bytes = b"new\n") -> Directory:
             (path / "out.txt").write_bytes(text)
             return path
 
-    site = Site(output="dist")
+    site = Site(copy_to="dist")
     site.name = site.variable = "site"
     return site
 
@@ -350,7 +350,7 @@ def test_locked_directory_names_every_changed_tracked_file(
             (path / "b.txt").write_bytes(b"new")
             return path
 
-    site = Site(output="dist")
+    site = Site(copy_to="dist")
     site.name = site.variable = "site"
     with pytest.raises(StepFailed) as error:
         execute([site], locked=True)
@@ -410,7 +410,7 @@ def test_reused_directory_does_not_publish(
             published.append(value)
             return super().publish(run, value)
 
-    site = Site(output="dist")
+    site = Site(copy_to="dist")
     site.name = site.variable = "site"
     execute([site])
     execute([site])
@@ -431,7 +431,7 @@ def test_directory_output_failure_releases_the_built_directory(
         def teardown(self, value: Path) -> None:
             released.append(value)
 
-    step = Releasing(output="dist")
+    step = Releasing(copy_to="dist")
     step.name = step.variable = "site"
     with pytest.raises(StepFailed, match="dist"):
         execute([step])
@@ -462,7 +462,7 @@ def test_publishing_removes_a_tracked_file_and_keeps_an_untracked_file(
             (path / "keep.txt").write_bytes(b"keep")
             return path
 
-    site = Site(output="dist")
+    site = Site(copy_to="dist")
     site.name = site.variable = "site"
     assert execute([site]) == destination
     assert not (destination / "old.txt").exists()
@@ -492,7 +492,7 @@ def test_locked_publish_keeps_a_tracked_file_the_build_no_longer_produces(
             (path / "keep.txt").write_bytes(b"keep")
             return path
 
-    site = Site(output="dist")
+    site = Site(copy_to="dist")
     site.name = site.variable = "site"
     with pytest.raises(StepFailed) as error:
         execute([site], locked=True)
@@ -547,7 +547,7 @@ class Watch(Step[None]):
     def build(self, run: Run) -> None:
         return None
 
-site = Site(output="dist")
+site = Site(copy_to="dist")
 watch = Watch(Files("dist"))
 consumer = default_step(Consumer(site))
 """

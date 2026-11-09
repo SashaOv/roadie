@@ -1473,7 +1473,7 @@ clause.
   is shown in both modes; a failing captured command still quotes standard
   error; a `RustBinary` build prints no cargo JSON. The `_cmd` docstring
   states both flags, and the backlog item goes.
-- [ ] **R16.5: Rename output to copy_to.** Decision 8, in `File`,
+- [x] **R16.5: Rename output to copy_to.** Decision 8, in `File`,
   `Directory`, their docstrings, the spec's Generated files and Directory step
   sections, and the tests. A test shows `output=` fails as an unknown
   argument. The backlog item goes.

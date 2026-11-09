@@ -11,7 +11,7 @@ from support import (
     write_build,
 )
 
-from roadie.build import File, Step
+from roadie.build import Directory, File, Step
 from roadie.engine.errors import StepFailed
 from roadie.engine.graph import load
 from roadie.engine.root import use_project_root
@@ -28,7 +28,7 @@ def test_file_output_is_published_and_equal_file_is_not_rewritten(previous: str 
         destination.parent.mkdir()
         destination.write_bytes(previous.encode())
         os.utime(destination, ns=(1_000_000_000, 1_000_000_000))
-    step = TextFile("new\n", output="nested/output.txt")
+    step = TextFile("new\n", copy_to="nested/output.txt")
     assert execute([step]) == destination
     assert destination.read_bytes() == b"new\n"
     output = capsys.readouterr().out
@@ -52,7 +52,7 @@ def test_locked_file_output_protects_tracked_files_and_writes_untracked_files(pr
         subprocess.run(["git", "add", "output.txt"], cwd=tmp_path, check=True)
     if previous is None:
         destination.unlink()
-    step = TextFile("new\n", output=Path("output.txt"))
+    step = TextFile("new\n", copy_to=Path("output.txt"))
     step.name = "generated"
     if tracked and previous != "new\n":
         with pytest.raises(StepFailed) as error:
@@ -87,7 +87,7 @@ def test_locked_tracked_file_ignores_autocrlf_checkout_bytes(
     destination.unlink()
     subprocess.run(["git", "checkout", "-q", "--", "output.txt"], cwd=root, check=True)
     assert destination.read_bytes() == b"new\r\n"
-    step = TextFile("new\n", output="output.txt")
+    step = TextFile("new\n", copy_to="output.txt")
     step.name = "generated"
     assert execute([step], locked=True) == destination
     assert destination.read_bytes() == b"new\r\n"
@@ -107,7 +107,7 @@ def test_file_output_value_is_available_to_dependents(tmp_path: Path, monkeypatc
             assert run[self.source] == tmp_path / "output.txt"
             return run[self.source].read_text()
 
-    source = TextFile("new\n", output="output.txt")
+    source = TextFile("new\n", copy_to="output.txt")
     assert execute([source, Consumer(source)]) == "new\n"
 
 
@@ -123,7 +123,7 @@ def test_file_output_failure_releases_the_built_artifact(tmp_path: Path, monkeyp
         def teardown(self, value: Path) -> None:
             released.append(value)
 
-    step = ReleasingFile("new\n", output="output.txt")
+    step = ReleasingFile("new\n", copy_to="output.txt")
     with pytest.raises(StepFailed, match="output.txt"):
         execute([step])
     with use_project_root(tmp_path):
@@ -135,7 +135,7 @@ def test_file_output_is_written_under_locked_outside_git(tmp_path: Path, monkeyp
     monkeypatch.chdir(tmp_path)
     isolate_repo(monkeypatch, tmp_path)
     destination = tmp_path / "new/dir/output.txt"
-    assert execute([TextFile("new\n", output=destination)], locked=True) == destination
+    assert execute([TextFile("new\n", copy_to=destination)], locked=True) == destination
 
 
 # (spec) Generated files
@@ -146,7 +146,7 @@ def test_locked_file_output_reports_git_failure_and_keeps_destination(tmp_path: 
     destination = tmp_path / "output.txt"
     destination.write_text("old\n")
     with pytest.raises(StepFailed) as error:
-        execute([TextFile("new\n", output=destination)], locked=True)
+        execute([TextFile("new\n", copy_to=destination)], locked=True)
     assert f"cannot check whether {destination} is tracked:" in str(error.value)
     assert destination.read_text() == "old\n"
 
@@ -166,7 +166,7 @@ def test_locked_run_does_not_reuse_a_hand_edited_tracked_output(tmp_path: Path, 
             path.write_text("body")
             return path
 
-    note = Note(output="output.txt")
+    note = Note(copy_to="output.txt")
     note.name = note.variable = "note"
     destination = execute([note])
     subprocess.run(["git", "add", "output.txt"], cwd=root, check=True)
@@ -184,8 +184,22 @@ def test_file_output_is_keyword_only(tmp_path: Path) -> None:
         "@dataclass(eq=False, kw_only=True)\n"
         "class Note(File):\n"
         "    def build(self, run):\n"
-        "        return self.output\n"
+        "        return self.copy_to\n"
         "api = Note('api.yaml')\n",
     )
     with pytest.raises(TypeError):
         load(tmp_path)
+
+
+# (spec) Generated files
+# (spec) Directory step
+def test_output_is_an_unknown_argument() -> None:
+    @dataclass(eq=False)
+    class Site(Directory):
+        def build(self, run: Run) -> Path:
+            return Path()
+
+    with pytest.raises(TypeError, match="output"):
+        TextFile("new\n", output="out.txt")
+    with pytest.raises(TypeError, match="output"):
+        Site(output="dist")

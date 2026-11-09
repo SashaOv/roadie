@@ -163,11 +163,11 @@ def test_cli_passes_locked_and_prints_keyword_output(tmp_path: Path, monkeypatch
         "@dataclass(eq=False, kw_only=True)\n"
         "class Note(File):\n"
         "    def build(self, run):\n"
-        "        return self.output\n"
-        "api = Note(output='api.yaml')\n",
+        "        return self.copy_to\n"
+        "api = Note(copy_to='api.yaml')\n",
     )
     run_cli(["--dry", "-f", str(tmp_path)])
-    assert capsys.readouterr().out.splitlines()[-1] == "api = Note(output='api.yaml')  # run"
+    assert capsys.readouterr().out.splitlines()[-1] == "api = Note(copy_to='api.yaml')  # run"
     observed: list[tuple[bool, object]] = []
     monkeypatch.setattr(
         cli,
