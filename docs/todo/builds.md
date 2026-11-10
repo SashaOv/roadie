@@ -1357,7 +1357,7 @@ three; no Windows skip was needed.
 
 ## R16: Every step has a name, and Roadie's output says what matters
 
-Status: executed, pending author verification
+Status: implemented 2026-11-09 (commits R16.*)
 
 **Improvement.** A step that no variable holds, such as `Copy(Emitter())`'s
 emitter or each member of `Group(*(Check(...) for package in PACKAGES))`, takes
@@ -1516,6 +1516,16 @@ Command `uv run roadie checks`. Verdict: pass, with the CI clause open.
 CI on `ubuntu-latest`, `macos-latest`, and `windows-latest` is open. The
 author action above discharges it: push `main` and confirm CI passes on all
 three platforms, or authorize the executor to push.
+
+**Final CI (2026-11-09).** CI run 42582188450 on `ce7cb02` failed on
+`windows-latest` alone: `test_a_rust_binary_build_prints_no_cargo_json` put a
+`cargo.cmd` stand-in on `PATH`, but Windows resolves `cargo` to the real
+`cargo.exe`, which found no `Cargo.toml`. The author's `ed342d8`, not a
+planned patch, replaces the stand-in by patching `subprocess.Popen` in the
+test; product code is unchanged. CI run 42585158284 on `ed342d8` passed on
+`ubuntu-latest`, `macos-latest` and `windows-latest`, which also runs the CLI
+scenario on Ubuntu and Windows. Its SIGTERM clause is POSIX-only and does
+not run on Windows. Discharges the CI clause.
 
 ## Backlog
 
