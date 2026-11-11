@@ -10,8 +10,22 @@ bullet, except the input-enforcement design, which is moved whole.
   its git top level.
 - A cargo-nextest test step that reads the runner's JUnit report into
   `TestResults`.
+- The interrupt tests pass when pytest starts in the background: a shell's
+  `&` leaves SIGINT ignored, so `raise_signal(SIGINT)` and
+  `_thread.interrupt_main()` do nothing, and each test waits out its child's
+  60-second sleep (7.5 minutes for the suite). A session fixture installs
+  `signal.default_int_handler` and restores the previous handler; child
+  sleeps match the watchers' 10-second limit.
 - `Release` fails when a tracked version file (`Cargo.toml`, `pyproject.toml`,
   `package.json`) with its own static version is not among its sources.
+- A run report: `--report <path>` appends one JSON line per event as it
+  happens (run start with the project disk's total and free space; each step's
+  start and end with built, reused or failed, elapsed time, free disk, and the
+  steps running alongside it; run end), so a run that dies on a full disk
+  leaves its report up to that moment. A report that cannot be written prints
+  one warning and stops, without failing the build. A command renders it as
+  Markdown: slowest steps, largest disk growth, free space at start, lowest
+  and end, and reused and built counts.
 
 ## User manual
 

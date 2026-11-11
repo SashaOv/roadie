@@ -131,6 +131,27 @@ builds, then the one planned build. Unplanned work is in
   --only-projects` lists workspace dependencies (`"version": "link:../core"`)
   only after install. Run outside any workspace, it prints one JSON array per
   `package.json` found below the working directory.
+- 2026-11-09: on `windows-latest`, `subprocess.Popen(["cargo", ...])` runs
+  `cargo.exe` and never a `cargo.cmd` placed earlier on `PATH`: CreateProcess
+  appends only `.exe` to a bare name (CI run 42582188450; fixed in `ed342d8`).
+  An npm-installed `pnpm` is `pnpm.cmd`, so Roadie cannot start it by name on
+  Windows.
+- 2026-11-10: GitHub's runner images (`ubuntu-24.04` 20261101.360.1,
+  `windows-2025` 20261101.318.1, `macos-15-arm64` 20261104.0514.1, from
+  `actions/runner-images` readmes) have Node 22.23.4 (24.22.2 cached), npm
+  10.9.9 and Yarn 1.22.22, and no pnpm. `pnpm/action-setup` v6.1.1 is commit
+  `73e46992e05b19abd31f2f3c20e0e7370d762115`; it takes `version` and
+  `standalone`, which installs `@pnpm/exe` instead of the npm package. The
+  latest pnpm is 12.18.0; Niva pins `pnpm@10.33.0` in `packageManager`.
+- 2026-11-10: in a scratch directory with `package.json` and no
+  `pnpm-workspace.yaml`, `pnpm ls --json --depth -1` lists that project alone,
+  while `pnpm ls -r` adds a nested `sub/package.json` as a second array. From
+  a member of a workspace, `pnpm ls -r --json --depth -1` lists every project
+  of the workspace, root included.
+- 2026-11-10: after `pnpm install`, Niva's `node_modules/.pnpm/lock.yaml` is
+  byte-identical to its `pnpm-lock.yaml`; in a scratch workspace with no
+  external dependencies, pnpm 10.33.0 writes neither that file nor
+  `node_modules/.modules.yaml`.
 
 --- Implemented / Next ---
 
@@ -1526,6 +1547,250 @@ test; product code is unchanged. CI run 42585158284 on `ed342d8` passed on
 `ubuntu-latest`, `macos-latest` and `windows-latest`, which also runs the CLI
 scenario on Ubuntu and Windows. Its SIGTERM clause is POSIX-only and does
 not run on Windows. Discharges the CI clause.
+
+## R17: A run leaves a report, Release takes directories, and JS steps rerun when Node, pnpm or their packages change
+
+Status: planned, approved 2026-11-10
+
+**Improvement.** `roadie --report <path>` appends one JSON line per event as
+the run goes: its start with the project disk's total and free space, each
+step's start and end with its outcome, elapsed time, free disk and the steps
+running alongside it, and the run's end. A run that dies, on a full disk or
+otherwise, leaves its report up to that moment. `roadie --summary <path>`
+renders the last run as Markdown: the slowest steps, the largest disk growth,
+free space at start, lowest and end, and the built and reused counts. Today
+a run that dies leaves only its console output, with no free-space figures and
+no record of which steps were running when it stopped.
+
+`Release` takes directories instead of files and finds each directory's
+versioned manifests itself, so a manifest beside a listed one cannot be left
+out: Niva's four files become `Release(".", "desktop", "desktop/src-tauri")`.
+
+A step that runs pnpm can take `PnpmPackage(name)`, as a Rust
+step takes `CargoPackage(name)`. Its fingerprint follows the package, the
+workspace packages it depends on, the lockfile, and the Node and pnpm versions,
+so a Node upgrade or a change in a dependency package reruns the step, and a
+change in an unrelated package does not. `NodeEnv()` covers the environment
+alone, for a step that reads the whole workspace. CI installs pnpm on all three
+platforms, so these inputs are tested against the real tools.
+
+Today a pnpm step's inputs are a hand-listed `Files`, as Niva's `WEB`
+(`jammer/build.py`) lists the lockfile, three `package.json` files and two
+package directories. Nothing covers the Node or pnpm version, so after an
+upgrade a step replays its old verdict.
+
+**Decisions.** Confirmed at the checkpoint (2026-11-10): 1–18; 15 and 17 as
+the author amended them.
+
+1. The workspace root is the nearest directory at or above the step's base
+   directory that holds `pnpm-workspace.yaml`. Without one it is the nearest
+   holding `package.json`, a single-package project. Neither fails with
+   `no package.json at or above <base directory>`.
+2. In a workspace, its projects are what `pnpm ls -r --json --depth -1` lists,
+   run at the root. A single-package project is its root alone; `pnpm ls -r`
+   is not run, because outside a workspace it lists nested `package.json`
+   files as projects (Facts, 2026-11-10).
+3. `NodeEnv()` fingerprints the output of `node --version` and `pnpm
+   --version`; the `NODE_ENV` and `NODE_OPTIONS` variables of the process
+   environment; the content of each project's `package.json`; and the root's
+   `pnpm-lock.yaml`, `pnpm-workspace.yaml` and `.npmrc`, where they exist;
+   and `node_modules/.pnpm/lock.yaml`, pnpm's copy of the lockfile as last
+   installed, where it exists. That last file is the change to 3 proposed for
+   the checkpoint: without it, a lockfile edited but not installed reruns a
+   step against the old `node_modules`, and the next run, after `pnpm
+   install`, reuses that verdict. It is to `NodeEnv` what the installed
+   distributions are to `PythonEnv` (Facts, 2026-11-10). Not covered, as
+   `CargoPackage` leaves out `~/.cargo`: user and global pnpm and npm
+   configuration, `npm_config_*` variables (whether pnpm 10 reads them is
+   unverified), and files at the workspace root outside every package, such
+   as a shared `tsconfig.base.json`, which a step takes as `Files`.
+4. `PnpmPackage(name)` fingerprints what `NodeEnv()` does, and the content of
+   every file git lists under the package and under the workspace packages it
+   depends on, directly or indirectly, with the listing of a `Files`
+   directory. A dependency is a key of the package's `dependencies`,
+   `devDependencies`, `optionalDependencies` or `peerDependencies` that names
+   a workspace project, as `CargoPackage` matches names. A name the workspace
+   does not hold fails with `pnpm package '<name>' is not in the workspace`.
+5. Within one run, `node --version`, `pnpm --version` and `pnpm ls` run once
+   per workspace (`run_state`, as `CargoPackage` does). A program that cannot
+   start fails with `cannot run <program>: <reason>`, the wording of `_cmd`.
+   `pnpm ls` exiting non-zero fails with `pnpm ls failed: <standard error>`.
+6. CI installs pnpm 10.33.0 with `pnpm/action-setup` at commit `73e4699`,
+   `standalone: true`, so Windows finds `pnpm.exe` by name (Facts,
+   2026-11-09). Starting an npm-installed `pnpm.cmd` on Windows goes to the
+   backlog; until then it fails as decision 5 says.
+7. The backlog's `Toolchain` input goes: `CargoPackage` covers
+   `rust-toolchain.toml` and `rustc --version`, `PythonEnv` the interpreter,
+   and `NodeEnv` Node.
+8. The executor pushes `main` after R17.5 and watches that CI run, because
+   pnpm on the three runners can be observed nowhere else, and pushes again
+   after R17.8 and watches the final run (both authorized at the checkpoint,
+   2026-11-10).
+9. `--report PATH`, relative to the working directory, opens the file for
+   appending and writes one JSON object per line, flushed as each event
+   happens, so a later run adds to the same file. Every event has `event`,
+   `time` (UTC, ISO 8601, whole seconds) and `free` (bytes free on the
+   filesystem holding the project root, from `shutil.disk_usage`):
+   - `run-start`: `total` bytes on that filesystem, `results` (the requested
+     names), `jobs`;
+   - `step-start`: `step` (its name) and `running` (the other steps running at
+     that moment);
+   - `step-end`: `step`, `outcome` (`built`, `reused`, `failed` or
+     `interrupted`), `elapsed` (seconds) and `running`;
+   - `run-end`: `outcome` (`succeeded`, `failed` or `interrupted`) and
+     `elapsed`.
+   The steps reported are those that print a `build` or `reused` line; a
+   deferred step's end is the end of its start. `interrupted` is not in the
+   backlog item, which names built, reused and failed; it is proposed for
+   Ctrl-C, which is not a failure (Failures section).
+10. A report that cannot be opened or written prints `cannot write report
+    <path>: <reason>; continuing without it` once to standard error, writes
+    no further events, and leaves the run's result and exit status unchanged.
+11. `--report` with `--dry` fails with `--report does not apply to --dry`, and
+    with `--clean` fails with `--report does not apply to --clean`, before
+    anything runs; a dry run and `--clean` would otherwise drop it silently.
+12. `roadie --summary PATH` prints the Markdown for the last run in the file
+    (from its last `run-start`) and exits without loading a build file.
+    Combined with a result, a parameter or another option it fails with
+    `--summary takes only a report path`. It shows free space at start,
+    lowest and end; the built, reused, failed and interrupted counts; the ten
+    slowest steps with `m:ss`; and the ten steps with the largest disk growth
+    (free at start minus free at end), with a note that growth includes the
+    steps running alongside. Sizes print in GiB with one decimal. A run with no
+    `run-end` adds the line `The run did not finish.` A missing file fails
+    with `report does not exist: <path>`; a line that is not an event fails
+    with `<path> line <n> is not a report event`.
+13. The option names `--report` and `--summary` are proposed; `roadie report
+    <path>` is ruled out because a bare word names a result.
+14. Roadie never truncates the report: the file is the user's, and it grows by
+    one line per event. A run holds the open file and nothing else for the
+    report, released when the run ends.
+15. Each of `Release`'s sources, relative to the base directory, is a
+    directory or a manifest file. A directory is a module directory, and
+    Roadie finds its manifests (decision 16). A file names its manifest
+    alone: its directory is the module directory and no other manifest there
+    is searched for, as a file source works today. A path that is neither
+    fails as a missing file does today. Roadie's `build.py` becomes
+    `Release(".", ...)`; Niva's four files keep working, and it can move to
+    `Release(".", "desktop", "desktop/src-tauri")`.
+16. In each directory, each of `pyproject.toml`, `Cargo.toml` and
+    `package.json` that exists and has its own static version, by the rules
+    `Release` reads them with today, is released. One without such a version
+    is skipped: Niva's root `package.json`, a `version.workspace = true`
+    member, a dynamic `[project] version`. A directory with none fails with
+    `cannot release: <directory> has no versioned pyproject.toml, Cargo.toml
+    or package.json`. Subdirectories are not read; that is the Module item
+    (decision 18). With Niva's current tree, the vendored manifests under
+    `jammer/ops/iac/vendor` are in no named directory and stay untouched, so
+    `Release` needs no customization for them (checked 2026-11-10).
+17. As today, the release starts from the primary version, and every
+    released manifest is written to the chosen version. The primary is the
+    manifest `primary=<path>` names, relative to the base directory, when
+    given; naming one the sources do not release fails with `Release primary
+    <path> is not among its sources`. Without `primary`, it is the first
+    source's manifest. When that source is a directory releasing several
+    manifests, their versions must match; otherwise the release fails before
+    changing anything with `cannot release: <directory> holds different
+    versions: <file> <version>, <file> <version>; name one with primary=`.
+    The rule is the author's (2026-11-10); the keyword `primary` is proposed.
+    Positional sources become `*sources`.
+18. The backlog's unlisted-version-file item is replaced by a Module item: a
+    build file names modules; every manifest with its own version in a
+    module's tree, down to any nested module, follows the module's version or
+    has none; vendored manifests can be left out.
+
+Not in this build: rendering more than the last run, and HTML output;
+`select_pnpm_packages` (a `select_rust_packages` for pnpm),
+which no build file needs yet; Niva's move from `WEB` to `PnpmPackage`, which is
+Niva's change; the Module concept (decision 18).
+
+**Acceptance check.**
+
+- `uv run roadie checks` passes, and CI passes on `ubuntu-latest`,
+  `macos-latest` and `windows-latest` with the real `node` and `pnpm`, the
+  pnpm tests not skipped.
+- The scenario in R17.3 runs the real `roadie` command as a subprocess in a
+  temporary git project with `--report`. It shows: a run with two parallel
+  steps writes `run-start`, a start and an end per step with each naming the
+  other in `running`, and `run-end`; a second run appends a second run whose
+  steps end `reused`; `--summary` renders the second run; killing `roadie`
+  with SIGKILL during a slow step (POSIX) leaves a report ending in that
+  step's `step-start`, and `--summary` adds `The run did not finish.`; a
+  report path that is a directory prints the warning once and the run exits 0.
+- A test releases a Niva-shaped tree into a bare upstream with
+  `Release(".", "desktop", "desktop/src-tauri")`: the root holds a
+  `Cargo.toml` and a `pyproject.toml` at one version and a `package.json`
+  without one. Afterwards the four versioned manifests carry the new version,
+  the root `package.json` and a `vendor/x/pyproject.toml` are unchanged, and
+  the tag is pushed.
+- The scenario in R17.8 runs the real `roadie` command as a subprocess in a
+  temporary git project holding a pnpm workspace in which `app` depends on
+  `core` and `other` stands alone, and a `Check` per package takes
+  `PnpmPackage`. It shows: a second run reuses every step; editing a file in
+  `core` reruns the `core` and `app` checks and reuses `other`'s; editing the
+  lockfile or `NODE_ENV` reruns all three.
+- A test fingerprints `NodeEnv()` with `node --version` patched to two
+  different outputs and gets two different fingerprints.
+- Each behaviour change is covered by a test that fails before its patch.
+
+**Author action required at completion.** None: the executor pushes after
+R17.8 and records the final CI run (decision 8), which discharges the CI
+clause.
+
+### Patches
+
+- [ ] **R17.1: Write a run report.** Decisions 9–11 and 14. A report writer
+  in `roadie.engine` takes events from the scheduler under one lock, so
+  parallel steps never interleave a line. The spec gains a Run report section
+  after Requested result, and the Command line section lists `--report`.
+  Tests: every event and field with `--jobs` 1 and 2; `running` names the
+  steps alongside; failed and interrupted outcomes; appending to an existing
+  file; an open failure and a write failure partway (patched `OSError`), each
+  printing the warning once and the run's status unchanged; `--dry` and
+  `--clean` refusing; the file closed when the run ends.
+- [ ] **R17.2: Summarize a run report as Markdown.** Decisions 12 and 13. The
+  Run report section states the output. Tests: a finished run, an unfinished
+  one, a file holding two runs (the last shown), the ten-step cut-off, a
+  missing file, a malformed line, and `--summary` with a result word. The
+  backlog's run report item goes.
+- [ ] **R17.3: Run the report scenario through the CLI.** Add the report
+  scenario from the acceptance check as a test that runs `roadie` as a
+  subprocess. Its SIGKILL clause is POSIX-only with the R14 marker.
+- [ ] **R17.4: Release the manifests of named directories.** Decisions
+  15–18. The `Release` docstring states the rules; Roadie's `build.py` takes
+  `Release(".", ...)`. Tests: a directory with two agreeing manifests and a
+  version-less third; a skipped `version.workspace = true` member; a
+  directory with no versioned manifest; a file path beside another manifest,
+  which is not released; directories and files mixed; agreeing manifests in
+  the first directory without `primary`; disagreeing ones without it
+  (nothing changed) and with it (the named one wins); a `primary` the sources
+  do not release; a subdirectory's manifest left
+  alone; and the Niva-shaped release from the acceptance check. The backlog
+  item is replaced as decision 18 says.
+- [ ] **R17.5: Install pnpm on every CI runner.** As decision 6, before
+  `uv sync`. A step prints `pnpm --version` and runs `python -c "import
+  subprocess; subprocess.run(['pnpm', '--version'], check=True)"`, which
+  shows Python finds pnpm by name. The patch is verified when that CI run
+  passes on all three platforms; the executor pushes and records the run here
+  (decision 8).
+- [ ] **R17.6: Add the NodeEnv input.** Decisions 1–3 and 5, in a new
+  `build/node.py`, exported from `roadie.build`. The spec gains a Node
+  environment section after Python environment. Tests use the real `node` and
+  `pnpm` in temporary workspaces: a workspace, a single package with a nested
+  `package.json` that does not count, a changed manifest, lockfile, installed
+  lockfile copy and environment variable, one `pnpm ls` per run, and no `package.json` above
+  the base directory. Patched `subprocess.run` covers a different Node
+  version, a program that cannot start and a failing `pnpm ls`.
+- [ ] **R17.7: Add the PnpmPackage input.** Decision 4, beside `NodeEnv`,
+  exported, with a spec section after Cargo packages. Tests cover the
+  dependency closure through each of the four dependency fields, a change in
+  an unrelated package, an unknown name, and a file git ignores (excluded).
+  The backlog's `NodeEnv` and `Toolchain` items go, and the npm-installed
+  `pnpm.cmd` item joins the backlog.
+- [ ] **R17.8: Run the pnpm scenario through the CLI.** Add the acceptance
+  scenario as a test that runs `roadie` as a subprocess in a temporary git
+  project. It uses no network: the workspace has no external dependencies,
+  and its lockfile comes from `pnpm install --offline`.
 
 ## Backlog
 
