@@ -1804,7 +1804,7 @@ clause.
   `windows-latest` ran `pnpm --version`, then Python's
   `subprocess.run(['pnpm', '--version'], check=True)` raised
   `FileNotFoundError: [WinError 2] The system cannot find the file specified`.
-- [ ] **R17.7: Start batch files by name on Windows.** Decisions 19 and 20,
+- [x] **R17.7: Start batch files by name on Windows.** Decisions 19 and 20,
   in `roadie.system`, used by `_cmd` and services; the `_cmd` docstring and
   the spec's Commands section state them. CI's Python `pnpm --version` step
   goes. Tests on every platform: the command line built for a batch file

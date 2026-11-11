@@ -26,7 +26,6 @@ jobs:
           standalone: true
 
       - run: pnpm --version
-      - run: python -c "import subprocess; subprocess.run(['pnpm', '--version'], check=True)"
 
       # The hosted images' preinstalled rustup and stable toolchain serve the
       # Cargo tests.

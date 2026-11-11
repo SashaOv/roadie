@@ -11,6 +11,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from roadie.system.command import prepare_command
+
 
 def process_group_session() -> bool:
     """True when `spawn_in_own_group` puts the child in its own session."""
@@ -26,9 +28,13 @@ def spawn_in_own_group(
     stdout: BinaryIO | int | None = None,
     stderr: BinaryIO | int | None = None,
 ) -> subprocess.Popen[bytes]:
-    """Start a process in its own process group on POSIX; alone on Windows."""
+    """Start a process in its own process group on POSIX; alone on Windows.
+
+    On Windows a bare program name is resolved, and a batch file is started,
+    as `prepare_command` does.
+    """
     return subprocess.Popen(
-        command,
+        prepare_command(command, environment),
         cwd=cwd,
         env=None if environment is None else dict(environment),
         stdin=stdin,

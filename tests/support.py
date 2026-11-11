@@ -22,6 +22,7 @@ _sandbox_root: Path | None = None
 
 is_posix = os.name == "posix"
 posix_only = pytest.mark.skipif(not is_posix, reason="POSIX-only")
+windows_only = pytest.mark.skipif(os.name != "nt", reason="Windows-only")
 needs_pty = pytest.mark.skipif(
     sys.platform == "win32", reason="pseudo-terminals are unavailable on Windows"
 )

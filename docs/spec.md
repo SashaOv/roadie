@@ -582,6 +582,17 @@ specify them. A command that cannot start fails with `<step> failed: cannot
 run <program>: <reason>`, where `<reason>` is the error's text without its
 filename.
 
+On Windows, a program `_cmd` or a service names without a directory is found
+as a shell finds it: `shutil.which` along the `PATH` the program runs with,
+trying each `PATHEXT` extension, the first match winning. A name not found
+starts and fails as on any other platform. A program found as a `.cmd` or
+`.bat` file runs as `cmd.exe /d /s /c "<file> <arguments>"`, with `cmd.exe`
+from `ComSpec`. Each argument is in double quotes, and backslashes before the
+closing quote are doubled, so cmd.exe reads spaces and `& | < > ^ ( )`
+literally. An argument holding `"`, `%` or a line break fails before starting
+with `cannot run <program>: cmd.exe would read <character> in <argument>`.
+Roadie's own `git` and `cargo` queries, and POSIX, are unchanged.
+
 Stopping a server signals its process group and every descendant. On Linux
 the descendants come from `/proc`; on macOS, where `/proc` is absent, from
 `ps -A -o pid=,ppid=`. A `ps` that cannot be run leaves the group signal as

@@ -34,6 +34,7 @@ from roadie.engine.process import (
     untrack_process,
     wait_interruptibly,
 )
+from roadie.system.command import CannotRun, prepare_command
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -229,21 +230,33 @@ class Step[T](ABC):
         A command that cannot start fails with `<name> failed: cannot run
         <program>: <reason>`, where `<reason>` is the error's text without
         its filename.
+
+        On Windows, a program named without a directory is found with
+        `shutil.which` on the `PATH` this command runs with, trying each
+        `PATHEXT` extension, the first match winning. A name that is not
+        found starts as given. A program found as a `.cmd` or `.bat` file
+        runs as `cmd.exe /d /s /c "<file> <arguments>"`, with `cmd.exe` from
+        `ComSpec`. Each argument is in double quotes, and backslashes before
+        the closing quote are doubled, so cmd.exe reads spaces and
+        `& | < > ^ ( )` literally. An argument holding `"`, `%` or a line
+        break fails before starting with `cannot run <program>: cmd.exe
+        would read <character> in <argument>`.
         """
         print("+", shlex.join(args), flush=True)
         prefix = current_prefix()
         out, err = output_streams()
+        env = self._command_env(environment)
         try:
             process = subprocess.Popen(
-                args,
+                prepare_command(args, env),
                 cwd=self.base_dir,
-                env=self._command_env(environment),
+                env=env,
                 stdout=subprocess.PIPE if capture_output or prefix else None,
                 stderr=subprocess.PIPE,
                 text=True,
             )
         except OSError as error:
-            raise StepFailed(self._label(), _cannot_run(args[0], error)) from error
+            raise StepFailed(self._label(), _run_failure(args[0], error)) from error
         track_process(process, session=False)
         readers: list[threading.Thread] = []
         stdout_parts: list[str] = []
@@ -324,7 +337,7 @@ class Step[T](ABC):
         (or `did not become ready at <url> within <timeout>s`). `<process>` is
         the executable's file name and up to two following arguments that are
         not options. In both cases the process tree is stopped. A command that
-        cannot start fails as `_cmd` does.
+        cannot start fails as `_cmd` does. The program is found as `_cmd` finds it.
         """
         print("+", shlex.join(args), flush=True)
         try:
@@ -337,7 +350,7 @@ class Step[T](ABC):
                 health_path=health_path,
             )
         except OSError as error:
-            raise StepFailed(self._label(), _cannot_run(args[0], error)) from error
+            raise StepFailed(self._label(), _run_failure(args[0], error)) from error
 
     def _command_env(self, environment: Mapping[str, str] | None) -> dict[str, str]:
         # Process environment, then the step's settings, then env files.
@@ -345,6 +358,12 @@ class Step[T](ABC):
         merged = {**os.environ, **(environment or {}), **self.env_values}
         merged[RUN_PID_VARIABLE] = str(os.getpid())
         return merged
+
+
+def _run_failure(program: str, error: OSError) -> str:
+    if isinstance(error, CannotRun):
+        return str(error)
+    return _cannot_run(program, error)
 
 
 def _cannot_run(program: str, error: OSError) -> str:
