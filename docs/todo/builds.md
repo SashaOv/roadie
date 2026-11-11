@@ -1773,12 +1773,16 @@ clause.
   do not release; a subdirectory's manifest left
   alone; and the Niva-shaped release from the acceptance check. The backlog
   item is replaced as decision 18 says.
-- [x] **R17.6: Install pnpm on every CI runner.** As decision 6, before
+- [ ] **R17.6: Install pnpm on every CI runner.** As decision 6, before
   `uv sync`. A step prints `pnpm --version` and runs `python -c "import
   subprocess; subprocess.run(['pnpm', '--version'], check=True)"`, which
   shows Python finds pnpm by name. The patch is verified when that CI run
   passes on all three platforms; the executor pushes and records the run here
-  (decision 8).
+  (decision 8). CI run 43089953768 on `33a005b` failed.
+  `ubuntu-latest` and `macos-latest` passed, including both pnpm commands.
+  `windows-latest` ran `pnpm --version`, then Python's
+  `subprocess.run(['pnpm', '--version'], check=True)` raised
+  `FileNotFoundError: [WinError 2] The system cannot find the file specified`.
 - [ ] **R17.7: Add the NodeEnv input.** Decisions 1–3 and 5, in a new
   `build/node.py`, exported from `roadie.build`. The spec gains a Node
   environment section after Python environment. Tests use the real `node` and
