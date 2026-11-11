@@ -4,7 +4,7 @@ import contextvars
 import sys
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, cast
@@ -55,24 +55,18 @@ class Run:
         self._artifact_lock = threading.Lock()
         self._report: Report | None = None
         self._report_began: dict[int, float] = {}
-        self._peer_names: Callable[[Step[Any]], list[str]] = lambda _step: []
 
     def _report_start(self, step: Step[Any]) -> None:
         if self._report is None or id(step) in self._report_began:
             return
         self._report_began[id(step)] = time.monotonic()
-        self._report.step_start(step._label(), self._peer_names(step))
+        self._report.step_start(step._label())
 
     def _report_end(self, step: Step[Any], outcome: str) -> None:
         if self._report is None or id(step) not in self._report_began:
             return
         began = self._report_began.pop(id(step))
-        self._report.step_end(
-            step._label(),
-            outcome,
-            time.monotonic() - began,
-            self._peer_names(step),
-        )
+        self._report.step_end(step._label(), outcome, time.monotonic() - began)
 
     # (spec) Step values
     def __getitem__[T](self, step: Step[T]) -> T:
@@ -183,13 +177,7 @@ def _run_steps(
     guards = {id(step): threading.Lock() for step in steps if step.deferred}
     schedule = threading.Condition(threading.RLock())
 
-    def peer_names(step: Step[Any]) -> list[str]:
-        with schedule:
-            active = set(running)
-        return [item._label() for item in steps if id(item) in active and item is not step]
-
     run._report = report
-    run._peer_names = peer_names
     reset_interrupt()
     announced = False
     announce_lock = threading.RLock()
@@ -357,8 +345,8 @@ def _schedule(
                     return
                 running.add(id(step))
                 schedule.notify_all()
-                # Claim the other ready steps before this one starts, so its
-                # report lists the steps that run alongside it.
+                # Claim the other ready steps before this one starts, so both
+                # step-start times are written before either step runs.
                 while (
                     not failures
                     and len(running) < jobs

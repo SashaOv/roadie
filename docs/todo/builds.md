@@ -1755,7 +1755,7 @@ clause.
   one, a file holding two runs (the last shown), the ten-step cut-off, a
   missing file, a malformed line, and `--summary` with a result word. The
   backlog's run report item goes.
-- [ ] **R17.3: Drop running from step events and time them to the
+- [x] **R17.3: Drop running from step events and time them to the
   millisecond.** Decision 9 as re-planned. The Run report section, the
   writer, the report validator and the R17.1 tests follow it. Tests: no
   `running` field in step events, and `time` carries milliseconds.

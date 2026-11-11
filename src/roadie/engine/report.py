@@ -1,6 +1,7 @@
 """Append a run report, and render the last run as Markdown."""
 
 import json
+import re
 import shutil
 import sys
 import threading
@@ -15,7 +16,8 @@ from roadie.engine.root import project_root
 
 
 def _timestamp() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC)
+    return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
 
 
 # (spec) Run report
@@ -35,17 +37,11 @@ class Report:
     def run_start(self, results: list[str], jobs: int) -> None:
         self._emit("run-start", results=results, jobs=jobs)
 
-    def step_start(self, step: str, running: list[str]) -> None:
-        self._emit("step-start", step=step, running=running)
+    def step_start(self, step: str) -> None:
+        self._emit("step-start", step=step)
 
-    def step_end(self, step: str, outcome: str, elapsed: float, running: list[str]) -> None:
-        self._emit(
-            "step-end",
-            step=step,
-            outcome=outcome,
-            elapsed=elapsed,
-            running=running,
-        )
+    def step_end(self, step: str, outcome: str, elapsed: float) -> None:
+        self._emit("step-end", step=step, outcome=outcome, elapsed=elapsed)
 
     def run_end(self, outcome: str, elapsed: float) -> None:
         self._emit("run-end", outcome=outcome, elapsed=elapsed)
@@ -88,6 +84,7 @@ class Report:
 
 
 _GIB = 1024**3
+_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
 _EVENTS = frozenset({"run-start", "step-start", "step-end", "run-end"})
 _STEP_OUTCOMES = frozenset({"built", "reused", "failed", "interrupted"})
 _RUN_OUTCOMES = frozenset({"succeeded", "failed", "interrupted"})
@@ -169,7 +166,7 @@ def _parse_event(line: str) -> dict[str, Any] | None:
         return None
     if not isinstance(value, dict) or value.get("event") not in _EVENTS:
         return None
-    if not isinstance(value.get("time"), str) or not _whole(value.get("free")):
+    if not _time(value.get("time")) or not _whole(value.get("free")):
         return None
     event = value["event"]
     if event == "run-start":
@@ -180,14 +177,13 @@ def _parse_event(line: str) -> dict[str, Any] | None:
         ):
             return None
     elif event == "step-start":
-        if not isinstance(value.get("step"), str) or not _strings(value.get("running")):
+        if not isinstance(value.get("step"), str):
             return None
     elif event == "step-end":
         if not (
             isinstance(value.get("step"), str)
             and value.get("outcome") in _STEP_OUTCOMES
             and _number(value.get("elapsed"))
-            and _strings(value.get("running"))
         ):
             return None
     elif not (value.get("outcome") in _RUN_OUTCOMES and _number(value.get("elapsed"))):
@@ -232,6 +228,10 @@ def _growth(step: _Measured) -> int:
 
 def _gib(nbytes: int) -> str:
     return f"{nbytes / _GIB:.1f}"
+
+
+def _time(value: object) -> bool:
+    return isinstance(value, str) and _TIME.fullmatch(value) is not None
 
 
 def _whole(value: object) -> bool:

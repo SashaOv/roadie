@@ -462,16 +462,15 @@ line, flushed as each event happens, so a later run adds to the same file.
 Roadie never truncates the file. A run holds the open file and nothing else
 for the report, and releases it when the run ends.
 
-Every event has `event`, `time` (UTC, ISO 8601, whole seconds,
-`YYYY-MM-DDTHH:MM:SSZ`) and `free` (bytes free on the filesystem holding the
+Every event has `event`, `time` (UTC, ISO 8601, milliseconds,
+`YYYY-MM-DDTHH:MM:SS.sssZ`) and `free` (bytes free on the filesystem holding the
 project root, from `shutil.disk_usage`):
 
 - `run-start`: `total` bytes on that filesystem, `results` (the requested
   names, in the order given) and `jobs`;
-- `step-start`: `step` (its name) and `running` (the other steps running at
-  that moment, in plan order);
+- `step-start`: `step` (its name);
 - `step-end`: `step`, `outcome` (`built`, `reused`, `failed` or
-  `interrupted`), `elapsed` (seconds) and `running`;
+  `interrupted`) and `elapsed` (seconds);
 - `run-end`: `outcome` (`succeeded`, `failed` or `interrupted`) and
   `elapsed`.
 

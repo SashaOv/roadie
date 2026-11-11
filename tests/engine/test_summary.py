@@ -38,20 +38,20 @@ Growth includes the steps running alongside.
 
 
 def _event(kind: str, free: int, **fields: object) -> dict[str, Any]:
-    return {"event": kind, "time": "2026-11-10T00:00:00Z", "free": free, **fields}
+    return {"event": kind, "time": "2026-11-10T00:00:00.000Z", "free": free, **fields}
 
 
 def _sample() -> list[dict[str, Any]]:
     return [
         _event("run-start", 10 * _GIB, total=100 * _GIB, results=["pair"], jobs=1),
-        _event("step-start", 10 * _GIB, step="compile", running=[]),
-        _event("step-end", 8 * _GIB, step="compile", outcome="built", elapsed=125, running=[]),
-        _event("step-start", 8 * _GIB, step="lint", running=[]),
-        _event("step-end", 8 * _GIB, step="lint", outcome="reused", elapsed=1, running=[]),
-        _event("step-start", 8 * _GIB, step="test", running=[]),
-        _event("step-end", 7 * _GIB, step="test", outcome="failed", elapsed=10, running=[]),
-        _event("step-start", 7 * _GIB, step="pack", running=[]),
-        _event("step-end", 7 * _GIB, step="pack", outcome="interrupted", elapsed=4, running=[]),
+        _event("step-start", 10 * _GIB, step="compile"),
+        _event("step-end", 8 * _GIB, step="compile", outcome="built", elapsed=125),
+        _event("step-start", 8 * _GIB, step="lint"),
+        _event("step-end", 8 * _GIB, step="lint", outcome="reused", elapsed=1),
+        _event("step-start", 8 * _GIB, step="test"),
+        _event("step-end", 7 * _GIB, step="test", outcome="failed", elapsed=10),
+        _event("step-start", 7 * _GIB, step="pack"),
+        _event("step-end", 7 * _GIB, step="pack", outcome="interrupted", elapsed=4),
         _event("run-end", 7 * _GIB, outcome="failed", elapsed=140),
     ]
 
@@ -91,8 +91,8 @@ def test_a_file_of_two_runs_shows_the_last(
     report = tmp_path / "report.json"
     earlier = [
         _event("run-start", 3 * _GIB, total=9 * _GIB, results=["old"], jobs=1),
-        _event("step-start", 3 * _GIB, step="old", running=[]),
-        _event("step-end", 1 * _GIB, step="old", outcome="built", elapsed=9999, running=[]),
+        _event("step-start", 3 * _GIB, step="old"),
+        _event("step-end", 1 * _GIB, step="old", outcome="built", elapsed=9999),
         _event("run-end", 1 * _GIB, outcome="succeeded", elapsed=9999),
     ]
     _write(report, earlier + _sample())
@@ -114,10 +114,10 @@ def test_the_slowest_and_growth_lists_stop_at_ten(
     for index in range(1, 12):
         name = f"s{index:02d}"
         growth = (12 - index) * _GIB
-        events.append(_event("step-start", free, step=name, running=[]))
+        events.append(_event("step-start", free, step=name))
         free -= growth
         events.append(
-            _event("step-end", free, step=name, outcome="built", elapsed=index, running=[])
+            _event("step-end", free, step=name, outcome="built", elapsed=index)
         )
     events.append(_event("run-end", free, outcome="succeeded", elapsed=free))
     report = tmp_path / "report.json"

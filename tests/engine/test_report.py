@@ -17,7 +17,7 @@ from roadie.build import Group, Service, Step
 from roadie.engine.errors import StepFailed
 from roadie.engine.run import Run
 
-_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
 
 
 class _Usage:
@@ -115,16 +115,10 @@ def test_a_run_records_every_event_and_field(
     assert len(ends) == 2
     assert {event["outcome"] for event in ends} == {"built"}
     for event in steps:
-        other = "b" if event["step"] == "a" else "a"
+        assert "running" not in event
         if event["event"] == "step-end":
             assert event["outcome"] == "built"
             assert event["elapsed"] >= 0
-            if jobs == 1:
-                assert event["running"] == []
-            elif event["step"] == "a":
-                assert event["running"] == ["b"]
-        else:
-            assert event["running"] == ([other] if jobs > 1 else [])
     finished = events[-1]
     assert finished["outcome"] == "succeeded"
     assert finished["elapsed"] >= 0
@@ -196,10 +190,10 @@ def test_a_deferred_step_ends_when_its_start_ends(
     ends = {event["step"]: event for event in _events(report) if event["event"] == "step-end"}
     assert ends["server"]["outcome"] == "built"
     assert ends["server"]["elapsed"] == 4
-    assert ends["server"]["running"] == ["after"]
+    assert "running" not in ends["server"]
     assert ends["after"]["outcome"] == "built"
     assert ends["after"]["elapsed"] == 5
-    assert ends["after"]["running"] == []
+    assert "running" not in ends["after"]
     assert _events(report)[-1]["elapsed"] == 9
 
 
