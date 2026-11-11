@@ -1773,7 +1773,7 @@ clause.
   do not release; a subdirectory's manifest left
   alone; and the Niva-shaped release from the acceptance check. The backlog
   item is replaced as decision 18 says.
-- [ ] **R17.6: Install pnpm on every CI runner.** As decision 6, before
+- [x] **R17.6: Install pnpm on every CI runner.** As decision 6, before
   `uv sync`. A step prints `pnpm --version` and runs `python -c "import
   subprocess; subprocess.run(['pnpm', '--version'], check=True)"`, which
   shows Python finds pnpm by name. The patch is verified when that CI run
