@@ -1748,7 +1748,7 @@ clause.
   file; an open failure and a write failure partway (patched `OSError`), each
   printing the warning once and the run's status unchanged; `--dry` and
   `--clean` refusing; the file closed when the run ends.
-- [ ] **R17.2: Summarize a run report as Markdown.** Decisions 12 and 13. The
+- [x] **R17.2: Summarize a run report as Markdown.** Decisions 12 and 13. The
   Run report section states the output. Tests: a finished run, an unfinished
   one, a file holding two runs (the last shown), the ten-step cut-off, a
   missing file, a malformed line, and `--summary` with a result word. The

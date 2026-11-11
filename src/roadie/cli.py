@@ -11,6 +11,7 @@ from roadie.engine.errors import RoadieError
 from roadie.engine.graph import Graph, load
 from roadie.engine.lock import clean_project
 from roadie.engine.parameters import ParameterValues
+from roadie.engine.report import render_summary
 from roadie.engine.root import find_project_root
 from roadie.engine.run import execute
 from roadie.engine.step import Step
@@ -61,9 +62,28 @@ def run(
         Path | None,
         Parameter(name="--report", help="Append a JSON line per event to this file"),
     ] = None,
+    summary: Annotated[
+        Path | None,
+        Parameter(name="--summary", help="Print the last run in this report as Markdown"),
+    ] = None,
 ) -> None:
     """Run the named results of a build file, by default its default result."""
     try:
+        if summary is not None and (
+            bool(results)
+            or file != Path(".")
+            or base_dir is not None
+            or locked
+            or bool(env)
+            or dry_run
+            or clean
+            or jobs is not None
+            or report is not None
+        ):
+            raise RoadieError("--summary takes only a report path")
+        if summary is not None:
+            print(render_summary(summary), end="")
+            return
         if report is not None and dry_run:
             raise RoadieError("--report does not apply to --dry")
         if report is not None and clean:

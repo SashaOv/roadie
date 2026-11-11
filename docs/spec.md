@@ -69,7 +69,7 @@ started, the run fails with `cannot run git to find the project root:
 ## Command line
 
 ```
-roadie [--dry-run | --dry] [--locked] [--clean] [--jobs N] [--report PATH] [--base-dir DIR] [--env FILE]... [-f PATH] [name=value]... [result [name=value]...]...
+roadie [--dry-run | --dry] [--locked] [--clean] [--jobs N] [--report PATH] [--summary PATH] [--base-dir DIR] [--env FILE]... [-f PATH] [name=value]... [result [name=value]...]...
 ```
 
 `-f PATH`, `--file PATH` names the root build file. A file is that build
@@ -143,6 +143,10 @@ can each be requested only once per run; request one of them`.
   With `--dry` it fails with `--report does not apply to --dry`, and with
   `--clean` it fails with `--report does not apply to --clean`, before
   anything runs.
+- `--summary PATH`: print the Markdown for the last run in `PATH` and exit
+  without loading a build file. Combined with a result, a parameter, or
+  another option it fails with `--summary takes only a report path`. See
+  [Run report](#run-report).
 - `--dry-run`, `--dry`: walk the plan through the same scheduler as a run:
   environment files, fingerprints, record matching, and deferred steps. It
   marks each step the way that run reports it: `# reuse` where the run
@@ -478,6 +482,46 @@ not `failed`.
 A report that cannot be opened or written prints `cannot write report
 <path>: <reason>; continuing without it` once to standard error, writes no
 further events, and leaves the run's result and exit status unchanged.
+
+`roadie --summary PATH` prints the Markdown for the last run in the file,
+from its last `run-start` through the events after it, and exits without
+loading a build file. Combined with a result, a parameter, or another
+option it fails with `--summary takes only a report path`. A missing file
+fails with `report does not exist: <path>`. A line that is not an event
+fails with `<path> line <n> is not a report event`, counting from 1 over
+the whole file. A file with no `run-start` fails with `report has no run:
+<path>`. A report that cannot be read fails with `cannot read report <path>:
+<reason>`.
+
+```
+# Run
+
+Free space was <start> GiB at the start, <lowest> GiB at the lowest, and <end> GiB at the end.
+
+<built> built, <reused> reused, <failed> failed, <interrupted> interrupted.
+
+## Slowest
+
+- `<step>` <m:ss>
+
+## Disk growth
+
+Growth includes the steps running alongside.
+
+- `<step>` <growth> GiB
+```
+
+`<start>` is free space on `run-start`. `<end>` is free space on `run-end`,
+or on the last event when the run has none. `<lowest>` is the lowest free
+space on the run's events. Each size is GiB (1024³ bytes) with one decimal.
+The counts are the run's `step-end` outcomes. `<m:ss>` is the step's
+`elapsed`: whole minutes and two digits of seconds, rounded down. The
+slowest list is the ten steps with the highest `elapsed`, highest first;
+equal times keep the order the steps started. The growth list is the ten
+steps whose free space fell the most from `step-start` to `step-end`,
+largest first; equal growth keeps that same order. A step's growth is its
+`step-start` free space minus its `step-end` free space. A run with no
+`run-end` adds a blank line and `The run did not finish.` as its last line.
 
 ### Reusing a step
 
