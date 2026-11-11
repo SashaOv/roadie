@@ -1552,13 +1552,16 @@ not run on Windows. Discharges the CI clause.
 
 Status: planned, approved 2026-11-10
 
+Re-planned 2026-11-11, approved by the author: the steps' start and end
+times replace `running` (decision 9), in the inserted R17.3.
+
 **Improvement.** `roadie --report <path>` appends one JSON line per event as
 the run goes: its start with the project disk's total and free space, each
-step's start and end with its outcome, elapsed time, free disk and the steps
-running alongside it, and the run's end. A run that dies, on a full disk or
-otherwise, leaves its report up to that moment. `roadie --summary <path>`
-renders the last run as Markdown: the slowest steps, the largest disk growth,
-free space at start, lowest and end, and the built and reused counts. Today
+step's start and end with its outcome, elapsed time and free disk, and the
+run's end. A run that dies, on a full disk or otherwise, leaves its report
+up to that moment. `roadie --summary <path>` renders the last run as
+Markdown: the slowest steps, the largest disk growth, free space at start,
+lowest and end, and the built and reused counts. Today
 a run that dies leaves only its console output, with no free-space figures and
 no record of which steps were running when it stopped.
 
@@ -1622,21 +1625,20 @@ the author amended them.
 7. The backlog's `Toolchain` input goes: `CargoPackage` covers
    `rust-toolchain.toml` and `rustc --version`, `PythonEnv` the interpreter,
    and `NodeEnv` Node.
-8. The executor pushes `main` after R17.5 and watches that CI run, because
+8. The executor pushes `main` after R17.6 and watches that CI run, because
    pnpm on the three runners can be observed nowhere else, and pushes again
-   after R17.8 and watches the final run (both authorized at the checkpoint,
+   after R17.9 and watches the final run (both authorized at the checkpoint,
    2026-11-10).
 9. `--report PATH`, relative to the working directory, opens the file for
    appending and writes one JSON object per line, flushed as each event
    happens, so a later run adds to the same file. Every event has `event`,
-   `time` (UTC, ISO 8601, whole seconds) and `free` (bytes free on the
+   `time` (UTC, ISO 8601, milliseconds) and `free` (bytes free on the
    filesystem holding the project root, from `shutil.disk_usage`):
    - `run-start`: `total` bytes on that filesystem, `results` (the requested
      names), `jobs`;
-   - `step-start`: `step` (its name) and `running` (the other steps running at
-     that moment);
+   - `step-start`: `step` (its name);
    - `step-end`: `step`, `outcome` (`built`, `reused`, `failed` or
-     `interrupted`), `elapsed` (seconds) and `running`;
+     `interrupted`), and `elapsed` (seconds);
    - `run-end`: `outcome` (`succeeded`, `failed` or `interrupted`) and
      `elapsed`.
    The steps reported are those that print a `build` or `reused` line; a
@@ -1709,10 +1711,10 @@ Niva's change; the Module concept (decision 18).
 - `uv run roadie checks` passes, and CI passes on `ubuntu-latest`,
   `macos-latest` and `windows-latest` with the real `node` and `pnpm`, the
   pnpm tests not skipped.
-- The scenario in R17.3 runs the real `roadie` command as a subprocess in a
+- The scenario in R17.4 runs the real `roadie` command as a subprocess in a
   temporary git project with `--report`. It shows: a run with two parallel
-  steps writes `run-start`, a start and an end per step with each naming the
-  other in `running`, and `run-end`; a second run appends a second run whose
+  steps writes `run-start`, both steps' `step-start` before either
+  `step-end`, and `run-end`; a second run appends a second run whose
   steps end `reused`; `--summary` renders the second run; killing `roadie`
   with SIGKILL during a slow step (POSIX) leaves a report ending in that
   step's `step-start`, and `--summary` adds `The run did not finish.`; a
@@ -1723,7 +1725,7 @@ Niva's change; the Module concept (decision 18).
   without one. Afterwards the four versioned manifests carry the new version,
   the root `package.json` and a `vendor/x/pyproject.toml` are unchanged, and
   the tag is pushed.
-- The scenario in R17.8 runs the real `roadie` command as a subprocess in a
+- The scenario in R17.9 runs the real `roadie` command as a subprocess in a
   temporary git project holding a pnpm workspace in which `app` depends on
   `core` and `other` stands alone, and a `Check` per package takes
   `PnpmPackage`. It shows: a second run reuses every step; editing a file in
@@ -1734,7 +1736,7 @@ Niva's change; the Module concept (decision 18).
 - Each behaviour change is covered by a test that fails before its patch.
 
 **Author action required at completion.** None: the executor pushes after
-R17.8 and records the final CI run (decision 8), which discharges the CI
+R17.9 and records the final CI run (decision 8), which discharges the CI
 clause.
 
 ### Patches
@@ -1753,10 +1755,14 @@ clause.
   one, a file holding two runs (the last shown), the ten-step cut-off, a
   missing file, a malformed line, and `--summary` with a result word. The
   backlog's run report item goes.
-- [ ] **R17.3: Run the report scenario through the CLI.** Add the report
+- [ ] **R17.3: Drop running from step events and time them to the
+  millisecond.** Decision 9 as re-planned. The Run report section, the
+  writer, the report validator and the R17.1 tests follow it. Tests: no
+  `running` field in step events, and `time` carries milliseconds.
+- [ ] **R17.4: Run the report scenario through the CLI.** Add the report
   scenario from the acceptance check as a test that runs `roadie` as a
   subprocess. Its SIGKILL clause is POSIX-only with the R14 marker.
-- [ ] **R17.4: Release the manifests of named directories.** Decisions
+- [ ] **R17.5: Release the manifests of named directories.** Decisions
   15–18. The `Release` docstring states the rules; Roadie's `build.py` takes
   `Release(".", ...)`. Tests: a directory with two agreeing manifests and a
   version-less third; a skipped `version.workspace = true` member; a
@@ -1767,13 +1773,13 @@ clause.
   do not release; a subdirectory's manifest left
   alone; and the Niva-shaped release from the acceptance check. The backlog
   item is replaced as decision 18 says.
-- [ ] **R17.5: Install pnpm on every CI runner.** As decision 6, before
+- [ ] **R17.6: Install pnpm on every CI runner.** As decision 6, before
   `uv sync`. A step prints `pnpm --version` and runs `python -c "import
   subprocess; subprocess.run(['pnpm', '--version'], check=True)"`, which
   shows Python finds pnpm by name. The patch is verified when that CI run
   passes on all three platforms; the executor pushes and records the run here
   (decision 8).
-- [ ] **R17.6: Add the NodeEnv input.** Decisions 1–3 and 5, in a new
+- [ ] **R17.7: Add the NodeEnv input.** Decisions 1–3 and 5, in a new
   `build/node.py`, exported from `roadie.build`. The spec gains a Node
   environment section after Python environment. Tests use the real `node` and
   `pnpm` in temporary workspaces: a workspace, a single package with a nested
@@ -1781,13 +1787,13 @@ clause.
   lockfile copy and environment variable, one `pnpm ls` per run, and no `package.json` above
   the base directory. Patched `subprocess.run` covers a different Node
   version, a program that cannot start and a failing `pnpm ls`.
-- [ ] **R17.7: Add the PnpmPackage input.** Decision 4, beside `NodeEnv`,
+- [ ] **R17.8: Add the PnpmPackage input.** Decision 4, beside `NodeEnv`,
   exported, with a spec section after Cargo packages. Tests cover the
   dependency closure through each of the four dependency fields, a change in
   an unrelated package, an unknown name, and a file git ignores (excluded).
   The backlog's `NodeEnv` and `Toolchain` items go, and the npm-installed
   `pnpm.cmd` item joins the backlog.
-- [ ] **R17.8: Run the pnpm scenario through the CLI.** Add the acceptance
+- [ ] **R17.9: Run the pnpm scenario through the CLI.** Add the acceptance
   scenario as a test that runs `roadie` as a subprocess in a temporary git
   project. It uses no network: the workspace has no external dependencies,
   and its lockfile comes from `pnpm install --offline`.
