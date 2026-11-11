@@ -1812,7 +1812,14 @@ clause.
   and each refused character. On Windows only (a `windows_only` marker
   beside `posix_only`): a `.cmd` placed on a step's `PATH` starts by name
   through `_cmd` and receives those arguments unchanged, and a `.cmd` service starts and stops. The executor
-  pushes and records the CI run here (decision 8).
+  pushes and records the CI run here (decision 8). Run 43095211006 on
+  `b976efa` stayed queued with no jobs; GitHub refused cancel, force-cancel,
+  rerun, and delete. Run 43119099601 on `b4507ae` failed.
+  `ubuntu-latest` and `macos-latest` passed. `windows-latest` passed the new
+  batch-file tests, then `test_a_rust_binary_build_prints_no_cargo_json`
+  failed: `_cmd` resolved `cargo` to `cargo.exe` before `Popen`, so the
+  test's stand-in never ran and real cargo looked for a `Cargo.toml` in the
+  checkout.
 - [ ] **R17.8: Add the NodeEnv input.** Decisions 1–3 and 5, in a new
   `build/node.py`, exported from `roadie.build`. The spec gains a Node
   environment section after Python environment. Tests use the real `node` and
