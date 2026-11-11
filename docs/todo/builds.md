@@ -143,6 +143,12 @@ builds, then the one planned build. Unplanned work is in
   `73e46992e05b19abd31f2f3c20e0e7370d762115`; it takes `version` and
   `standalone`, which installs `@pnpm/exe` instead of the npm package. The
   latest pnpm is 12.18.0; Niva pins `pnpm@10.33.0` in `packageManager`.
+- 2026-11-11: that action, with `version: 10.33.0` and `standalone: true`,
+  installs pnpm 11.28.10 and switches to 10.33.0 by self-update, which leaves
+  shims and no `pnpm.exe` in `PNPM_HOME` on `windows-latest`. PowerShell runs
+  `pnpm --version`; Python's `subprocess.run(['pnpm', '--version'])` fails
+  with `[WinError 2]`. Ubuntu and macOS pass (CI run 43089953768 on
+  `33a005b`). Which shim files it leaves was not listed.
 - 2026-11-10: in a scratch directory with `package.json` and no
   `pnpm-workspace.yaml`, `pnpm ls --json --depth -1` lists that project alone,
   while `pnpm ls -r` adds a nested `sub/package.json` as a second array. From
@@ -1555,6 +1561,10 @@ Status: planned, approved 2026-11-10
 Re-planned 2026-11-11, approved by the author: the steps' start and end
 times replace `running` (decision 9), in the inserted R17.3.
 
+Re-planned 2026-11-11, approved by the author: Roadie starts batch files on
+Windows (decisions 6, 19 and 20), in the inserted R17.7, because CI's pnpm
+is a shim there.
+
 **Improvement.** `roadie --report <path>` appends one JSON line per event as
 the run goes: its start with the project disk's total and free space, each
 step's start and end with its outcome, elapsed time and free disk, and the
@@ -1619,15 +1629,14 @@ the author amended them.
    start fails with `cannot run <program>: <reason>`, the wording of `_cmd`.
    `pnpm ls` exiting non-zero fails with `pnpm ls failed: <standard error>`.
 6. CI installs pnpm 10.33.0 with `pnpm/action-setup` at commit `73e4699`,
-   `standalone: true`, so Windows finds `pnpm.exe` by name (Facts,
-   2026-11-09). Starting an npm-installed `pnpm.cmd` on Windows goes to the
-   backlog; until then it fails as decision 5 says.
+   `standalone: true`. On Windows that leaves a shim, not `pnpm.exe` (Facts,
+   2026-11-11), so Roadie starts batch files (decisions 19 and 20).
 7. The backlog's `Toolchain` input goes: `CargoPackage` covers
    `rust-toolchain.toml` and `rustc --version`, `PythonEnv` the interpreter,
    and `NodeEnv` Node.
-8. The executor pushes `main` after R17.6 and watches that CI run, because
+8. The executor pushes `main` after R17.7 and watches that CI run, because
    pnpm on the three runners can be observed nowhere else, and pushes again
-   after R17.9 and watches the final run (both authorized at the checkpoint,
+   after R17.10 and watches the final run (both authorized at the checkpoint,
    2026-11-10).
 9. `--report PATH`, relative to the working directory, opens the file for
    appending and writes one JSON object per line, flushed as each event
@@ -1700,6 +1709,18 @@ the author amended them.
     build file names modules; every manifest with its own version in a
     module's tree, down to any nested module, follows the module's version or
     has none; vendored manifests can be left out.
+19. On Windows, a program a step names without a directory, in `_cmd` or a
+    service, and `NodeEnv`'s `node` and `pnpm`, are found as a Windows shell
+    finds them: `shutil.which` along the `PATH` the program runs with, trying
+    each `PATHEXT` extension, the first match winning. A name not found
+    starts and fails as today. Roadie's own `git` and `cargo` queries, and
+    POSIX, are unchanged.
+20. A program found as a `.cmd` or `.bat` file runs as `cmd.exe /d /s /c
+    "<file> <arguments>"` (`cmd.exe` from `ComSpec`), each argument in double
+    quotes with backslashes before the closing quote doubled, so cmd.exe
+    reads spaces and `& | < > ^ ( )` literally. An argument holding `"`, `%`
+    or a line break fails before starting with `cannot run <program>: cmd.exe
+    would read <character> in <argument>`.
 
 Not in this build: rendering more than the last run, and HTML output;
 `select_pnpm_packages` (a `select_rust_packages` for pnpm),
@@ -1725,7 +1746,7 @@ Niva's change; the Module concept (decision 18).
   without one. Afterwards the four versioned manifests carry the new version,
   the root `package.json` and a `vendor/x/pyproject.toml` are unchanged, and
   the tag is pushed.
-- The scenario in R17.9 runs the real `roadie` command as a subprocess in a
+- The scenario in R17.10 runs the real `roadie` command as a subprocess in a
   temporary git project holding a pnpm workspace in which `app` depends on
   `core` and `other` stands alone, and a `Check` per package takes
   `PnpmPackage`. It shows: a second run reuses every step; editing a file in
@@ -1736,7 +1757,7 @@ Niva's change; the Module concept (decision 18).
 - Each behaviour change is covered by a test that fails before its patch.
 
 **Author action required at completion.** None: the executor pushes after
-R17.9 and records the final CI run (decision 8), which discharges the CI
+R17.10 and records the final CI run (decision 8), which discharges the CI
 clause.
 
 ### Patches
@@ -1773,7 +1794,7 @@ clause.
   do not release; a subdirectory's manifest left
   alone; and the Niva-shaped release from the acceptance check. The backlog
   item is replaced as decision 18 says.
-- [ ] **R17.6: Install pnpm on every CI runner.** As decision 6, before
+- [x] **R17.6: Install pnpm on every CI runner.** As decision 6, before
   `uv sync`. A step prints `pnpm --version` and runs `python -c "import
   subprocess; subprocess.run(['pnpm', '--version'], check=True)"`, which
   shows Python finds pnpm by name. The patch is verified when that CI run
@@ -1783,7 +1804,16 @@ clause.
   `windows-latest` ran `pnpm --version`, then Python's
   `subprocess.run(['pnpm', '--version'], check=True)` raised
   `FileNotFoundError: [WinError 2] The system cannot find the file specified`.
-- [ ] **R17.7: Add the NodeEnv input.** Decisions 1–3 and 5, in a new
+- [ ] **R17.7: Start batch files by name on Windows.** Decisions 19 and 20,
+  in `roadie.system`, used by `_cmd` and services; the `_cmd` docstring and
+  the spec's Commands section state them. CI's Python `pnpm --version` step
+  goes. Tests on every platform: the command line built for a batch file
+  from arguments holding spaces, `&`, parentheses and a trailing backslash,
+  and each refused character. On Windows only (a `windows_only` marker
+  beside `posix_only`): a `.cmd` placed on a step's `PATH` starts by name
+  through `_cmd` and receives those arguments unchanged, and a `.cmd` service starts and stops. The executor
+  pushes and records the CI run here (decision 8).
+- [ ] **R17.8: Add the NodeEnv input.** Decisions 1–3 and 5, in a new
   `build/node.py`, exported from `roadie.build`. The spec gains a Node
   environment section after Python environment. Tests use the real `node` and
   `pnpm` in temporary workspaces: a workspace, a single package with a nested
@@ -1791,13 +1821,12 @@ clause.
   lockfile copy and environment variable, one `pnpm ls` per run, and no `package.json` above
   the base directory. Patched `subprocess.run` covers a different Node
   version, a program that cannot start and a failing `pnpm ls`.
-- [ ] **R17.8: Add the PnpmPackage input.** Decision 4, beside `NodeEnv`,
+- [ ] **R17.9: Add the PnpmPackage input.** Decision 4, beside `NodeEnv`,
   exported, with a spec section after Cargo packages. Tests cover the
   dependency closure through each of the four dependency fields, a change in
   an unrelated package, an unknown name, and a file git ignores (excluded).
-  The backlog's `NodeEnv` and `Toolchain` items go, and the npm-installed
-  `pnpm.cmd` item joins the backlog.
-- [ ] **R17.9: Run the pnpm scenario through the CLI.** Add the acceptance
+  The backlog's `NodeEnv` and `Toolchain` items go.
+- [ ] **R17.10: Run the pnpm scenario through the CLI.** Add the acceptance
   scenario as a test that runs `roadie` as a subprocess in a temporary git
   project. It uses no network: the workspace has no external dependencies,
   and its lockfile comes from `pnpm install --offline`.
