@@ -1759,7 +1759,7 @@ clause.
   millisecond.** Decision 9 as re-planned. The Run report section, the
   writer, the report validator and the R17.1 tests follow it. Tests: no
   `running` field in step events, and `time` carries milliseconds.
-- [ ] **R17.4: Run the report scenario through the CLI.** Add the report
+- [x] **R17.4: Run the report scenario through the CLI.** Add the report
   scenario from the acceptance check as a test that runs `roadie` as a
   subprocess. Its SIGKILL clause is POSIX-only with the R14 marker.
 - [ ] **R17.5: Release the manifests of named directories.** Decisions
