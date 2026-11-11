@@ -69,7 +69,7 @@ started, the run fails with `cannot run git to find the project root:
 ## Command line
 
 ```
-roadie [--dry-run | --dry] [--locked] [--clean] [--jobs N] [--base-dir DIR] [--env FILE]... [-f PATH] [name=value]... [result [name=value]...]...
+roadie [--dry-run | --dry] [--locked] [--clean] [--jobs N] [--report PATH] [--base-dir DIR] [--env FILE]... [-f PATH] [name=value]... [result [name=value]...]...
 ```
 
 `-f PATH`, `--file PATH` names the root build file. A file is that build
@@ -138,6 +138,11 @@ can each be requested only once per run; request one of them`.
   of CPUs Roadie may use, or 1 when that count is unavailable; see
   [Parallel steps](#parallel-steps). A value below 1 fails with `--jobs must
   be at least 1`. Output is prefixed when N is above 1, as described there.
+- `--report PATH`: append one JSON object per line to `PATH`, relative to
+  the working directory, as the run goes. See [Run report](#run-report).
+  With `--dry` it fails with `--report does not apply to --dry`, and with
+  `--clean` it fails with `--report does not apply to --clean`, before
+  anything runs.
 - `--dry-run`, `--dry`: walk the plan through the same scheduler as a run:
   environment files, fingerprints, record matching, and deferred steps. It
   marks each step the way that run reports it: `# reuse` where the run
@@ -445,6 +450,34 @@ service, for one, waits on its process. A run may request several results.
 It builds the union of their plans, each shared step once, and serves each
 requested result whose kind serves. A class that sets `once_per_run`, as
 `Service` does, may be requested once in that run.
+
+### Run report
+
+`--report PATH` opens `PATH` for appending and writes one JSON object per
+line, flushed as each event happens, so a later run adds to the same file.
+Roadie never truncates the file. A run holds the open file and nothing else
+for the report, and releases it when the run ends.
+
+Every event has `event`, `time` (UTC, ISO 8601, whole seconds,
+`YYYY-MM-DDTHH:MM:SSZ`) and `free` (bytes free on the filesystem holding the
+project root, from `shutil.disk_usage`):
+
+- `run-start`: `total` bytes on that filesystem, `results` (the requested
+  names, in the order given) and `jobs`;
+- `step-start`: `step` (its name) and `running` (the other steps running at
+  that moment, in plan order);
+- `step-end`: `step`, `outcome` (`built`, `reused`, `failed` or
+  `interrupted`), `elapsed` (seconds) and `running`;
+- `run-end`: `outcome` (`succeeded`, `failed` or `interrupted`) and
+  `elapsed`.
+
+The steps reported are those that print a `build` or `reused` line. A
+deferred step's end is the end of its start. An interrupt is `interrupted`,
+not `failed`.
+
+A report that cannot be opened or written prints `cannot write report
+<path>: <reason>; continuing without it` once to standard error, writes no
+further events, and leaves the run's result and exit status unchanged.
 
 ### Reusing a step
 

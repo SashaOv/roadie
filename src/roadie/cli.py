@@ -57,9 +57,17 @@ def run(
             help="Run up to N independent steps at once. The default is the number of CPUs Roadie may use",
         ),
     ] = None,
+    report: Annotated[
+        Path | None,
+        Parameter(name="--report", help="Append a JSON line per event to this file"),
+    ] = None,
 ) -> None:
     """Run the named results of a build file, by default its default result."""
     try:
+        if report is not None and dry_run:
+            raise RoadieError("--report does not apply to --dry")
+        if report is not None and clean:
+            raise RoadieError("--report does not apply to --clean")
         if jobs is None:
             jobs = os.process_cpu_count() or 1
         if jobs < 1:
@@ -92,6 +100,7 @@ def run(
             targets=targets,
             parameters=ParameterValues(run_wide, own),
             leading=leading,
+            report=report,
         )
     except RoadieError as error:
         raise SystemExit(str(error)) from error

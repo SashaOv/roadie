@@ -4,7 +4,7 @@ import contextvars
 import sys
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, cast
@@ -37,6 +37,7 @@ from roadie.engine.records import (
     save_records,
     sweep_stale_state,
 )
+from roadie.engine.report import Report
 from roadie.engine.root import project_root, use_project_root
 from roadie.engine.step import Step
 
@@ -52,6 +53,26 @@ class Run:
         self.finish_reported = False
         self._artifacts: dict[int, list[str]] = {}
         self._artifact_lock = threading.Lock()
+        self._report: Report | None = None
+        self._report_began: dict[int, float] = {}
+        self._peer_names: Callable[[Step[Any]], list[str]] = lambda _step: []
+
+    def _report_start(self, step: Step[Any]) -> None:
+        if self._report is None or id(step) in self._report_began:
+            return
+        self._report_began[id(step)] = time.monotonic()
+        self._report.step_start(step._label(), self._peer_names(step))
+
+    def _report_end(self, step: Step[Any], outcome: str) -> None:
+        if self._report is None or id(step) not in self._report_began:
+            return
+        began = self._report_began.pop(id(step))
+        self._report.step_end(
+            step._label(),
+            outcome,
+            time.monotonic() - began,
+            self._peer_names(step),
+        )
 
     # (spec) Step values
     def __getitem__[T](self, step: Step[T]) -> T:
@@ -97,25 +118,32 @@ def execute(
     targets: Sequence[Step[Any]] | None = None,
     parameters: ParameterValues | None = None,
     leading: int = 0,
+    report: Path | None = None,
 ) -> object:
     if jobs < 1:
         raise RoadieError("--jobs must be at least 1")
     with use_project_root(root):
-        held = acquire_run_lock(root)
+        writer = Report(report) if report is not None else None
         try:
-            return _run_steps(
-                steps,
-                locked=locked,
-                env=env,
-                run_lock=held,
-                dry=dry,
-                jobs=jobs,
-                targets=targets,
-                parameters=parameters,
-                leading=leading,
-            )
+            held = acquire_run_lock(root)
+            try:
+                return _run_steps(
+                    steps,
+                    locked=locked,
+                    env=env,
+                    run_lock=held,
+                    dry=dry,
+                    jobs=jobs,
+                    targets=targets,
+                    parameters=parameters,
+                    leading=leading,
+                    report=writer,
+                )
+            finally:
+                held.release()
         finally:
-            held.release()
+            if writer is not None:
+                writer.close()
 
 
 def _run_steps(
@@ -129,6 +157,7 @@ def _run_steps(
     targets: Sequence[Step[Any]] | None = None,
     parameters: ParameterValues | None = None,
     leading: int = 0,
+    report: Report | None = None,
 ) -> object:
     _apply_env(steps, env)
     run = Run(locked=locked)
@@ -153,6 +182,14 @@ def _run_steps(
     }
     guards = {id(step): threading.Lock() for step in steps if step.deferred}
     schedule = threading.Condition(threading.RLock())
+
+    def peer_names(step: Step[Any]) -> list[str]:
+        with schedule:
+            active = set(running)
+        return [item._label() for item in steps if id(item) in active and item is not step]
+
+    run._report = report
+    run._peer_names = peer_names
     reset_interrupt()
     announced = False
     announce_lock = threading.RLock()
@@ -179,6 +216,8 @@ def _run_steps(
             print(line, flush=True)
 
     succeeded = False
+    outcome = "succeeded"
+    reported_run = False
     previous_before_stop = set_before_stop(announce_interrupt)
     try:
         with run_scope(), interrupt_on_terminate():
@@ -188,6 +227,13 @@ def _run_steps(
                     steps,
                     parameters if parameters is not None else ParameterValues({}, {}),
                 )
+                if report is not None:
+                    if targets is None:
+                        names = [steps[-1]._label()] if steps else []
+                    else:
+                        names = [step._label() for step in targets]
+                    report.run_start(names, jobs)
+                    reported_run = True
                 value = _schedule(
                     steps,
                     run=run,
@@ -210,8 +256,10 @@ def _run_steps(
                     leading=leading,
                 )
                 if interrupted:
+                    outcome = "interrupted"
                     raise KeyboardInterrupt
                 if failures:
+                    outcome = "failed"
                     raise failures[0]
                 if dry:
                     for step in steps:
@@ -225,16 +273,32 @@ def _run_steps(
                     return None
                 succeeded = True
             except KeyboardInterrupt:
+                outcome = "interrupted"
                 announce_interrupt()
                 raise
+            except BaseException:
+                if outcome == "succeeded":
+                    outcome = "failed"
+                raise
             finally:
-                if not dry:
-                    with schedule:
-                        expired = _take_live(run, live)
-                    _teardown(expired)
-                if bound is not None:
-                    reset_parameters(bound)
-                reset_interrupt()
+                try:
+                    if not dry:
+                        with schedule:
+                            expired = _take_live(run, live)
+                        _teardown(expired)
+                except KeyboardInterrupt:
+                    outcome = "interrupted"
+                    raise
+                except BaseException:
+                    if outcome == "succeeded":
+                        outcome = "failed"
+                    raise
+                finally:
+                    if report is not None and reported_run:
+                        report.run_end(outcome, time.monotonic() - run.started_at)
+                    if bound is not None:
+                        reset_parameters(bound)
+                    reset_interrupt()
     except KeyboardInterrupt:
         announce_interrupt()
         raise
@@ -292,6 +356,22 @@ def _schedule(
                         raise RoadieError("cannot schedule the plan")
                     return
                 running.add(id(step))
+                schedule.notify_all()
+                # Claim the other ready steps before this one starts, so its
+                # report lists the steps that run alongside it.
+                while (
+                    not failures
+                    and len(running) < jobs
+                    and _next_ready(
+                        steps, finished, running, prerequisites, requested, leading
+                    )
+                    is not None
+                ):
+                    schedule.wait()
+                if failures:
+                    running.discard(id(step))
+                    schedule.notify_all()
+                    return
             token = set_prefix(step._label()) if jobs > 1 else None
             try:
                 try:
@@ -309,6 +389,7 @@ def _schedule(
                         dry=dry,
                     )
                 except KeyboardInterrupt:
+                    run._report_end(step, "interrupted")
                     end_prefix()
                     request_stop()
                     with schedule:
@@ -320,6 +401,7 @@ def _schedule(
                         raise
                     return
                 except BaseException as error:  # noqa: BLE001 — SystemExit is a step failure
+                    run._report_end(step, "failed")
                     end_prefix()
                     failure = (
                         error
@@ -513,11 +595,12 @@ def _run_one(
         value = step.decode(record["value"])
         with schedule:
             run.reused.add(id(step))
+        run._report_start(step)
         print(f"reused {step._label()}", flush=True)
         _value, output = _kept(
             step, run, live, value, built=False,
             step_fingerprint=step_fingerprint, requested=requested, run_lock=run_lock,
-            schedule=schedule,
+            schedule=schedule, reported="reused",
         )
         with schedule:
             outputs[id(step)] = output
@@ -533,15 +616,21 @@ def _run_one(
             outputs[id(step)] = "dry"
     else:
         _start_deferred(step, run, live, started, guards, schedule, requested)
+        member_reused = step._reports_reused(run.reused)
+        if member_reused:
+            run._report_start(step)
         announce(step)
+        if type(step).recorded:
+            run._report_start(step)
         began = time.monotonic() if type(step).recorded else None
         with current_step(step), command_stdin(inherit=_inherits_stdin(step, requested)):
             value = step.build(run)
         elapsed = None if began is None else time.monotonic() - began
+        reported = "reused" if member_reused else ("built" if type(step).recorded else None)
         _value, output = _kept(
             step, run, live, value, built=True,
             step_fingerprint=step_fingerprint, requested=requested, run_lock=run_lock,
-            schedule=schedule, elapsed=elapsed,
+            schedule=schedule, elapsed=elapsed, reported=reported,
         )
         with schedule:
             if step.deferred:
@@ -617,6 +706,7 @@ def _kept(
     run_lock: HeldLock | None,
     schedule: threading.Condition,
     elapsed: float | None = None,
+    reported: str | None = None,
 ) -> tuple[object, str]:
     with schedule:
         run._values[id(step)] = value
@@ -630,6 +720,8 @@ def _kept(
     _remember(step, step_fingerprint, output, value, run=run, built=built)
     if elapsed is not None:
         report_built(step, elapsed)
+    if reported is not None:
+        run._report_end(step, reported)
     if id(step) in requested and (
         type(step).serve is not Step.serve or requested.issubset({id(step)})
     ):
@@ -686,6 +778,8 @@ def _start_one(
             return
         try:
             announce(dependency)
+            if type(dependency).recorded:
+                run._report_start(dependency)
             began = time.monotonic() if type(dependency).recorded else None
             with (
                 current_step(dependency),
@@ -693,14 +787,20 @@ def _start_one(
             ):
                 value = dependency.build(run)
             elapsed = None if began is None else time.monotonic() - began
-        except (KeyboardInterrupt, StepFailed):
+        except KeyboardInterrupt:
+            run._report_end(dependency, "interrupted")
+            raise
+        except StepFailed:
+            run._report_end(dependency, "failed")
             raise
         except BaseException as error:
+            run._report_end(dependency, "failed")
             raise StepFailed(
                 dependency._label(), _reason(error)
             ) from error
         if elapsed is not None:
             report_built(dependency, elapsed)
+        run._report_end(dependency, "built")
         with schedule:
             run._values[id(dependency)] = value
             live.append(dependency)

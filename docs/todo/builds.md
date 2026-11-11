@@ -1739,7 +1739,7 @@ clause.
 
 ### Patches
 
-- [ ] **R17.1: Write a run report.** Decisions 9–11 and 14. A report writer
+- [x] **R17.1: Write a run report.** Decisions 9–11 and 14. A report writer
   in `roadie.engine` takes events from the scheduler under one lock, so
   parallel steps never interleave a line. The spec gains a Run report section
   after Requested result, and the Command line section lists `--report`.

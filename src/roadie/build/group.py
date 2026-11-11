@@ -25,9 +25,12 @@ class Group(Step[tuple[object, ...]]):
             raise RoadieError("Group takes only steps")
         self.steps = steps
 
+    def _reports_reused(self, reused: set[int]) -> bool:
+        return bool(self.steps) and all(id(step) in reused for step in self.steps)
+
     def build(self, run: "Run") -> tuple[object, ...]:
         values = tuple(run[step] for step in self.steps)
-        if self.steps and all(id(step) in run.reused for step in self.steps):
+        if self._reports_reused(run.reused):
             print(f"reused {self._label()}", flush=True)
         return values
 

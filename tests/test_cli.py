@@ -172,7 +172,7 @@ def test_cli_passes_locked_and_prints_keyword_output(tmp_path: Path, monkeypatch
     monkeypatch.setattr(
         cli,
         "execute",
-        lambda steps, *, root, locked, env=(), dry=False, jobs=1, targets=None, parameters=None, leading=0: observed.append(
+        lambda steps, *, root, locked, env=(), dry=False, jobs=1, targets=None, parameters=None, leading=0, report=None: observed.append(
             (locked, env)
         ),
     )

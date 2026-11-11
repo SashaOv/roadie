@@ -330,11 +330,14 @@ class _Included(Step[tuple[object, ...]]):
             raise RoadieError(f"{self._path} marks no default result")
         yield self.steps[0]
 
+    def _reports_reused(self, reused: set[int]) -> bool:
+        return bool(self.steps) and all(id(step) in reused for step in self.steps)
+
     def build(self, run: Any) -> tuple[object, ...]:
         if not self.steps:
             raise RoadieError(f"{self._path} marks no default result")
         values = tuple(run[step] for step in self.steps)
-        if all(id(step) in run.reused for step in self.steps):
+        if self._reports_reused(run.reused):
             print(f"reused {self._label()}", flush=True)
         return values
 
