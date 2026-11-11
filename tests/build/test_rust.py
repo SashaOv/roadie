@@ -331,13 +331,14 @@ def test_a_rust_binary_build_prints_no_cargo_json(
     )
     script = root / "emit_json.py"
     script.write_text(f"print({line!r})\n")
-    # CreateProcess resolves `cargo` to `cargo.exe` and never runs `cargo.cmd`,
-    # so the stand-in is the Python script, whatever platform finds `cargo`.
+    # On Windows `_cmd` passes the path it finds for `cargo`, and a real
+    # `cargo.exe` there wins over a stand-in, so the stand-in replaces any
+    # program named `cargo` at `Popen`.
     real_popen = subprocess.Popen
 
     def popen(args: object, *pargs: object, **kwargs: object) -> subprocess.Popen[str]:
         command = list(args) if isinstance(args, (list, tuple)) else [args]
-        if command and command[0] == "cargo":
+        if command and Path(str(command[0])).stem.lower() == "cargo":
             command = [sys.executable, str(script), *command[1:]]
         return real_popen(command, *pargs, **kwargs)  # type: ignore[arg-type]
 

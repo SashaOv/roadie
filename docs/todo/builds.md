@@ -1565,6 +1565,10 @@ Re-planned 2026-11-11, approved by the author: Roadie starts batch files on
 Windows (decisions 6, 19 and 20), in the inserted R17.7, because CI's pnpm
 is a shim there.
 
+Paused 2026-11-11: CI runs on Windows cost too much, so the author continues
+on Windows. R17.1–R17.7 are committed, and R17.7 waits for its Windows
+verification (its patch note). R17.8–R17.10 are not started.
+
 **Improvement.** `roadie --report <path>` appends one JSON line per event as
 the run goes: its start with the project disk's total and free space, each
 step's start and end with its outcome, elapsed time and free disk, and the
@@ -1819,7 +1823,9 @@ clause.
   batch-file tests, then `test_a_rust_binary_build_prints_no_cargo_json`
   failed: `_cmd` resolved `cargo` to `cargo.exe` before `Popen`, so the
   test's stand-in never ran and real cargo looked for a `Cargo.toml` in the
-  checkout.
+  checkout. The stand-in now replaces any program named `cargo` (commit
+  `R17: Match the cargo stand-in by program name`), which passes on macOS
+  and is not yet run on Windows.
 - [ ] **R17.8: Add the NodeEnv input.** Decisions 1–3 and 5, in a new
   `build/node.py`, exported from `roadie.build`. The spec gains a Node
   environment section after Python environment. Tests use the real `node` and
