@@ -16,8 +16,9 @@ bullet, except the input-enforcement design, which is moved whole.
   60-second sleep (7.5 minutes for the suite). A session fixture installs
   `signal.default_int_handler` and restores the previous handler; child
   sleeps match the watchers' 10-second limit.
-- `Release` fails when a tracked version file (`Cargo.toml`, `pyproject.toml`,
-  `package.json`) with its own static version is not among its sources.
+- A build file names modules; every manifest with its own version in a
+  module's tree, down to any nested module, follows the module's version or
+  has none; vendored manifests can be left out.
 
 ## User manual
 

@@ -68,16 +68,23 @@ def _release(repo: Path, *secondary: str) -> str:
 
 
 # (spec) Step kinds
-def test_release_names_version_sources_by_their_files() -> None:
+def test_release_names_version_sources_by_their_files(tmp_path: Path) -> None:
     with pytest.raises(RoadieError, match="Release takes paths: got int"):
         Release(1)
+    with pytest.raises(RoadieError, match="Release takes a directory or a manifest file"):
+        Release()
+    with pytest.raises(RoadieError, match="Release primary takes a path: got int"):
+        Release("pyproject.toml", primary=1)
+    (tmp_path / "notes.txt").write_text("x\n")
+    notes = Release("notes.txt")
+    notes.base_dir = tmp_path
     with pytest.raises(
         RoadieError,
         match=re.escape(
             "Release takes pyproject.toml, Cargo.toml, or package.json files: got notes.txt"
         ),
     ):
-        Release("notes.txt")
+        notes._manifests()
     step = Release("pyproject.toml", "other/pyproject.toml", message="ship it")
     assert step.call_arguments()[0] == ["pyproject.toml", "other/pyproject.toml"]
     import roadie.build as api
@@ -477,3 +484,201 @@ def test_a_param_message_is_the_release_message(tmp_path: Path) -> None:
     execute(plan, root=repo, parameters=ParameterValues({"message": "from the run"}, {}))
     assert _git(repo, "log", "-1", "--format=%B").stdout.strip() == "v0.1.1 release\n\nfrom the run"
     assert _object_kind(repo, "v0.1.1") == "tag"
+
+
+def _cargo_package(directory: Path, version: str, name: str = "demo") -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "src").mkdir(exist_ok=True)
+    (directory / "src" / "lib.rs").write_text("pub fn demo() {}\n")
+    manifest = directory / "Cargo.toml"
+    manifest.write_text(
+        f'[package]\nname = "{name}"\nversion = "{version}"\nedition = "2021"\n\n'
+        '[lib]\npath = "src/lib.rs"\n'
+    )
+    return manifest
+
+
+def _package_json(directory: Path, version: str | None, name: str = "demo") -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    file = directory / "package.json"
+    if version is None:
+        file.write_text(f'{{"name": "{name}"}}\n')
+    else:
+        file.write_text(f'{{"name": "{name}", "version": "{version}"}}\n')
+    return file
+
+
+def _run(repo: Path, *sources: str, primary: str | None = None) -> str:
+    step = Release(*sources, primary=primary)
+    step.base_dir = repo
+    step.name = "release"
+    value = execute([step], root=repo)
+    assert isinstance(value, str)
+    return value
+
+
+# (spec) Step kinds
+def test_a_directory_releases_agreeing_manifests_and_skips_a_versionless_one(
+    tmp_path: Path,
+) -> None:
+    repo, bare = _repository(tmp_path, "0.1.0")
+    cargo = _cargo_package(repo, "0.1.0")
+    package = _package_json(repo, None)
+    original = package.read_text()
+    _git(repo, "add", "Cargo.toml", "src/lib.rs", "package.json")
+    _git(repo, "commit", "-q", "-m", "manifests")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    assert _run(repo, ".") == "0.1.1"
+    assert 'version = "0.1.1"' in (repo / "pyproject.toml").read_text()
+    assert 'version = "0.1.1"' in cargo.read_text()
+    assert package.read_text() == original
+    assert "v0.1.1" in _tags(bare)
+
+
+# (spec) Step kinds
+def test_a_workspace_member_without_its_own_version_is_skipped(tmp_path: Path) -> None:
+    repo, _bare = _repository(tmp_path, "0.1.0")
+    member = repo / "member"
+    member.mkdir()
+    _project(member, "0.1.0")
+    cargo = member / "Cargo.toml"
+    cargo.write_text('[package]\nname = "member"\nversion.workspace = true\nedition = "2021"\n')
+    original = cargo.read_text()
+    _git(repo, "add", "member")
+    _git(repo, "commit", "-q", "-m", "member")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    assert _run(repo, "member") == "0.1.1"
+    assert 'version = "0.1.1"' in (member / "pyproject.toml").read_text()
+    assert cargo.read_text() == original
+    assert 'version = "0.1.0"' in (repo / "pyproject.toml").read_text()
+
+
+# (spec) Step kinds
+def test_a_directory_with_no_versioned_manifest_fails(tmp_path: Path) -> None:
+    repo, bare = _repository(tmp_path, "0.1.0")
+    _package_json(repo / "blank", None)
+    _git(repo, "add", "blank/package.json")
+    _git(repo, "commit", "-q", "-m", "blank")
+    with pytest.raises(
+        StepFailed,
+        match=re.escape(
+            "cannot release: blank has no versioned pyproject.toml, Cargo.toml or package.json"
+        ),
+    ):
+        _run(repo, "blank")
+    assert _tags(bare) == set()
+    assert 'version = "0.1.0"' in (repo / "pyproject.toml").read_text()
+
+
+# (spec) Step kinds
+def test_a_file_source_does_not_release_the_manifest_beside_it(tmp_path: Path) -> None:
+    repo, _bare = _repository(tmp_path, "0.1.0")
+    package = _package_json(repo, "0.1.0")
+    original = package.read_text()
+    _git(repo, "add", "package.json")
+    _git(repo, "commit", "-q", "-m", "package")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    assert _run(repo, "pyproject.toml") == "0.1.1"
+    assert 'version = "0.1.1"' in (repo / "pyproject.toml").read_text()
+    assert package.read_text() == original
+
+
+# (spec) Step kinds
+def test_directories_and_files_release_only_the_named_manifests(tmp_path: Path) -> None:
+    repo, bare = _repository(tmp_path, "0.1.0")
+    other = repo / "other"
+    cargo = _cargo_package(other, "0.1.0", name="other")
+    package = _package_json(other, "0.1.0")
+    original = package.read_text()
+    _git(repo, "add", "other")
+    _git(repo, "commit", "-q", "-m", "other")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    assert _run(repo, ".", "other/Cargo.toml") == "0.1.1"
+    assert 'version = "0.1.1"' in (repo / "pyproject.toml").read_text()
+    assert 'version = "0.1.1"' in cargo.read_text()
+    assert package.read_text() == original
+    assert "v0.1.1" in _tags(bare)
+
+
+# (spec) Step kinds
+def test_disagreeing_manifests_fail_until_primary_names_one(tmp_path: Path) -> None:
+    repo, bare = _repository(tmp_path, "0.2.0")
+    package = _package_json(repo, "0.1.0")
+    _git(repo, "add", "package.json")
+    _git(repo, "commit", "-q", "-m", "versions")
+    pyproject = (repo / "pyproject.toml").read_text()
+    original = package.read_text()
+    with pytest.raises(
+        StepFailed,
+        match=re.escape(
+            "cannot release: . holds different versions: "
+            "pyproject.toml 0.2.0, package.json 0.1.0; name one with primary="
+        ),
+    ):
+        _run(repo, ".")
+    assert (repo / "pyproject.toml").read_text() == pyproject
+    assert package.read_text() == original
+    assert _tags(bare) == set()
+
+    assert _run(repo, ".", primary="pyproject.toml") == "0.2.0"
+    assert (repo / "pyproject.toml").read_text() == pyproject
+    assert '"version": "0.2.0"' in package.read_text()
+    assert _tags(bare) == {"v0.2.0"}
+
+
+# (spec) Step kinds
+def test_a_primary_the_sources_do_not_release_fails(tmp_path: Path) -> None:
+    repo, bare = _repository(tmp_path, "0.1.0")
+    vendor = _project(repo / "vendor", "9.9.9")
+    original = vendor.read_text()
+    root = (repo / "pyproject.toml").read_text()
+    _git(repo, "add", "vendor/pyproject.toml")
+    _git(repo, "commit", "-q", "-m", "vendor")
+    with pytest.raises(
+        StepFailed,
+        match=re.escape("Release primary vendor/pyproject.toml is not among its sources"),
+    ):
+        _run(repo, ".", primary="vendor/pyproject.toml")
+    assert (repo / "pyproject.toml").read_text() == root
+    assert vendor.read_text() == original
+    assert _tags(bare) == set()
+
+
+# (spec) Step kinds
+def test_a_subdirectory_manifest_is_left_alone(tmp_path: Path) -> None:
+    repo, _bare = _repository(tmp_path, "0.1.0")
+    nested = _project(repo / "nested", "9.9.9")
+    original = nested.read_text()
+    _git(repo, "add", "nested/pyproject.toml")
+    _git(repo, "commit", "-q", "-m", "nested")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    assert _run(repo, ".") == "0.1.1"
+    assert nested.read_text() == original
+    assert 'version = "0.1.1"' in (repo / "pyproject.toml").read_text()
+
+
+# (spec) Step kinds
+def test_a_niva_shaped_tree_releases_the_named_directories(tmp_path: Path) -> None:
+    repo, bare = _repository(tmp_path, "0.1.0")
+    root_cargo = _cargo_package(repo, "0.1.0", name="niva")
+    root_package = _package_json(repo, None, name="niva")
+    desktop_package = _package_json(repo / "desktop", "0.1.0", name="desktop")
+    tauri = _cargo_package(repo / "desktop" / "src-tauri", "0.1.0", name="niva-tauri")
+    vendor = _project(repo / "vendor" / "x", "9.9.9")
+    root_package_text = root_package.read_text()
+    vendor_text = vendor.read_text()
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "tree")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    assert _run(repo, ".", "desktop", "desktop/src-tauri") == "0.1.1"
+    for manifest in (repo / "pyproject.toml", root_cargo, desktop_package, tauri):
+        assert "0.1.1" in manifest.read_text()
+    assert root_package.read_text() == root_package_text
+    assert vendor.read_text() == vendor_text
+    assert "v0.1.1" in _tags(bare)

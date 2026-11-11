@@ -430,33 +430,94 @@ def _write_text(path: Path, text: str) -> None:
         handle.write(text)
 
 
-def _source(path: object) -> PyProject | CargoManifest | PackageJson:
-    kinds: dict[str, type[PyProject | CargoManifest | PackageJson]] = {
-        "pyproject.toml": PyProject,
-        "Cargo.toml": CargoManifest,
-        "package.json": PackageJson,
-    }
-    if isinstance(path, (str, os.PathLike)):
-        shown = os.fspath(path)
-        kind = kinds.get(Path(shown).name)
-        if kind is not None:
-            return kind(shown)
-        accepted = ", ".join(tuple(kinds)[:-1]) + ", or " + tuple(kinds)[-1]
-        raise RoadieError(f"Release takes {accepted} files: got {shown}")
-    raise RoadieError(f"Release takes paths: got {type(path).__name__}")
+_ManifestKind = PyProject | CargoManifest | PackageJson
+_MANIFESTS: tuple[tuple[str, type[_ManifestKind]], ...] = (
+    ("pyproject.toml", PyProject),
+    ("Cargo.toml", CargoManifest),
+    ("package.json", PackageJson),
+)
+_MANIFEST_KINDS = dict(_MANIFESTS)
+
+
+class _Manifest:
+    def __init__(self, source: _ManifestKind, name: str, version: str | None) -> None:
+        self.source = source
+        self.name = name
+        self.version = version
+
+    def file(self, base_dir: Path) -> Path:
+        return self.source._file(base_dir).resolve()
+
+    def read(self, base_dir: Path) -> str:
+        if self.version is None:
+            self.version = self.source.read_version(base_dir)
+        return self.version
+
+
+def _version_or_none(kind: type[_ManifestKind], file: Path, base_dir: Path) -> str | None:
+    try:
+        return kind(file).read_version(base_dir)
+    except RoadieError:
+        return None
+
+
+def _in_directory(directory: Path, base_dir: Path) -> list[_Manifest]:
+    found: list[_Manifest] = []
+    for name, kind in _MANIFESTS:
+        file = directory / name
+        if not file.is_file():
+            continue
+        version = _version_or_none(kind, file, base_dir)
+        if version is None:
+            continue
+        found.append(_Manifest(kind(file), name, version))
+    return found
+
+
+def _one_source(base_dir: Path, source: str) -> list[_Manifest]:
+    raw = Path(source)
+    path = raw.resolve() if raw.is_absolute() else (base_dir / raw).resolve()
+    if path.is_dir():
+        found = _in_directory(path, base_dir)
+        if not found:
+            raise RoadieError(
+                f"cannot release: {source} has no versioned pyproject.toml, "
+                "Cargo.toml or package.json"
+            )
+        return found
+    kind = _MANIFEST_KINDS.get(path.name)
+    if kind is not None and (path.is_file() or not path.exists()):
+        return [_Manifest(kind(source), path.name, None)]
+    raise RoadieError(
+        "Release takes pyproject.toml, Cargo.toml, or package.json files: got " + source
+    )
 
 
 # (spec) Step kinds
 class Release(Step[str]):
     """Release the primary version; the value is that version.
 
-    `primary` and each further source are paths, relative to the step's base
-    directory.     The file name says the kind: `pyproject.toml` is a Python
-    project, read and written as `PyProject` does, `Cargo.toml` is a Cargo
-    manifest, and `package.json` is a JS package. Any other name fails with
-    `Release takes pyproject.toml, Cargo.toml, or package.json files: got
-    <path>`. A value that is not a path fails with `Release takes paths:
-    got <type>`.
+    Each source, relative to the base directory, is a directory or a manifest
+    file. A directory releases each of `pyproject.toml`, `Cargo.toml` and
+    `package.json` in it that has its own static version, read as
+    `PyProject`, `CargoManifest` and `PackageJson` read them; one without
+    such a version is skipped. Subdirectories are not read. A directory with
+    none fails with `cannot release: <directory> has no versioned
+    pyproject.toml, Cargo.toml or package.json`. A file names that manifest
+    alone. A path that is neither fails with `Release takes pyproject.toml,
+    Cargo.toml, or package.json files: got <path>`. A value that is not a
+    path fails with `Release takes paths: got <type>`. With no source it
+    fails with `Release takes a directory or a manifest file`.
+
+    The primary version is the manifest `primary=<path>` names, relative to
+    the base directory. A value that is not a path fails with `Release
+    primary takes a path: got <type>`. Naming one the sources do not release
+    fails with `Release primary <path> is not among its sources`. Without
+    `primary`, it is the first source's manifest. When that source is a
+    directory releasing several manifests, their versions must match;
+    otherwise the release fails before changing anything with `cannot
+    release: <directory> holds different versions: <file> <version>, <file>
+    <version>; name one with primary=`.
 
     Never reused and keeps no record, so the output fingerprint is the step's
     own fingerprint. It fails, before changing anything, with `cannot release:
@@ -473,7 +534,7 @@ class Release(Step[str]):
     version <version> is not X.Y.Z`. An equal version bumps the build part,
     `Z`. A higher version is released as it is.
 
-    The version is written to every source that differs. When any file
+    The version is written to every released manifest that differs. When any file
     changed, those files are committed as `v<X.Y.Z> release`. `message` is a
     string, a `Param`, or `None` (the default). Another kind fails with
     `Release message takes a string or a Param: got <type>`. A message that
@@ -490,8 +551,8 @@ class Release(Step[str]):
 
     def __init__(
         self,
-        primary: str | os.PathLike[str],
-        *secondary: str | os.PathLike[str],
+        *sources: str | os.PathLike[str],
+        primary: str | os.PathLike[str] | None = None,
         requires: Step[Any] | Iterable[Step[Any]] = (),
         message: str | Param | None = None,
     ) -> None:
@@ -499,8 +560,15 @@ class Release(Step[str]):
             raise RoadieError(
                 f"Release message takes a string or a Param: got {type(message).__name__}"
             )
-        self.primary = _source(primary)
-        self.secondary = tuple(_source(path) for path in secondary)
+        if primary is not None and not isinstance(primary, (str, os.PathLike)):
+            raise RoadieError(f"Release primary takes a path: got {type(primary).__name__}")
+        for source in sources:
+            if not isinstance(source, (str, os.PathLike)):
+                raise RoadieError(f"Release takes paths: got {type(source).__name__}")
+        if not sources:
+            raise RoadieError("Release takes a directory or a manifest file")
+        self.sources = tuple(os.fspath(source) for source in sources)
+        self.primary = None if primary is None else os.fspath(primary)
         self.requires = one_or_many(
             requires, Step, owner="Release", parameter="requires", takes="steps"
         )
@@ -508,11 +576,36 @@ class Release(Step[str]):
 
     def call_arguments(self) -> tuple[list[object], dict[str, object]]:
         named: dict[str, object] = {}
+        if self.primary is not None:
+            named["primary"] = self.primary
         if self.requires:
             named["requires"] = self.requires
         if self.message is not None:
             named["message"] = self.message
-        return [self.primary.path, *(source.path for source in self.secondary)], named
+        return list(self.sources), named
+
+    def _manifests(self) -> list[tuple[str, list[_Manifest]]]:
+        return [(source, _one_source(self.base_dir, source)) for source in self.sources]
+
+    def _primary_version(self, groups: list[tuple[str, list[_Manifest]]]) -> str:
+        if self.primary is not None:
+            target = self.resolve(self.primary)
+            for _, found in groups:
+                for item in found:
+                    if item.file(self.base_dir) == target:
+                        return item.read(self.base_dir)
+            raise RoadieError(f"Release primary {self.primary} is not among its sources")
+        source, found = groups[0]
+        versions = [item.read(self.base_dir) for item in found]
+        if len(set(versions)) > 1:
+            shown = ", ".join(
+                f"{item.name} {version}" for item, version in zip(found, versions, strict=True)
+            )
+            raise RoadieError(
+                f"cannot release: {source} holds different versions: {shown}; "
+                "name one with primary="
+            )
+        return versions[0]
 
     def _release_message(self) -> str | None:
         message = self.message.value if isinstance(self.message, Param) else self.message
@@ -521,15 +614,22 @@ class Release(Step[str]):
         return message
 
     def build(self, run: "Run") -> str:
+        groups = self._manifests()
         repository = _repository(self.base_dir)
         _require_clean(repository)
         remote, branch = _upstream(repository)
         _require_current(repository, remote, branch)
-        version = _chosen_version(repository, self.primary.read_version(self.base_dir))
+        version = _chosen_version(repository, self._primary_version(groups))
         paths: list[Path] = []
-        for source in (self.primary, *self.secondary):
-            if source.read_version(self.base_dir) != version:
-                paths.extend(source.write_version(self.base_dir, version))
+        seen: set[Path] = set()
+        for _, found in groups:
+            for item in found:
+                file = item.file(self.base_dir)
+                if file in seen:
+                    continue
+                seen.add(file)
+                if item.read(self.base_dir) != version:
+                    paths.extend(item.source.write_version(self.base_dir, version))
         message = self._release_message()
         if paths:
             _commit(repository, paths, version, message)

@@ -9,7 +9,7 @@ pytest = Pytest(inputs=(sources, environment))
 checks = default_step(Group(ruff, mypy, pytest))
 approve = UserApproval("Release main?")
 release = Release(
-    "pyproject.toml",
+    ".",
     requires=(checks, approve),
     message=Param("message", default=None),
 )

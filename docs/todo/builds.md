@@ -1762,7 +1762,7 @@ clause.
 - [x] **R17.4: Run the report scenario through the CLI.** Add the report
   scenario from the acceptance check as a test that runs `roadie` as a
   subprocess. Its SIGKILL clause is POSIX-only with the R14 marker.
-- [ ] **R17.5: Release the manifests of named directories.** Decisions
+- [x] **R17.5: Release the manifests of named directories.** Decisions
   15–18. The `Release` docstring states the rules; Roadie's `build.py` takes
   `Release(".", ...)`. Tests: a directory with two agreeing manifests and a
   version-less third; a skipped `version.workspace = true` member; a
