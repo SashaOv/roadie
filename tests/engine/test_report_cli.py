@@ -2,22 +2,12 @@
 
 import json
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import Any
 
 import pytest
-from support import git_init, posix_only, write_build
-
-
-def _roadie() -> Path:
-    parent = Path(sys.executable).parent
-    for name in ("roadie", "roadie.exe"):
-        candidate = parent / name
-        if candidate.is_file():
-            return candidate
-    raise AssertionError(f"roadie is not installed next to {sys.executable}")
+from support import git_init, posix_only, roadie_executable, run_roadie, write_build
 
 
 def _source(ready_a: Path, ready_b: Path, ready_slow: Path) -> str:
@@ -56,17 +46,7 @@ slow = Slow({str(ready_slow)!r})
 
 def _summary(root: Path, report: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [str(_roadie()), "--summary", str(report)],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-
-def _cli(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [str(_roadie()), "-f", str(root), *args],
+        [str(roadie_executable()), "--summary", str(report)],
         cwd=root,
         capture_output=True,
         text=True,
@@ -95,7 +75,7 @@ def test_the_report_scenario_runs_through_the_roadie_command(tmp_path: Path) -> 
     git_init(root)
     write_build(root, _source(root / "a.ready", root / "b.ready", root / "slow.ready"))
 
-    first = _cli(root, "--jobs", "2", "--report", str(report), "a", "b")
+    first = run_roadie(root, "--jobs", "2", "--report", str(report), "a", "b")
     assert first.returncode == 0, first.stderr
     runs = _runs(report)
     assert len(runs) == 1
@@ -108,7 +88,7 @@ def test_the_report_scenario_runs_through_the_roadie_command(tmp_path: Path) -> 
     assert kinds[:first_end].count("step-start") == 2
     assert {event["outcome"] for event in runs[0] if event["event"] == "step-end"} == {"built"}
 
-    second = _cli(root, "--jobs", "2", "--report", str(report), "a", "b")
+    second = run_roadie(root, "--jobs", "2", "--report", str(report), "a", "b")
     assert second.returncode == 0, second.stderr
     runs = _runs(report)
     assert len(runs) == 2
@@ -124,7 +104,7 @@ def test_the_report_scenario_runs_through_the_roadie_command(tmp_path: Path) -> 
 
     report_dir = root / "report-dir"
     report_dir.mkdir()
-    warned = _cli(root, "--report", str(report_dir), "a")
+    warned = run_roadie(root, "--report", str(report_dir), "a")
     assert warned.returncode == 0, warned.stderr
     assert warned.stderr.count("cannot write report") == 1
     assert "continuing without it" in warned.stderr
@@ -139,7 +119,7 @@ def test_sigkill_during_a_slow_step_leaves_an_unfinished_report(tmp_path: Path) 
     git_init(root)
     write_build(root, _source(root / "a.ready", root / "b.ready", ready))
     process = subprocess.Popen(
-        [str(_roadie()), "-f", str(root), "--jobs", "1", "--report", str(report), "slow"],
+        [str(roadie_executable()), "-f", str(root), "--jobs", "1", "--report", str(report), "slow"],
         cwd=root,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

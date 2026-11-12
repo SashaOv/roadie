@@ -1840,7 +1840,7 @@ clause.
   dependency closure through each of the four dependency fields, a change in
   an unrelated package, an unknown name, and a file git ignores (excluded).
   The backlog's `NodeEnv` and `Toolchain` items go.
-- [ ] **R17.10: Run the pnpm scenario through the CLI.** Add the acceptance
+- [x] **R17.10: Run the pnpm scenario through the CLI.** Add the acceptance
   scenario as a test that runs `roadie` as a subprocess in a temporary git
   project. It uses no network: the workspace has no external dependencies,
   and its lockfile comes from `pnpm install --offline`.

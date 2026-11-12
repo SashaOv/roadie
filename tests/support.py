@@ -74,6 +74,30 @@ def isolate_repo(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
     monkeypatch.setattr(f"{__name__}._forced_root", root)
 
 
+def roadie_executable() -> Path:
+    """The `roadie` command installed beside the interpreter running the tests."""
+    parent = Path(sys.executable).parent
+    for name in ("roadie", "roadie.exe"):
+        candidate = parent / name
+        if candidate.is_file():
+            return candidate
+    raise AssertionError(f"roadie is not installed next to {sys.executable}")
+
+
+def run_roadie(
+    root: Path, *args: str, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run `roadie -f <root> <args>` in `root`, capturing its output."""
+    return subprocess.run(
+        [str(roadie_executable()), "-f", str(root), *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+
+
 def write_build(directory: Path, source: str) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "build.py").write_text(f"from roadie.build import *\n\n{source}")
