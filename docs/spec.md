@@ -304,6 +304,18 @@ one run, these programs run once per workspace. One that cannot start fails
 with `cannot run <program>: <reason>`; one that exits non-zero fails with
 `<command> failed: <standard error>`, such as `pnpm ls failed: ...`.
 
+### Pnpm packages
+
+`PnpmPackage(name)` names a project of the pnpm workspace `NodeEnv()` finds
+by its `package.json` name. Its fingerprint covers what
+`NodeEnv()` does, and the content of every file git lists, tracked or
+untracked and not ignored, under the project and under the workspace projects
+it depends on, directly or indirectly, using the same listing as a `Files`
+directory. A project depends on another when a key of its `dependencies`,
+`devDependencies`, `optionalDependencies` or `peerDependencies` names it.
+Changes to unrelated projects do not change it. A name the workspace does not
+hold fails with `pnpm package '<name>' is not in the workspace`.
+
 ### Environment variables
 
 `Env(*names)` fingerprints the value of each named process environment

@@ -4,8 +4,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from support import git_init
 
-from roadie.build import NodeEnv, node
+from roadie.build import NodeEnv, PnpmPackage, node
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import run_scope
 from roadie.system import prepare_command
@@ -186,3 +187,80 @@ def test_a_failing_pnpm_ls_fails_with_its_standard_error(
     with pytest.raises(RoadieError) as caught:
         _fingerprint(root)
     assert str(caught.value) == "pnpm ls failed: ERR_PNPM_BROKEN boom"
+
+
+def _git_workspace(root: Path, field: str) -> Path:
+    """A git pnpm workspace: `app` needs `core` needs `base` through `field`; `other` stands alone."""
+    (root / "pnpm-workspace.yaml").write_text('packages:\n  - "packages/*"\n')
+    _write_json(root / "package.json", {"private": True})
+    needs = {"app": "core", "core": "base", "base": None, "other": None}
+    for name, needed in needs.items():
+        manifest: dict[str, object] = {"name": name, "version": "1.0.0"}
+        if needed is not None:
+            manifest[field] = {needed: "workspace:*"}
+        _write_json(root / f"packages/{name}/package.json", manifest)
+        (root / f"packages/{name}/index.js").write_text(f"// {name}\n")
+    git_init(root)
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+    return root
+
+
+def _package_fingerprint(name: str, base_dir: Path) -> str:
+    with run_scope():
+        return PnpmPackage(name).fingerprint(base_dir)
+
+
+# (spec) Pnpm packages
+@pytest.mark.parametrize(
+    "field",
+    ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"],
+)
+def test_pnpm_package_follows_its_dependency_closure(tmp_path: Path, field: str) -> None:
+    root = _git_workspace(tmp_path, field)
+    app = _package_fingerprint("app", root)
+    core = _package_fingerprint("core", root)
+
+    (root / "packages/other/index.js").write_text("// other changed\n")
+    assert _package_fingerprint("app", root) == app
+    (root / "packages/app/index.js").write_text("// app changed\n")
+    assert _package_fingerprint("core", root) == core
+    assert _package_fingerprint("app", root) != app
+
+    app = _package_fingerprint("app", root)
+    (root / "packages/base/index.js").write_text("// base changed\n")
+    assert _package_fingerprint("app", root) != app
+    assert _package_fingerprint("core", root) != core
+
+
+# (spec) Pnpm packages
+def test_pnpm_package_follows_the_node_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _git_workspace(tmp_path, "dependencies")
+    monkeypatch.delenv("NODE_ENV", raising=False)
+    baseline = _package_fingerprint("other", root)
+    monkeypatch.setenv("NODE_ENV", "production")
+    assert _package_fingerprint("other", root) != baseline
+
+
+# (spec) Pnpm packages
+def test_pnpm_package_counts_untracked_files_and_not_ignored_ones(tmp_path: Path) -> None:
+    root = _git_workspace(tmp_path, "dependencies")
+    baseline = _package_fingerprint("core", root)
+    (root / "packages/base/extra.js").write_text("// untracked\n")
+    with_untracked = _package_fingerprint("core", root)
+    assert with_untracked != baseline
+
+    (root / ".gitignore").write_text("*.ignored\n")
+    (root / "packages/base/skip.ignored").write_text("// ignored\n")
+    ignored_base = _package_fingerprint("core", root)
+    (root / "packages/base/skip.ignored").write_text("// ignored, changed\n")
+    assert _package_fingerprint("core", root) == ignored_base
+
+
+# (spec) Pnpm packages
+def test_a_pnpm_package_missing_from_the_workspace_fails(tmp_path: Path) -> None:
+    root = _git_workspace(tmp_path, "dependencies")
+    with pytest.raises(RoadieError) as caught:
+        _package_fingerprint("missing", root)
+    assert str(caught.value) == "pnpm package 'missing' is not in the workspace"

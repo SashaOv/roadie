@@ -5,7 +5,7 @@ from roadie.build.env import Env
 from roadie.build.file import File
 from roadie.build.files import Files
 from roadie.build.group import Group
-from roadie.build.node import NodeEnv
+from roadie.build.node import NodeEnv, PnpmPackage
 from roadie.build.param import Param
 from roadie.build.pytest_step import Pytest
 from roadie.build.python_env import PythonEnv
@@ -40,6 +40,7 @@ __all__ = [
     "Input",
     "NodeEnv",
     "Param",
+    "PnpmPackage",
     "Pytest",
     "PythonEnv",
     "Release",

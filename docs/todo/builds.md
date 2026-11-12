@@ -1835,7 +1835,7 @@ clause.
   lockfile copy and environment variable, one `pnpm ls` per run, and no `package.json` above
   the base directory. Patched `subprocess.run` covers a different Node
   version, a program that cannot start and a failing `pnpm ls`.
-- [ ] **R17.9: Add the PnpmPackage input.** Decision 4, beside `NodeEnv`,
+- [x] **R17.9: Add the PnpmPackage input.** Decision 4, beside `NodeEnv`,
   exported, with a spec section after Cargo packages. Tests cover the
   dependency closure through each of the four dependency fields, a change in
   an unrelated package, an unknown name, and a file git ignores (excluded).

@@ -40,10 +40,6 @@ Guidance taken out of the spec because it follows from the rules.
 
 - `Dir(path)` input: a directory's tracked content, fingerprinted by git tree
   id.
-- `Toolchain` input: the pinned toolchain file and the compiler version it
-  resolves to.
-- `NodeEnv` input: the `package.json` files, the pnpm lockfile and the Node
-  version.
 - `Host(label)` input: the class of machine a step needs.
 - `GitCommit` input: a commit SHA, which differs on every commit, so a step
   that takes it never matches an earlier run.
