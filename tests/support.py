@@ -26,8 +26,20 @@ windows_only = pytest.mark.skipif(os.name != "nt", reason="Windows-only")
 needs_pty = pytest.mark.skipif(
     sys.platform == "win32", reason="pseudo-terminals are unavailable on Windows"
 )
+
+
+def _can_symlink() -> bool:
+    """Windows creates symlinks only in Developer Mode or with admin rights."""
+    with tempfile.TemporaryDirectory() as scratch:
+        try:
+            (Path(scratch) / "link").symlink_to(Path(scratch) / "target")
+        except OSError:
+            return False
+    return True
+
+
 needs_symlinks = pytest.mark.skipif(
-    sys.platform == "win32", reason="unprivileged symlinks are unavailable on Windows"
+    not _can_symlink(), reason="symlinks need Windows Developer Mode or admin rights"
 )
 
 

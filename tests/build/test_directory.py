@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from support import execute, git_init, isolate_repo, write_build
+from support import execute, git_init, isolate_repo, needs_symlinks, write_build
 
 from roadie.build import Directory, Step
 from roadie.engine.errors import StepFailed
@@ -158,6 +158,7 @@ def test_directory_step_rejects_a_path_that_is_not_a_directory(
 
 
 # (spec) Directory step
+@needs_symlinks
 def test_directory_records_a_link_by_its_target_and_does_not_follow_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

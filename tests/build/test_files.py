@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from support import execute, git_init, posix_only
+from support import execute, git_init, needs_symlinks, posix_only
 
 from roadie.build import Files, Step
 from roadie.engine.errors import RoadieError, StepFailed
@@ -113,6 +113,7 @@ def test_directory_outside_a_work_tree_includes_every_file(tmp_path: Path) -> No
 
 
 # (spec) Files input
+@needs_symlinks
 def test_files_record_a_link_by_its_target_and_do_not_follow_it(tmp_path: Path) -> None:
     source = tmp_path / "src"
     source.mkdir()
@@ -145,6 +146,7 @@ def test_files_record_a_link_by_its_target_and_do_not_follow_it(tmp_path: Path) 
 
 
 # (spec) Files input
+@needs_symlinks
 def test_files_in_a_work_tree_record_a_link_by_its_target(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     git_init(root)
