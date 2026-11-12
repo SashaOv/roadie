@@ -410,7 +410,9 @@ prints `interrupted: stopping <names>` once, unprefixed, before stopping
 anything. `<names>` are the running steps in plan order, then the live
 services not among them. With none, it prints `interrupted`. Ctrl-C and
 SIGTERM stop the programs the steps are running, then wait for those steps
-to finish. A
+to finish. On Windows a program is stopped with `taskkill /T /PID <pid>`,
+and when that fails, as it does for a console program, with `taskkill /T /F
+/PID <pid>` at once. A
 teardown that fails does not stop the others from being torn down. The first teardown failure fails
 the run with `<name> failed: teardown: <reason>` and the others are printed
 to standard error; when the run is already failing, all are printed and the

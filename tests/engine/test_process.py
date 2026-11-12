@@ -38,6 +38,20 @@ def test_sigterm_takes_the_same_cleanup_path_as_ctrl_c() -> None:
     assert signal.getsignal(signal.SIGTERM) is previous
 
 
+# (spec) Teardown
+def test_an_interrupt_stops_a_console_program_at_once(tmp_path: Path) -> None:
+    """A console program on Windows has no window to close, so a polite
+    taskkill fails; the interrupt must not leave it running."""
+    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], cwd=tmp_path)
+    try:
+        system_process.interrupt_process(process, session=False)
+        process.wait(timeout=10)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+
+
 # (spec) Step helpers
 def test_stopping_a_server_stops_its_tree_not_only_the_wrapper(tmp_path: Path) -> None:
     """`cargo run` and `pnpm dev` hold the port in a grandchild, so a stop that

@@ -53,7 +53,10 @@ if sys.platform == "win32":
             process.send_signal(sent)
 
     def interrupt_process(process: subprocess.Popen[Any], *, session: bool) -> None:
-        if _taskkill(process.pid, force=False) is None:
+        """taskkill /T, then taskkill /T /F at once when it fails, as for a
+        console program, which has no window to close."""
+        status = _taskkill(process.pid, force=False)
+        if status is None or (status != 0 and _taskkill(process.pid, force=True) is None):
             process.terminate()
 
     def stop_process_tree(process: subprocess.Popen[bytes]) -> None:
