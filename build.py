@@ -5,7 +5,7 @@ environment = PythonEnv()
 
 ruff = Check("uv", "run", "ruff", "check", inputs=(sources, environment))
 mypy = Check("uv", "run", "mypy", "src", "build.py", inputs=(sources, environment))
-pytest = Pytest(inputs=(sources, environment))
+pytest = Pytest("-n", "auto", inputs=(sources, environment))
 checks = default_step(Group(ruff, mypy, pytest))
 approve = UserApproval("Release main?")
 release = Release(

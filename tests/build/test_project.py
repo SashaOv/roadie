@@ -27,7 +27,7 @@ def test_roadie_checks_itself_and_releases_only_when_asked() -> None:
     assert isinstance(mypy, Check)
     assert mypy.command == ("uv", "run", "mypy", "src", "build.py")
     assert isinstance(pytest_step, Pytest)
-    assert pytest_step.args == ()
+    assert pytest_step.args == ("-n", "auto")
     assert isinstance(checks, Group)
     approve, release = graph.plan("release")[-2:]
     assert isinstance(approve, UserApproval)
