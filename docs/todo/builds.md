@@ -1827,7 +1827,7 @@ clause.
   `R17: Match the cargo stand-in by program name`). CI run 43130969002 on
   `5f756a8` passed on all three platforms, and the author's Windows run of
   `tests/engine/test_batch.py` passed both Windows-only tests (2026-11-11).
-- [ ] **R17.8: Add the NodeEnv input.** Decisions 1–3 and 5, in a new
+- [x] **R17.8: Add the NodeEnv input.** Decisions 1–3 and 5, in a new
   `build/node.py`, exported from `roadie.build`. The spec gains a Node
   environment section after Python environment. Tests use the real `node` and
   `pnpm` in temporary workspaces: a workspace, a single package with a nested

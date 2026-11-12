@@ -281,6 +281,29 @@ is not in the workspace`. Within one run, `cargo metadata` and
 `PythonEnv()` fingerprints the version of the interpreter running Roadie and
 the name and version of every distribution installed in its environment.
 
+### Node environment
+
+`NodeEnv()` fingerprints the Node and pnpm environment of the workspace found
+from the step's base directory. The workspace root is the nearest directory at
+or above the base directory that holds `pnpm-workspace.yaml`; without one, the
+nearest that holds `package.json`, a single-package project. Neither fails
+with `no package.json at or above <base directory>`. A workspace's projects
+are what `pnpm ls -r --json --depth -1` lists at the root; a single-package
+project is its root alone. The fingerprint covers:
+
+- the output of `node --version` and `pnpm --version`;
+- the `NODE_ENV` and `NODE_OPTIONS` variables of the process environment;
+- the content of each project's `package.json`;
+- the content of the root's `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.npmrc`
+  and `node_modules/.pnpm/lock.yaml`, where they exist.
+
+User and global pnpm and npm configuration, and files at the root outside
+every project, are not covered; a step takes those as `Files`. On Windows,
+`node` and `pnpm` are found as `_cmd` finds a program (Step helpers). Within
+one run, these programs run once per workspace. One that cannot start fails
+with `cannot run <program>: <reason>`; one that exits non-zero fails with
+`<command> failed: <standard error>`, such as `pnpm ls failed: ...`.
+
 ### Environment variables
 
 `Env(*names)` fingerprints the value of each named process environment

@@ -40,6 +40,16 @@ def prepare_command(
     return batch_command_line(command[0], found, command[1:], comspec=_comspec(env))
 
 
+def cannot_run_message(program: str, error: OSError) -> str:
+    """Return `cannot run <program>: <reason>`, the reason without its filename."""
+    if isinstance(error, CannotRun):
+        return str(error)
+    reason = str(error)
+    if error.filename is not None:
+        reason = reason.removesuffix(f": {error.filename!r}")
+    return f"cannot run {program}: {reason}"
+
+
 def batch_command_line(
     program: str,
     script: str,

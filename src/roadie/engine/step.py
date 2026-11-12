@@ -34,7 +34,7 @@ from roadie.engine.process import (
     untrack_process,
     wait_interruptibly,
 )
-from roadie.system.command import CannotRun, prepare_command
+from roadie.system.command import cannot_run_message, prepare_command
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -256,7 +256,7 @@ class Step[T](ABC):
                 text=True,
             )
         except OSError as error:
-            raise StepFailed(self._label(), _run_failure(args[0], error)) from error
+            raise StepFailed(self._label(), cannot_run_message(args[0], error)) from error
         track_process(process, session=False)
         readers: list[threading.Thread] = []
         stdout_parts: list[str] = []
@@ -350,7 +350,7 @@ class Step[T](ABC):
                 health_path=health_path,
             )
         except OSError as error:
-            raise StepFailed(self._label(), _run_failure(args[0], error)) from error
+            raise StepFailed(self._label(), cannot_run_message(args[0], error)) from error
 
     def _command_env(self, environment: Mapping[str, str] | None) -> dict[str, str]:
         # Process environment, then the step's settings, then env files.
@@ -358,19 +358,6 @@ class Step[T](ABC):
         merged = {**os.environ, **(environment or {}), **self.env_values}
         merged[RUN_PID_VARIABLE] = str(os.getpid())
         return merged
-
-
-def _run_failure(program: str, error: OSError) -> str:
-    if isinstance(error, CannotRun):
-        return str(error)
-    return _cannot_run(program, error)
-
-
-def _cannot_run(program: str, error: OSError) -> str:
-    reason = str(error)
-    if error.filename is not None:
-        reason = reason.removesuffix(f": {error.filename!r}")
-    return f"cannot run {program}: {reason}"
 
 
 def _reserved_names() -> frozenset[str]:

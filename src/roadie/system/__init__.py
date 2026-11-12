@@ -1,6 +1,11 @@
 """Operating-system operations and capabilities. Imports nothing from Roadie."""
 
-from roadie.system.command import CannotRun, batch_command_line, prepare_command
+from roadie.system.command import (
+    CannotRun,
+    batch_command_line,
+    cannot_run_message,
+    prepare_command,
+)
 from roadie.system.lock import lock, unlock
 from roadie.system.path import executable_suffix
 from roadie.system.process import (
@@ -14,6 +19,7 @@ from roadie.system.process import (
 __all__ = [
     "CannotRun",
     "batch_command_line",
+    "cannot_run_message",
     "executable_suffix",
     "interrupt_process",
     "lock",
