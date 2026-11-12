@@ -714,3 +714,27 @@ whose build file no longer exists. The root directory is kept, along with
 the lock and the timestamp; only its record and artifacts go. A directory
 under `_outside` is kept, because the sweep cannot recover the build file's
 path; a file no entry lists is still deleted.
+
+### Developing on Windows
+
+Roadie's own checks run pytest with one worker per CPU, because most of the
+suite's time on Windows goes to starting processes. The tests need no admin
+rights; do not run them elevated.
+
+Windows makes symlinks only in Developer Mode or with admin rights. A test
+that makes symlinks probes once whether it can, and skips with `symlinks need
+Windows Developer Mode or admin rights` when it cannot. Defender's real-time
+scan of every file a process opens slows each import and each process start.
+
+`scripts\setup-windows.cmd` sets a machine up for both. It needs PowerShell 7
+(`pwsh` on PATH) and stops naming it when it is missing. Run it as yourself,
+not elevated. It resolves, as your account, the checkout, uv's cache and
+Python installs, the Python the `.venv` is based on, and pytest's temporary
+folders, then asks Windows once to elevate. Elevated, it turns on Developer
+Mode and adds those folders to Defender's exclusions; folders, not programs,
+so `python.exe` and `git.exe` are still scanned elsewhere. It prints what it
+did, then whether Python can make symlinks yet; when it cannot, it shows
+Python's error, and signing out and back in may help. It exits with status 1 when Windows does not elevate or either
+change fails, naming the cause; organization-managed Defender can refuse
+exclusions. A checkout on a Dev Drive needs no exclusions, since Defender
+scans it in performance mode.
