@@ -1556,7 +1556,7 @@ not run on Windows. Discharges the CI clause.
 
 ## R17: A run leaves a report, Release takes directories, and JS steps rerun when Node, pnpm or their packages change
 
-Status: planned, approved 2026-11-10
+Status: implemented 2026-11-11 (commits R17.*)
 
 Re-planned 2026-11-11, approved by the author: the steps' start and end
 times replace `running` (decision 9), in the inserted R17.3.
@@ -1844,6 +1844,30 @@ clause.
   scenario as a test that runs `roadie` as a subprocess in a temporary git
   project. It uses no network: the workspace has no external dependencies,
   and its lockfile comes from `pnpm install --offline`.
+
+**Acceptance run (2026-11-11).** Commit `4c5a350dcd205aa5d2f43acab1e47b195f2f86d0`,
+tree `780937c6512b0634f6694dd1b713fa8690641ec0`. Host Darwin 25.6.0 arm64,
+uv 0.12.23, Python 3.13.13, node v24.12.0, pnpm 10.33.0. Log
+`/Users/sasha/.local/share/roadie/r17-acceptance.log`, sha256
+`45a8ad1a01042facafa15b98dd078113be7f888da8cc23bbde46eed161dcde98`.
+Command `uv run roadie checks`. Verdict: pass.
+
+- `uv run ruff check` and `uv run mypy src build.py` passed. `uv run pytest
+  -q -rs --tb=line`: 420 passed; the 2 skipped are R17.7's Windows-only
+  tests. `uv run roadie checks` exited 0, reusing its verdict for this tree.
+- CI run 43135091902 on `4c5a350` passed on `ubuntu-latest` and
+  `macos-latest` (420 passed, 2 skipped) and `windows-latest` (404 passed,
+  18 skipped: the POSIX-only tests, as at `5f756a8` with 383 passed). The
+  pnpm tests ran on all three, with the real `node` and pnpm 10.33.0.
+- The report scenario (`test_the_report_scenario_runs_through_the_roadie_command`,
+  and the SIGKILL test on POSIX), the Niva-shaped release, the pnpm scenario
+  (`test_the_pnpm_scenario_runs_through_the_roadie_command`) and the patched
+  Node version (`test_a_different_node_version_changes_the_fingerprint`)
+  passed in those runs.
+- Not in the plan: the Pnpm packages spec section follows Node environment,
+  which it builds on, rather than Cargo packages; and `node --version` or
+  `pnpm --version` exiting non-zero fails with `<command> failed: <standard
+  error>`, the wording decision 5 gives `pnpm ls`.
 
 ## Backlog
 
