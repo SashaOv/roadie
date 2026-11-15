@@ -148,7 +148,7 @@ No clause needs the author.
 - [x] **CQ1.4: Keep each value adapter with its step class.** Test: a step
   class defined in a function, used once and dropped, is gone after
   `gc.collect()`, observed through a weak reference.
-- [ ] **CQ1.5: Wait on an event before interrupting the service test.**
+- [x] **CQ1.5: Wait on an event before interrupting the service test.**
   `test_ctrl_c_stops_a_requested_service_that_outlives_it` waits, with a
   timeout, for the service to reach `serve`, and its watcher thread ends on
   failure too. The `Sleeper.wait` fake blocks on an event instead of sleeping

@@ -1,5 +1,6 @@
 import os
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -144,11 +145,16 @@ def test_requested_service_stays_up_until_ctrl_c(capsys: pytest.CaptureFixture[s
 
 
 # (spec) Requested result
-def test_ctrl_c_stops_a_requested_service_that_outlives_it() -> None:
+@pytest.mark.parametrize("fail_start", [False, True])
+def test_ctrl_c_stops_a_requested_service_that_outlives_it(fail_start: bool) -> None:
     started: list[RunningProcess] = []
+    ready = threading.Event()
+    finished = threading.Event()
 
     class Stubborn(Service):
         def build(self, run: Run) -> RunningProcess:
+            if fail_start:
+                raise RuntimeError("startup failed")
             port = available_port()
             server = self._start_cmd(
                 sys.executable,
@@ -163,19 +169,30 @@ def test_ctrl_c_stops_a_requested_service_that_outlives_it() -> None:
             started.append(server)
             return server
 
-    def interrupt() -> None:
-        while not started:
-            time.sleep(0.05)
-        time.sleep(0.5)
-        signal.raise_signal(signal.SIGINT)
+        def serve(self, value: RunningProcess) -> None:
+            ready.set()
+            super().serve(value)
 
-    threading.Thread(target=interrupt, daemon=True).start()
+    def interrupt() -> None:
+        if ready.wait(10) and not finished.is_set():
+            signal.raise_signal(signal.SIGINT)
+
+    watcher = threading.Thread(target=interrupt)
+    watcher.start()
     begin = time.monotonic()
     try:
-        execute([Stubborn()])
+        if fail_start:
+            with pytest.raises(StepFailed, match="startup failed"):
+                execute([Stubborn()])
+        else:
+            execute([Stubborn()])
+            assert started[0].process.poll() is not None
         assert time.monotonic() - begin < 10
-        assert started[0].process.poll() is not None
     finally:
+        finished.set()
+        ready.set()
+        watcher.join(timeout=5)
+        assert not watcher.is_alive()
         for server in started:
             server.stop()
 
@@ -184,6 +201,7 @@ def test_ctrl_c_stops_a_requested_service_that_outlives_it() -> None:
 @posix_only
 def test_sigterm_while_a_requested_service_is_up_exits_0(capsys: pytest.CaptureFixture[str]) -> None:
     started = threading.Event()
+    released = threading.Event()
 
     class Sleeper:
         url = "http://127.0.0.1:9"
@@ -192,11 +210,13 @@ def test_sigterm_while_a_requested_service_is_up_exits_0(capsys: pytest.CaptureF
 
         def wait(self, timeout: float | None = None) -> int:
             started.set()
-            time.sleep(5)
+            if not released.wait(timeout):
+                raise subprocess.TimeoutExpired("service", timeout)
             return 0
 
         def stop(self) -> None:
             self.stopped = True
+            released.set()
 
     sleeper = Sleeper()
     sleeper.process = sleeper
