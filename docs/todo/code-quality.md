@@ -280,7 +280,7 @@ No clause needs the author.
 - [x] **CQ2.2: Read a marked step in one function.** `_marked_default` and
   `_marked_setup` become one function that takes the mark's name for its
   messages; `Graph.plan_results` goes.
-- [ ] **CQ2.3: Make a path relative in one function.** `_relative` and
+- [x] **CQ2.3: Make a path relative in one function.** `_relative` and
   `_path_attribute` in `engine/fingerprint.py` become one, as decision 3
   says.
 - [ ] **CQ2.4: List tracked files in one git call.** `tracked` and

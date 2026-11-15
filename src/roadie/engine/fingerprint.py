@@ -105,24 +105,11 @@ def _class_id(step: Step[Any]) -> str:
 
 def _attribute_text(value: object) -> str:
     if isinstance(value, Path):
-        return _path_attribute(value)
+        return _relative(value)
     if isinstance(value, tuple):
         inner = ", ".join(_attribute_text(item) for item in value)
         return f"({inner}{',' if len(value) == 1 else ''})"
     return repr(value)
-
-
-def _path_attribute(path: Path) -> str:
-    resolved = path.resolve()
-    try:
-        root = project_root().resolve()
-    except RoadieError:
-        return resolved.as_posix()
-    try:
-        relative = resolved.relative_to(root)
-    except ValueError:
-        return resolved.as_posix()
-    return relative.as_posix() if relative.parts else "."
 
 
 def _relative(path: Path) -> str:
@@ -130,11 +117,11 @@ def _relative(path: Path) -> str:
     try:
         root = project_root().resolve()
     except RoadieError:
-        return str(resolved)
+        return resolved.as_posix()
     try:
         relative = resolved.relative_to(root)
     except ValueError:
-        return str(resolved)
+        return resolved.as_posix()
     return relative.as_posix() if relative.parts else "."
 
 
