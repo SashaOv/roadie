@@ -17,6 +17,19 @@ def _imports(path: Path) -> set[str]:
 
 
 # (spec) Packages
+def test_the_system_package_imports_nothing_else_from_roadie() -> None:
+    offending = {
+        f"{path.relative_to(PACKAGE).as_posix()} imports {module}"
+        for path in (PACKAGE / "system").rglob("*.py")
+        for module in _imports(path)
+        if (module == "roadie" or module.startswith("roadie."))
+        and module != "roadie.system"
+        and not module.startswith("roadie.system.")
+    }
+    assert not offending
+
+
+# (spec) Packages
 def test_the_engine_does_not_import_the_build_file_api() -> None:
     offending = {
         f"{path.relative_to(PACKAGE).as_posix()} imports {module}"

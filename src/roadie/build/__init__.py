@@ -13,6 +13,7 @@ from roadie.build.release import Release
 from roadie.build.rust import (
     CargoPackage,
     RustBinary,
+    cargo_executable,
     cargo_rust_packages,
     select_rust_packages,
 )
@@ -23,6 +24,14 @@ from roadie.engine.config import config
 from roadie.engine.errors import RoadieError
 from roadie.engine.graph import default_step, include, setup
 from roadie.engine.inputs import Input, run_state
+from roadie.engine.process import (
+    Command,
+    RunningProcess,
+    available_port,
+    port_is_busy,
+    signal_server,
+    wait_for_port,
+)
 from roadie.engine.run import Run
 from roadie.engine.step import Step
 
@@ -30,6 +39,7 @@ __all__ = [
     "Binary",
     "CargoPackage",
     "Check",
+    "Command",
     "Deployment",
     "Directory",
     "Env",
@@ -46,6 +56,7 @@ __all__ = [
     "Release",
     "RoadieError",
     "Run",
+    "RunningProcess",
     "RustBinary",
     "Service",
     "Step",
@@ -54,11 +65,16 @@ __all__ = [
     "Tests",
     "UserApproval",
     "UserTask",
+    "available_port",
+    "cargo_executable",
     "cargo_rust_packages",
     "config",
     "default_step",
     "include",
+    "port_is_busy",
     "run_state",
     "select_rust_packages",
     "setup",
+    "signal_server",
+    "wait_for_port",
 ]

@@ -215,14 +215,14 @@ class RustBinary(Binary):
             "--message-format=json",
             capture_output=True,
         )
-        source = _executable_from_cargo_messages(completed.stdout, self.package.name)
+        source = cargo_executable(completed.stdout, self.package.name)
         destination = run.artifact(self, executable_suffix())
         shutil.copyfile(source, destination)
         os.chmod(destination, source.stat().st_mode)
         return destination
 
 
-def _executable_from_cargo_messages(output: str, package: str) -> Path:
+def cargo_executable(output: str, package: str) -> Path:
     """Return the bin executable cargo reported for `package`."""
     found: str | None = None
     for line in output.splitlines():

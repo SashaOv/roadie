@@ -393,7 +393,7 @@ No clause needs the author.
 - [x] **CQ3.4: Keep a server's output readers with its process.** Decision 5.
   Tests: a server that prints 5 MB in a parallel run keeps under 1 MB; after
   `stop()` no reader thread is alive.
-- [ ] **CQ3.5: Name the extension functions Niva uses.** Decisions 6 and 8.
+- [x] **CQ3.5: Name the extension functions Niva uses.** Decisions 6 and 8.
   Test: a consumer module that imports only from `roadie.build` runs a
   `Command` without a step, starts a server, waits for its port, and parses
   Cargo messages.
