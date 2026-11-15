@@ -227,20 +227,7 @@ class Step[T](ABC):
         with the same prefix, and still returns it. Unless `check` is false,
         a non-zero exit fails the step with `<name> failed: <command>
         exited with status <n>: <last 2000 characters of standard error>`.
-        A command that cannot start fails with `<name> failed: cannot run
-        <program>: <reason>`, where `<reason>` is the error's text without
-        its filename.
-
-        On Windows, a program named without a directory is found with
-        `shutil.which` on the `PATH` this command runs with, trying each
-        `PATHEXT` extension, the first match winning. A name that is not
-        found starts as given. A program found as a `.cmd` or `.bat` file
-        runs as `cmd.exe /d /s /c "<file> <arguments>"`, with `cmd.exe` from
-        `ComSpec`. Each argument is in double quotes, and backslashes before
-        the closing quote are doubled, so cmd.exe reads spaces and
-        `& | < > ^ ( )` literally. An argument holding `"`, `%` or a line
-        break fails before starting with `cannot run <program>: cmd.exe
-        would read <character> in <argument>`.
+        See docs/spec.md, "Step helpers", for command resolution and startup errors.
         """
         print("+", shlex.join(args), flush=True)
         prefix = current_prefix()

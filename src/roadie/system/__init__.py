@@ -2,7 +2,6 @@
 
 from roadie.system.command import (
     CannotRun,
-    batch_command_line,
     cannot_run_message,
     prepare_command,
 )
@@ -18,7 +17,6 @@ from roadie.system.process import (
 
 __all__ = [
     "CannotRun",
-    "batch_command_line",
     "cannot_run_message",
     "executable_suffix",
     "interrupt_process",

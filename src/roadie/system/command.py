@@ -37,7 +37,7 @@ def prepare_command(
         return command
     if not found.lower().endswith((".cmd", ".bat")):
         return [found, *command[1:]]
-    return batch_command_line(command[0], found, command[1:], comspec=_comspec(env))
+    return _batch_command_line(command[0], found, command[1:], comspec=_comspec(env))
 
 
 def cannot_run_message(program: str, error: OSError) -> str:
@@ -50,7 +50,7 @@ def cannot_run_message(program: str, error: OSError) -> str:
     return f"cannot run {program}: {reason}"
 
 
-def batch_command_line(
+def _batch_command_line(
     program: str,
     script: str,
     arguments: Sequence[str],

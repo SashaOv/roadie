@@ -285,7 +285,7 @@ No clause needs the author.
   says.
 - [x] **CQ2.4: List tracked files in one git call.** `tracked` and
   `tracked_files` share one `git ls-files` helper; their messages stay.
-- [ ] **CQ2.5: Keep Windows command rules in the system layer and the spec.**
+- [x] **CQ2.5: Keep Windows command rules in the system layer and the spec.**
   `_cmd`'s docstring loses the Windows paragraph, decision 4 renames the
   helper, and `tests/engine/test_batch.py`'s quoting tests move to
   `tests/system/test_command.py` (G6).
