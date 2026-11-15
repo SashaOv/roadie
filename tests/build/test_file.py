@@ -1,7 +1,9 @@
 import os
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 from support import (
@@ -203,3 +205,49 @@ def test_output_is_an_unknown_argument() -> None:
         TextFile("new\n", output="out.txt")
     with pytest.raises(TypeError, match="output"):
         Site(output="dist")
+
+
+# (spec) Generated files
+@pytest.mark.parametrize("kind", ["file", "directory"])
+@pytest.mark.parametrize("locked", [False, True])
+@pytest.mark.parametrize("failed", ["destination", "built", "both", "empty"])
+def test_hash_failure_keeps_generated_output(
+    kind: str, locked: bool, failed: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    isolate_repo(monkeypatch, tmp_path)
+    subprocess.run(["git", "init", "-q"], check=True)
+    destination = tmp_path / "output.txt"
+    destination.write_text("old\n")
+    subprocess.run(["git", "add", "output.txt"], check=True)
+
+    class Bundle(Directory):
+        def build(self, run: Run) -> Path:
+            path = run.artifact(self, "")
+            path.mkdir(exist_ok=True)
+            (path / "output.txt").write_text("new\n")
+            return path
+
+    step = TextFile("new\n", copy_to=destination) if kind == "file" else Bundle(copy_to=tmp_path)
+    real_run = subprocess.run
+    hashed: list[Path] = []
+
+    def hash_result(args: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if "hash-object" not in args:
+            return real_run(args, **kwargs)
+        path = Path(args[-1])
+        hashed.append(path)
+        fails = failed in {"both", "empty"} or (path == destination) == (failed == "destination")
+        return subprocess.CompletedProcess(
+            args, 1 if fails and failed != "empty" else 0,
+            "" if fails else "valid-hash\n", "hash refused" if fails else "",
+        )
+
+    monkeypatch.setattr(subprocess, "run", hash_result)
+    with pytest.raises(StepFailed) as error:
+        execute([step], locked=locked)
+    expected = hashed[-1]
+    reason = "git printed no hash" if failed == "empty" else "hash refused"
+    assert f"cannot compare {expected} with git: {reason}" in str(error.value)
+    assert destination.read_text() == "old\n"

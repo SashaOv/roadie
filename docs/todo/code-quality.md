@@ -91,7 +91,7 @@ Order constraints:
 
 ### CQ1: Failures surface and state ends with its run
 
-Status: planned, awaiting author checkpoint
+Status: planned, approved 2026-11-15
 
 **Improvement.** A generated file that git cannot hash fails the step; today
 two failed hashes compare equal and the old file is kept as unchanged. Two
@@ -133,7 +133,7 @@ No clause needs the author.
 
 ### Patches
 
-- [ ] **CQ1.1: Fail when git cannot hash a generated file.** Tests: the
+- [x] **CQ1.1: Fail when git cannot hash a generated file.** Tests: the
   destination's hash fails; the built file's hash fails; both fail; the hash
   is empty. Each asserts the message and an unchanged destination, for `File`
   and for `Directory`.

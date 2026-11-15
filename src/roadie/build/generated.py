@@ -75,7 +75,7 @@ def same_as_git_stores(destination: Path, built: Path) -> bool:
     )
 
 
-def _git_hash(repository_path: Path, file: Path, path: str) -> str | None:
+def _git_hash(repository_path: Path, file: Path, path: str) -> str:
     completed = subprocess.run(
         (
             "git",
@@ -91,5 +91,8 @@ def _git_hash(repository_path: Path, file: Path, path: str) -> str | None:
         check=False,
     )
     if completed.returncode != 0:
-        return None
-    return completed.stdout.strip() or None
+        raise RoadieError(f"cannot compare {file} with git: {completed.stderr.strip()}")
+    hashed = completed.stdout.strip()
+    if not hashed:
+        raise RoadieError(f"cannot compare {file} with git: git printed no hash")
+    return hashed
