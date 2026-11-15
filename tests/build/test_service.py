@@ -279,18 +279,16 @@ def test_http_service_waits_on_root_unless_it_sets_health_path(
     seen: list[str | None] = []
 
     def start(
-        command: tuple[str, ...],
+        _command: object,
         *,
         port: int,
-        cwd: Path,
-        environment: dict[str, str] | None = None,
         timeout: float = 120,
         health_path: str | None = None,
     ) -> RunningProcess:
         seen.append(health_path)
         raise RuntimeError("stopped")
 
-    monkeypatch.setattr(RunningProcess, "start", start)
+    monkeypatch.setattr("roadie.engine.process.Command.start", start)
 
     class Plain(HttpService):
         def build(self, run: Run) -> RunningProcess:

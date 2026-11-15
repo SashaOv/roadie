@@ -342,7 +342,7 @@ def test_a_rust_binary_build_prints_no_cargo_json(
             command = [sys.executable, str(script), *command[1:]]
         return real_popen(command, *pargs, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr("roadie.engine.step.subprocess.Popen", popen)
+    monkeypatch.setattr("roadie.engine.process.subprocess.Popen", popen)
     monkeypatch.setattr(
         "roadie.build.rust.CargoPackage.fingerprint",
         lambda self, base_dir: "package:app",

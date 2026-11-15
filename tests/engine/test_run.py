@@ -589,14 +589,12 @@ def test_env_files_override_step_settings_and_not_the_reverse(
         def terminate(self) -> None:
             return None
 
-    def fake_start(*args: object, **kwargs: object) -> Stopped:
-        environment = kwargs["environment"]
-        assert isinstance(environment, dict)
-        seen.append(environment)
+    def fake_start(command: object, **_kwargs: object) -> Stopped:
+        seen.append(command._environment())  # type: ignore[attr-defined]
         return Stopped()
 
-    monkeypatch.setattr("roadie.engine.step.subprocess.Popen", FakeProcess)
-    monkeypatch.setattr("roadie.engine.step.RunningProcess.start", fake_start)
+    monkeypatch.setattr("roadie.engine.process.subprocess.Popen", FakeProcess)
+    monkeypatch.setattr("roadie.engine.process.Command.start", fake_start)
 
     class Server(Service):
         def build(self, run: Run) -> Stopped:

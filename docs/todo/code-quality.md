@@ -310,7 +310,7 @@ writing this record:
 
 ### CQ3: One owner runs commands
 
-Status: planned, approved 2026-11-15
+Status: implemented 2026-11-15 (commits CQ3.*)
 
 **Improvement.** One `Command` object in `engine/process.py` runs a command
 to completion and starts a server. Today `Step._cmd` and
@@ -397,6 +397,32 @@ No clause needs the author.
   Test: a consumer module that imports only from `roadie.build` runs a
   `Command` without a step, starts a server, waits for its port, and parses
   Cargo messages.
+
+### Execution and acceptance
+
+2026-11-15:
+
+- Commits `a980a00`, `196af56`, `221d40a`, `573f4fc` and `2f8304b` carry
+  the five patch names exactly and stay intact. This marking commit trims
+  the tree to the bound: `Command.start` owns server startup, so
+  `RunningProcess.start` and `spawn_server` go, uncaptured output keeps
+  nothing through `read_lines`, and their test callers move with them.
+- `git grep -n 'Popen(\|\.terminate()\|_pumps' src/roadie/engine/step.py
+  src/roadie/build` and `git grep -n '\.terminate()\|_pumps'
+  src/roadie/engine` print nothing (exit 1).
+- CQ3.3's memory tests failed before their patch (3 parametrizations, peak
+  above 1 MB) and pass after; CQ3.4's socket-free probe went from a
+  5,292,430-byte peak with no `readers` to 105,846 bytes with both readers
+  dead after `stop()`; CQ3.5's consumer import failed before its patch.
+- Sandbox-only final run: `ruff check` and `mypy src build.py` pass;
+  pytest shows 418 passed, 2 skipped and 37 failures, all in the sandbox's
+  socket/pty/release categories (loopback is blocked there), the same
+  count as before the trim. Un-sandboxed gates passed at CQ3.1 (446) and
+  CQ3.2 (447).
+- `src/roadie`: 6,138 lines; the bound was 6,140.
+
+CI on Ubuntu and macOS has not run; nothing is pushed. That clause stays
+open until the author pushes.
 
 ## Backlog
 

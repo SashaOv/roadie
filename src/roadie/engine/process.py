@@ -5,25 +5,21 @@ import shlex
 import signal
 import socket
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Any, BinaryIO, TextIO
+from typing import Any
 
 from roadie.engine.errors import StepFailed
 from roadie.engine.lock import RUN_PID_VARIABLE
-from roadie.engine.prefix import (
-    current_prefix,
-    current_sink,
-    output_streams,
-    read_lines,
-)
+from roadie.engine.prefix import current_prefix, current_sink, read_lines
 from roadie.system import (
     cannot_run_message,
     interrupt_process,
@@ -31,9 +27,7 @@ from roadie.system import (
     process_group_session,
     signal_process_tree,
     spawn_in_own_group,
-)
-from roadie.system import (
-    stop_process_tree as _stop_process_tree,
+    stop_process_tree,
 )
 
 _inherit_stdin: ContextVar[bool] = ContextVar("roadie_inherit_stdin", default=True)
@@ -52,58 +46,9 @@ class RunningProcess:
     url: str
     readers: tuple[threading.Thread, ...] = ()
 
-    @classmethod
-    def start(
-        cls,
-        command: Sequence[str],
-        *,
-        port: int,
-        cwd: Path,
-        environment: Mapping[str, str] | None = None,
-        timeout: float = 120,
-        health_path: str | None = None,
-    ) -> "RunningProcess":
-        prefix = current_prefix()
-        sink = current_sink()
-        piped = bool(prefix) and sink is not None
-        process = spawn_server(
-            command,
-            environment=environment,
-            cwd=cwd,
-            stdout=subprocess.PIPE if piped else None,
-            stderr=subprocess.PIPE if piped else None,
-        )
-        readers: tuple[threading.Thread, ...] = ()
-        if piped and sink is not None:
-            readers = tuple(
-                _pump_server(
-                    process, sink_stdout=sink.stdout, sink_stderr=sink.stderr, prefix=prefix
-                )
-            )
-        track_process(process, session=process_group_session())
-        url = f"http://127.0.0.1:{port}"
-        try:
-            if health_path is None:
-                wait_for_port(process, port=port, timeout=timeout)
-            else:
-                health_url = f"{url}{health_path}"
-                _wait_for_ready(
-                    process, lambda: http_url_is_ready(health_url), timeout,
-                    f"did not become ready at {health_url} within {timeout:g}s",
-                )
-            return cls(process, url, readers)
-        except BaseException:
-            untrack_process(process)
-            stop_process_tree(process)
-            for reader in readers:
-                reader.join()
-            if interrupt_requested():
-                raise KeyboardInterrupt
-            raise
-
     def stop(self) -> None:
-        """Signal the process tree with SIGTERM, wait up to 10 seconds, then
-        send SIGKILL, and kill any descendant that outlives its parent."""
+        """Signal the process tree with SIGTERM, wait 10 seconds, then send
+        SIGKILL, and kill any descendant that outlives its parent."""
         untrack_process(self.process)
         stop_process_tree(self.process)
         for reader in self.readers:
@@ -113,9 +58,7 @@ class RunningProcess:
 class _Tail(list[str]):
     """Keep only the last 2000 characters appended."""
 
-    def __init__(self) -> None:
-        super().__init__()
-        self._size = 0
+    _size = 0
 
     def append(self, line: str) -> None:
         super().append(line)
@@ -123,18 +66,10 @@ class _Tail(list[str]):
         while self._size > 2000:
             excess = self._size - 2000
             if len(self[0]) <= excess:
-                self._size -= len(self[0])
-                del self[0]
+                self._size -= len(self.pop(0))
             else:
                 self[0] = self[0][excess:]
                 self._size -= excess
-
-
-class _Discarded(list[str]):
-    """Accept lines without keeping them."""
-
-    def append(self, _line: str) -> None:
-        pass
 
 
 # (spec) Step helpers
@@ -157,22 +92,22 @@ class Command:
         """Print `+ <command>` and run the command in `cwd`.
 
         Its environment is the process environment, then `environment`, then
-        `ROADIE_RUN_PID` set to this process's PID. It inherits standard
-        input. Standard error is shown as it arrives, each line prefixed
-        with `[<label>] ` when the run uses more than one job. Standard
-        output is shown the same way, unless `capture_output` is set: then
-        it is returned, unprefixed, and not printed. `show_output` prints
-        that captured output as it arrives, with the same prefix, and still
-        returns it. Unless `check` is false, a non-zero exit fails with
-        `<label> failed: <command> exited with status <n>: <last 2000
-        characters of standard error>`. It keeps captured standard output
-        in full, the last 2000 characters of standard error, and nothing
-        of standard output it does not capture. See docs/spec.md, "Step
-        helpers", for command resolution and startup errors.
+        `ROADIE_RUN_PID` set to this process's PID. It inherits standard input.
+        Standard error is shown as it arrives, each line prefixed with
+        `[<label>] ` when the run uses more than one job. Standard output is
+        shown the same way, unless `capture_output` is set: then it is returned,
+        unprefixed, and not printed. `show_output` prints that captured output
+        as it arrives, with the same prefix, and still returns it. Unless
+        `check` is false, a non-zero exit fails with `<label> failed: <command>
+        exited with status <n>: <last 2000 characters of standard error>`. It
+        keeps captured standard output in full, the last 2000 characters of
+        standard error, and nothing of standard output it does not capture.
+        See docs/spec.md, "Step helpers", for command resolution and errors.
         """
         print("+", shlex.join(self.args), flush=True)
         prefix = current_prefix()
-        out, err = output_streams()
+        sink = current_sink()
+        out, err = (sink.stdout, sink.stderr) if sink is not None else (sys.stdout, sys.stderr)
         env = self._environment()
         try:
             process = subprocess.Popen(
@@ -187,7 +122,7 @@ class Command:
             raise StepFailed(self.label, cannot_run_message(self.args[0], error)) from error
         track_process(process, session=False)
         readers: list[threading.Thread] = []
-        stdout_parts: list[str] = [] if capture_output else _Discarded()
+        stdout_parts: list[str] | None = [] if capture_output else None
         stderr_parts: list[str] = _Tail()
         try:
             assert process.stderr is not None
@@ -206,7 +141,7 @@ class Command:
                 wait_interruptibly(process)
                 for reader in readers:
                     reader.join()
-                stdout = "".join(stdout_parts) if capture_output else None
+                stdout = "".join(stdout_parts or []) if capture_output else None
                 stderr = "".join(stderr_parts)
             except KeyboardInterrupt:
                 note_interrupt()
@@ -226,8 +161,10 @@ class Command:
             stdout,
             stderr,
         )
-        if check:
-            self._check(completed)
+        if check and completed.returncode != 0:
+            detail = (completed.stderr or "").strip()[-2000:]
+            reason = f"{shlex.join(completed.args)} exited with status {completed.returncode}"
+            raise StepFailed(self.label, f"{reason}: {detail}" if detail else reason)
         return completed
 
     def start(
@@ -240,49 +177,77 @@ class Command:
         """Print `+ <command>`, start a server, and return it once it is ready.
 
         The command runs in `cwd` with the environment of `run`, inherits
-        standard input, and starts in a new session (POSIX) so its whole
-        process tree can be signalled. When the run uses more than one job,
-        each line the server prints is shown as it arrives, prefixed with
-        `[<label>] `. The result holds the process and the URL
-        `http://127.0.0.1:<port>`; it is ready once the port accepts
-        connections, or, with `health_path`, once `GET <url><health_path>`
-        answers 200.
-
-        If the process exits first, it fails with `<process> exited with
-        status <n> before becoming ready`; if `timeout` seconds pass, with
-        `<process> did not start listening on port <port> within <timeout>s`
-        (or `did not become ready at <url> within <timeout>s`). `<process>`
-        is the executable's file name and up to two following arguments that
-        are not options. In both cases the process tree is stopped. A
-        command that cannot start fails as `run` does. The program is found
-        as `run` finds it.
+        standard input, and starts in a new session (POSIX) so its whole process
+        tree can be signalled. When the run uses more than one job, each line
+        the server prints is shown as it arrives, prefixed with `[<label>] `.
+        The result holds the process and the URL `http://127.0.0.1:<port>`; it
+        is ready once the port accepts connections, or, with `health_path`,
+        once `GET <url><health_path>` answers 200. If the process exits first,
+        it fails with `<process> exited with status <n> before becoming ready`;
+        if `timeout` seconds pass, with `<process> did not start listening on
+        port <port> within <timeout>s` (or `did not become ready at <url>
+        within <timeout>s`). `<process>` is the executable's file name and up
+        to two following arguments that are not options. In both cases the
+        process tree is stopped. A command that cannot start fails as `run`
+        does. The program is found as `run` finds it.
         """
         print("+", shlex.join(self.args), flush=True)
+        prefix = current_prefix()
+        sink = current_sink()
+        piped = bool(prefix) and sink is not None
         try:
-            return RunningProcess.start(
+            # Own group: a `cargo run`/`pnpm dev` grandchild holds the port.
+            process = spawn_in_own_group(
                 self.args,
-                port=port,
-                environment=self._environment(),
-                timeout=timeout,
                 cwd=self.cwd,
-                health_path=health_path,
+                environment=self._environment(),
+                stdin=None if _inherit_stdin.get() else subprocess.DEVNULL,
+                stdout=subprocess.PIPE if piped else None,
+                stderr=subprocess.PIPE if piped else None,
             )
         except OSError as error:
             raise StepFailed(self.label, cannot_run_message(self.args[0], error)) from error
+        readers: tuple[threading.Thread, ...] = ()
+        if piped and sink is not None:
+            out_pipe, err_pipe = process.stdout, process.stderr
+            assert out_pipe is not None and err_pipe is not None
+            readers = (
+                read_lines(lambda: out_pipe.readline().decode(errors="replace"), sink.stdout, prefix, None, daemon=True),
+                read_lines(lambda: err_pipe.readline().decode(errors="replace"), sink.stderr, prefix, None, daemon=True),
+            )
+        track_process(process, session=process_group_session())
+        url = f"http://127.0.0.1:{port}"
+        try:
+            if health_path is None:
+                wait_for_port(process, port=port, timeout=timeout)
+            else:
+                health_url = f"{url}{health_path}"
+
+                def ready() -> bool:
+                    try:
+                        with urllib.request.urlopen(health_url, timeout=0.2) as response:
+                            return response.status == 200
+                    except (OSError, urllib.error.URLError):
+                        return False
+
+                _wait_for_ready(
+                    process, ready, timeout,
+                    f"did not become ready at {health_url} within {timeout:g}s",
+                )
+            return RunningProcess(process, url, readers)
+        except BaseException:
+            untrack_process(process)
+            stop_process_tree(process)
+            for reader in readers:
+                reader.join()
+            if interrupt_requested():
+                raise KeyboardInterrupt
+            raise
 
     def _environment(self) -> dict[str, str]:
         merged = {**os.environ, **(self.environment or {})}
         merged[RUN_PID_VARIABLE] = str(os.getpid())
         return merged
-
-    def _check(self, completed: subprocess.CompletedProcess[str]) -> None:
-        if completed.returncode != 0:
-            detail = (completed.stderr or "").strip()[-2000:]
-            reason = f"{shlex.join(completed.args)} exited with status {completed.returncode}"
-            raise StepFailed(
-                self.label,
-                f"{reason}: {detail}" if detail else reason,
-            )
 
 
 def port_is_busy(port: int) -> bool:
@@ -309,14 +274,6 @@ def wait_for_port(
         process, lambda: port_is_busy(port), timeout,
         f"did not start listening on port {port} within {timeout:g}s",
     )
-
-
-def http_url_is_ready(url: str) -> bool:
-    try:
-        with urllib.request.urlopen(url, timeout=0.2) as response:
-            return response.status == 200
-    except (OSError, urllib.error.URLError):
-        return False
 
 
 def _wait_for_ready(
@@ -356,28 +313,6 @@ def _process_name(process: subprocess.Popen[bytes]) -> str:
     return shlex.join(words)
 
 
-def _decode_line(pipe: IO[bytes]) -> str:
-    raw = pipe.readline()
-    return "" if raw == b"" else raw.decode(errors="replace")
-
-
-def _pump_server(
-    process: subprocess.Popen[bytes],
-    *,
-    sink_stdout: TextIO,
-    sink_stderr: TextIO,
-    prefix: str,
-) -> list[threading.Thread]:
-    stdout = process.stdout
-    stderr = process.stderr
-    if stdout is None or stderr is None:
-        return []
-    return [
-        read_lines(lambda: _decode_line(stdout), sink_stdout, prefix, _Discarded(), daemon=True),
-        read_lines(lambda: _decode_line(stderr), sink_stderr, prefix, _Discarded(), daemon=True),
-    ]
-
-
 @contextmanager
 def command_stdin(*, inherit: bool) -> Generator[None]:
     """Choose whether a command started in this scope inherits standard input."""
@@ -388,32 +323,7 @@ def command_stdin(*, inherit: bool) -> Generator[None]:
         _inherit_stdin.reset(token)
 
 
-def spawn_server(
-    command: Sequence[str],
-    *,
-    cwd: Path,
-    environment: Mapping[str, str] | None = None,
-    stdout: BinaryIO | int | None = None,
-    stderr: BinaryIO | int | None = None,
-) -> subprocess.Popen[bytes]:
-    """Start a server in its own process group.
-
-    `cargo run` and `pnpm dev` are wrappers: the process that holds the port is
-    a grandchild. Signalling the group reaches it; signalling the wrapper alone
-    can leave the port held after the command returns.
-    """
-    return spawn_in_own_group(
-        command,
-        cwd=cwd,
-        environment=environment,
-        stdin=None if _inherit_stdin.get() else subprocess.DEVNULL,
-        stdout=stdout,
-        stderr=stderr,
-    )
-
-
-def signal_server(process: subprocess.Popen[bytes], sent: signal.Signals) -> None:
-    signal_process_tree(process, sent)
+signal_server = signal_process_tree
 
 
 @contextmanager
@@ -498,7 +408,3 @@ def stop_tracked_processes() -> None:
         if process.poll() is not None:
             continue
         interrupt_process(process, session=session)
-
-
-def stop_process_tree(process: subprocess.Popen[bytes]) -> None:
-    _stop_process_tree(process)

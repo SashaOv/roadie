@@ -57,7 +57,7 @@ def test_stopping_a_server_stops_its_tree_not_only_the_wrapper(tmp_path: Path) -
     """`cargo run` and `pnpm dev` hold the port in a grandchild, so a stop that
     signals only the wrapper leaves the port held."""
     pid_file = tmp_path / "child.pid"
-    process = processes.spawn_server(
+    process = system_process.spawn_in_own_group(
         (
             sys.executable,
             "-c",
@@ -115,7 +115,7 @@ def test_stopping_a_server_stops_its_forked_grandchild(tmp_path: Path) -> None:
             "unkillable from the job process after the wrapper exits"
         )
     pid_file = tmp_path / "grandchild.pid"
-    process = processes.spawn_server(
+    process = system_process.spawn_in_own_group(
         (
             sys.executable,
             "-c",
@@ -158,7 +158,7 @@ def test_stopping_a_server_stops_its_forked_grandchild(tmp_path: Path) -> None:
 def test_stopping_reaches_a_descendant_outside_the_process_group(tmp_path: Path) -> None:
     """A grandchild can leave the wrapper's process group; stopping still finds it."""
     pid_file = tmp_path / "child.pid"
-    process = processes.spawn_server(
+    process = system_process.spawn_in_own_group(
         (
             sys.executable,
             "-c",
@@ -227,15 +227,13 @@ def test_ps_discovery_skips_lines_that_are_not_pids(monkeypatch: pytest.MonkeyPa
 # (spec) Step helpers
 def test_running_process_waits_for_port_and_stops() -> None:
     port = processes.available_port()
-    server = processes.RunningProcess.start(
+    server = processes.Command(
         # Keep accepting: the readiness poll is itself a connection.
         (sys.executable, "-c", ("import socket; s = socket.socket(); "
          f"s.bind(('127.0.0.1', {port})); s.listen()\n"
          "while True: s.accept()[0].close()")),
-        port=port,
-        timeout=5,
         cwd=Path.cwd(),
-    )
+    ).start(port=port, timeout=5)
     try:
         assert processes.port_is_busy(port)
         assert server.url == f"http://127.0.0.1:{port}"
@@ -249,14 +247,14 @@ def test_running_process_waits_for_port_and_stops() -> None:
 @pytest.mark.parametrize("ending", ["exit", "timeout"])
 def test_running_process_cleans_up_failed_start(ending: str, monkeypatch: pytest.MonkeyPatch) -> None:
     started: list[subprocess.Popen[bytes]] = []
-    original = processes.spawn_server
+    original = processes.spawn_in_own_group
 
     def spawn(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
         child = original(*args, **kwargs)
         started.append(child)
         return child
 
-    monkeypatch.setattr(processes, "spawn_server", spawn)
+    monkeypatch.setattr(processes, "spawn_in_own_group", spawn)
     command = "raise SystemExit(7)" if ending == "exit" else "import threading; threading.Event().wait()"
     reason = (
         f"{re.escape(Path(sys.executable).name)} exited with status 7 before becoming ready"
@@ -264,7 +262,7 @@ def test_running_process_cleans_up_failed_start(ending: str, monkeypatch: pytest
         else f"{re.escape(Path(sys.executable).name)} did not start listening"
     )
     with pytest.raises(SystemExit, match=reason):
-        processes.RunningProcess.start((sys.executable, "-c", command), port=processes.available_port(), timeout=0.5, cwd=Path.cwd())
+        processes.Command((sys.executable, "-c", command), cwd=Path.cwd()).start(port=processes.available_port(), timeout=0.5)
     assert len(started) == 1
     assert started[0].poll() is not None
 
@@ -320,13 +318,10 @@ def test_startup_errors_identify_the_command(
 # (spec) Step helpers
 def test_http_start_waits_until_the_health_path_returns_200() -> None:
     port = processes.available_port()
-    server = processes.RunningProcess.start(
+    server = processes.Command(
         (sys.executable, str(Path(__file__).parents[1] / "fixtures/http_service.py"), str(port)),
-        port=port,
-        health_path="/health",
-        timeout=5,
         cwd=Path.cwd(),
-    )
+    ).start(port=port, health_path="/health", timeout=5)
     try:
         with urllib.request.urlopen(f"{server.url}/health", timeout=1) as response:
             assert response.status == 200
@@ -351,16 +346,12 @@ def test_http_start_fails_when_the_process_exits_or_never_returns_200(ending: st
         reason = f"did not become ready at http://127.0.0.1:{port}/health within 0.4s"
         timeout = 0.4
     with pytest.raises(SystemExit, match=re.escape(reason)):
-        processes.RunningProcess.start(
-            (sys.executable, "-c", command),
-            port=port,
-            health_path="/health",
-            timeout=timeout,
-            cwd=Path.cwd(),
-        )
+        processes.Command(
+            (sys.executable, "-c", command), cwd=Path.cwd()
+        ).start(port=port, health_path="/health", timeout=timeout)
 
 
 # (spec) Step helpers
-def test_spawn_server_requires_a_directory() -> None:
+def test_command_start_requires_a_directory() -> None:
     with pytest.raises(TypeError):
-        processes.spawn_server((sys.executable, "-c", "pass"))
+        processes.Command((sys.executable, "-c", "pass"))  # type: ignore[call-arg]
