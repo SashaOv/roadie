@@ -32,7 +32,7 @@ estimates are proposals.
 |---|---|---:|
 | Failures surface and state ends with its run | 1, G2, G3, G4, G5 | +40 |
 | Nothing is written twice | G1 (docstring), G6 (test layout), the duplicates in Facts | −110 |
-| One owner runs commands | 2, 6, G1, H1, the author's two finds | −30 |
+| One owner runs commands | 2, 6, G1, H1, the author's two finds | −25 |
 | The scheduler owns its state | 4, H2, H3, the serving flag, `env_values` | −230 |
 | A step declares its attributes | 5, the selected `attributes()` approach | +50 |
 | Release plans before it changes anything | 8, H7 | −30 |
@@ -42,8 +42,8 @@ from 912 lines to about 680.
 
 Order constraints:
 
-- "One owner runs commands" lands before R18, so that tracing wraps one
-  command path.
+- "One owner runs commands" lands before R18, so that tracing wraps
+  `Command.run` and `Command.start` alone.
 - Windows is suspended (2026-11-15): CI runs Ubuntu and macOS, and acceptance
   names those two. Windows tests resume as their own build, on a Windows
   machine.
@@ -242,7 +242,7 @@ Review, 2026-11-15, on `main` at `87311d1` (`cq1` fast-forwarded into
 
 ### CQ2: Nothing is written twice
 
-Status: planned, approved 2026-11-15
+Status: implemented 2026-11-15 (commits CQ2.*)
 
 **Improvement.** Each duplicate in Facts becomes one definition, and code
 nothing calls goes. `src/roadie` shrinks by about 110 lines, from 6,284, with
@@ -293,7 +293,121 @@ No clause needs the author.
   `PyProject`, `CargoManifest` and `PackageJson` take `__init__`, `_file`,
   `__repr__` and `fingerprint` from one base class.
 
+### Execution and acceptance
+
+2026-11-15, reviewed on `main` at `7a7cf64` after the executor stopped before
+writing this record:
+
+- Commits `dda935a`, `b04a247`, `839d9f6`, `99a3078`, `18e66d5` and `7a7cf64`
+  carry the six patch names exactly.
+- CI [run 43747818553](https://github.com/SashaOv/roadie/actions/runs/43747818553)
+  on `7a7cf64`: Ubuntu PASS, macOS PASS.
+- `uv run roadie` after `--clean` on macOS: 446 passed, 2 skipped.
+- The grep prints nothing (exit 1).
+- Tests changed only by moving the quoting tests from
+  `tests/engine/test_batch.py` to `tests/system/test_command.py`.
+- `src/roadie`: 6,163 lines, 121 fewer than CQ1 left; the bound was 6,200.
+
+### CQ3: One owner runs commands
+
+Status: planned, awaiting author checkpoint
+
+**Improvement.** One `Command` object in `engine/process.py` runs a command
+to completion and starts a server. Today `Step._cmd` and
+`RunningProcess.start` each print the command, resolve the program, report a
+failed start, track the process for Ctrl-C, read its output with the run's
+prefix and untrack it, in two modules. Code without a step can run a command
+without borrowing one, as Niva's `_gh_json(step, ...)` does today. A command
+also keeps only the output its caller reads. Today a parallel run keeps
+every standard output line it only prints, every command keeps all of
+standard error to show its last 2000 characters, and a server's readers keep
+every line the server prints until it stops. Niva's process and Cargo helpers
+become documented names in `roadie.build`.
+
+**Decisions.** Proposed for the checkpoint.
+
+1. `Command` is a frozen dataclass of the arguments, the directory, the
+   environment and the label its messages use. `run(capture_output,
+   show_output, check)` returns a `CompletedProcess`; `start(port, timeout,
+   health_path)` returns a `RunningProcess`. Their behavior and messages are
+   those `_cmd` and `_start_cmd` document today.
+2. `Step._cmd` and `Step._start_cmd` keep their signatures and build a
+   `Command` from the step's base directory, environment and label.
+   `_command_env` and `_check_cmd` move into `Command`. Step-kind docstrings
+   keep their text; the helpers' docstrings move to `Command`'s methods.
+3. When Ctrl-C reaches the waiting thread, `run` stops the command through
+   `roadie.system.interrupt_process(process, session=False)`, as
+   `request_stop` stops the others. POSIX behavior is unchanged (SIGTERM);
+   on Windows this is `taskkill /T`, which is not verified while Windows is
+   suspended.
+4. What a command keeps:
+   - captured standard output, in full, until `run` returns, because its
+     callers parse it (Cargo and `gh` JSON);
+   - the last 2000 characters of standard error, which is what
+     `CompletedProcess.stderr` then holds. That is all `Pytest`, `Check` and
+     the exit check read: `Check`'s last 2000 characters of output then error
+     are the same when error is cut to its own last 2000;
+   - nothing of standard output it does not capture, and nothing a server
+     prints.
+   `run`'s docstring states this. A single line with no newline is still
+   read whole; bounding it is backlog.
+5. A `RunningProcess` holds its own output readers, so the module-level
+   `_pumps` table goes.
+6. `roadie.build` exports `Command`, `RunningProcess`, `available_port`,
+   `port_is_busy`, `wait_for_port`, `signal_server` and `cargo_executable`,
+   which is `_executable_from_cargo_messages` renamed, with a docstring.
+   Niva's lock pins Roadie at `4ee2b6a`, so nothing breaks until Niva
+   upgrades; its imports change then (backlog).
+7. Roadie's own `git`, `cargo` and `uv` queries stay on `subprocess.run`:
+   they print nothing, stream nothing and each has its own message.
+8. `tests/test_layers.py` also refuses a `roadie.system` module that imports
+   any other Roadie module (G1).
+
+**Acceptance check.**
+
+- `uv run roadie` passes on Ubuntu and macOS CI.
+- `git grep -n 'Popen(\|\.terminate()\|_pumps' src/roadie/engine/step.py src/roadie/build`
+  prints nothing, and `git grep -n '\.terminate()\|_pumps' src/roadie/engine`
+  prints nothing.
+- The tests CQ3.3 and CQ3.4 add fail before their patches and pass after.
+- The record states the line count of `src/roadie`; it is at most 6,140.
+
+No clause needs the author.
+
+### Patches
+
+- [ ] **CQ3.1: Run and start commands through one `Command`.** Decisions 1
+  and 2. `Step._cmd`, `Step._start_cmd` and `HttpService._start_cmd` build a
+  `Command`; the shared start, track, read and untrack code exists once. No
+  test changes beyond imports; the suite covers both paths.
+- [ ] **CQ3.2: Stop an interrupted command through the system layer.**
+  Decision 3. Test: Ctrl-C in the command's thread calls `interrupt_process`
+  with `session=False`, and the run exits 130.
+- [ ] **CQ3.3: Keep only the output a command's caller reads.** Decision 4.
+  Tests, each with `--jobs 1` and `--jobs 2`, measuring the peak with
+  `tracemalloc`: a failing command that writes 5 MB to standard error keeps
+  under 1 MB and fails with the last 2000 characters; a command that writes
+  5 MB to standard output it does not capture keeps under 1 MB; a `Check`
+  whose output and error each exceed 2000 characters fails with the same
+  text as before.
+- [ ] **CQ3.4: Keep a server's output readers with its process.** Decision 5.
+  Tests: a server that prints 5 MB in a parallel run keeps under 1 MB; after
+  `stop()` no reader thread is alive.
+- [ ] **CQ3.5: Name the extension functions Niva uses.** Decisions 6 and 8.
+  Test: a consumer module that imports only from `roadie.build` runs a
+  `Command` without a step, starts a server, waits for its port, and parses
+  Cargo messages.
+
 ## Backlog
+
+- Niva, when it upgrades Roadie past CQ3: import the process helpers and
+  `cargo_executable` from `roadie.build`, and run `gh` through `Command`
+  instead of passing a step to `_gh_json`.
+- One helper for Roadie's own `git`, `cargo` and `uv` queries, which repeat
+  `subprocess.run`, the exit check and a message with git's error in five
+  modules.
+- Bound a single output line that has no newline, without splitting a
+  parallel run's prefix into it.
 
 - Resume Windows tests: fix `test_ctrl_c_stops_a_requested_service_that_outlives_it`
   on a Windows machine (CI's Python 3.15.2 worker crashed with
