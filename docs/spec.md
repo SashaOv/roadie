@@ -597,7 +597,7 @@ fingerprinted. The remaining attributes must be plain values: `None`, `str`,
 fails with `<step> attribute <name> must be a plain value, an input, or a
 step`, when the step is fingerprinted or shown by `--dry`. An attribute
 whose name Roadie keeps for itself — its bookkeeping, such as `name`,
-`base_dir` and `env_values`, its hooks, such as `report`, and its class
+`base_dir`, its hooks, such as `report`, and its class
 attributes `reusable`, `recorded` and `deferred` — fails with `<step>
 attribute <name> is reserved by Roadie`, at the same point. A subclass may
 still override those class attributes and hooks.
@@ -606,9 +606,10 @@ still override those class attributes and hooks.
 
 `run[step]` returns the value of a dependency built or restored earlier in
 the run. A step the run has not built, or has already torn down, fails with
-`<name> is not available in this run`. `run.artifact(step, suffix)` returns
-a path for an artifact of the step, unique to the step and the suffix, and
-creates its parent directory.
+`<name> is not available in this run`. `run.environment(step)` returns the
+environment-file values the run read for that step. `run.artifact(step,
+suffix)` returns a path for an artifact of the step, unique to the step and
+the suffix, and creates its parent directory.
 
 ### Step helpers
 

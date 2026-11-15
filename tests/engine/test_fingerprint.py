@@ -56,10 +56,7 @@ def test_step_fingerprint_covers_files_dependency_outputs_and_env(tmp_path: Path
         assert edited != original
         assert fingerprint(step, outputs={source: "b" * 64}) != edited
         assert fingerprint(step, outputs=outputs, env={"PORT": "1"}) != fingerprint(step, outputs=outputs, env={})
-        step.env_values = {"PORT": "9"}
-        assert fingerprint(step, outputs=outputs) == fingerprint(step, outputs=outputs, env={"PORT": "9"})
-        step.env_values = {"PORT": "10"}
-        assert fingerprint(step, outputs=outputs) != fingerprint(step, outputs=outputs, env={"PORT": "9"})
+        assert fingerprint(step, outputs=outputs) == fingerprint(step, outputs=outputs, env={})
 
         missing = Files("absent")
         before = missing.fingerprint(root)

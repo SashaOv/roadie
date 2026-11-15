@@ -31,6 +31,9 @@ from roadie.system import (
 )
 
 _inherit_stdin: ContextVar[bool] = ContextVar("roadie_inherit_stdin", default=True)
+_command_environment: ContextVar[Mapping[str, str] | None] = ContextVar(
+    "roadie_command_environment", default=None
+)
 _tracked: dict[int, tuple[subprocess.Popen[Any], bool]] = {}
 _tracked_lock = threading.Lock()
 _interrupt = threading.Event()
@@ -93,7 +96,9 @@ class Command:
         """Print `+ <command>` and run the command in `cwd`.
 
         Its environment is the process environment, then `environment`, then
-        `ROADIE_RUN_PID` set to this process's PID. It inherits standard input.
+        the environment values of the step in whose build it runs, when any,
+        then `ROADIE_RUN_PID` set to this process's PID. It inherits standard
+        input.
         Standard error is shown as it arrives, each line prefixed with
         `[<label>] ` when the run uses more than one job. Standard output is
         shown the same way, unless `capture_output` is set: then it is returned,
@@ -238,7 +243,11 @@ class Command:
             raise
 
     def _environment(self) -> dict[str, str]:
-        merged = {**os.environ, **(self.environment or {})}
+        merged = {
+            **os.environ,
+            **(self.environment or {}),
+            **(_command_environment.get() or {}),
+        }
         merged[RUN_PID_VARIABLE] = str(os.getpid())
         return merged
 
@@ -322,13 +331,17 @@ def _print_server_lines(pipe: IO[bytes], stream: TextIO, prefix: str) -> threadi
 
 
 @contextmanager
-def command_stdin(*, inherit: bool) -> Generator[None]:
-    """Choose whether a command started in this scope inherits standard input."""
-    token = _inherit_stdin.set(inherit)
+def command_context(
+    *, inherit: bool, environment: Mapping[str, str]
+) -> Generator[None]:
+    """Give commands in this scope a stdin choice and environment values."""
+    stdin_token = _inherit_stdin.set(inherit)
+    env_token = _command_environment.set(environment)
     try:
         yield
     finally:
-        _inherit_stdin.reset(token)
+        _inherit_stdin.reset(stdin_token)
+        _command_environment.reset(env_token)
 
 
 signal_server = signal_process_tree

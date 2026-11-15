@@ -624,7 +624,7 @@ No clause needs the author.
   not serve. It keeps the run lock until teardown, starts without the
   terminal when it is not requested, and an interrupt does not name it.
   Today it behaves like a service.
-- [ ] **CQ4.3: Keep environment values with the run.** Decision 2. Tests:
+- [x] **CQ4.3: Keep environment values with the run.** Decision 2. Tests:
   - after a run, the step's `vars()` are what they were before it;
   - the same step run twice, with different `--env` files, sees each run's
     values in `run.environment(self)` and in its command's environment;

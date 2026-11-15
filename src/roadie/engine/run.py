@@ -24,7 +24,7 @@ from roadie.engine.parameters import (
 )
 from roadie.engine.prefix import parallel_output, reset_prefix, set_prefix, unprefixed
 from roadie.engine.process import (
-    command_stdin,
+    command_context,
     interrupt_on_terminate,
     interrupt_requested,
     request_stop,
@@ -45,8 +45,14 @@ _records = threading.Lock()
 
 
 class Run:
-    def __init__(self, *, locked: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        locked: bool = False,
+        environments: dict[int, dict[str, str]] | None = None,
+    ) -> None:
         self._values: dict[int, object] = {}
+        self._environments: dict[int, dict[str, str]] = environments or {}
         self.reused: set[int] = set()
         self.locked = locked
         self.started_at = 0.0
@@ -67,6 +73,11 @@ class Run:
             return
         began = self._report_began.pop(id(step))
         self._report.step_end(step._label(), outcome, time.monotonic() - began)
+
+    # (spec) Step values
+    def environment(self, step: Step[Any]) -> dict[str, str]:
+        """Return the environment-file values the run read for `step`."""
+        return self._environments.get(id(step), {})
 
     # (spec) Step values
     def __getitem__[T](self, step: Step[T]) -> T:
@@ -154,8 +165,7 @@ def _run_steps(
     leading: int = 0,
     report: Report | None = None,
 ) -> object:
-    _apply_env(steps, env)
-    run = Run(locked=locked)
+    run = Run(locked=locked, environments=_environments(steps, env))
     run.started_at = time.monotonic()
     live: list[Step[Any]] = []
     if targets is None:
@@ -567,13 +577,13 @@ def _run_one(
     if step.deferred and id(step) not in requested:
         # A deferred step's output fingerprint is its step fingerprint, so a
         # consumer can be reused without it. The consumer builds it.
-        step_fingerprint = fingerprint(step, outputs=outputs)
+        step_fingerprint = fingerprint(step, outputs=outputs, env=run.environment(step))
         with schedule:
             outputs[id(step)] = step_fingerprint
             if dry:
                 marks[id(step)] = "not started"
         return
-    step_fingerprint = fingerprint(step, outputs=outputs)
+    step_fingerprint = fingerprint(step, outputs=outputs, env=run.environment(step))
     record = _matching(step, step_fingerprint)
     if record is not None and dry:
         with schedule:
@@ -612,7 +622,12 @@ def _run_one(
         if type(step).recorded:
             run._report_start(step)
         began = time.monotonic() if type(step).recorded else None
-        with current_step(step), command_stdin(inherit=_inherits_stdin(step, requested)):
+        with (
+            current_step(step),
+            command_context(
+                inherit=_inherits_stdin(step, requested), environment=run.environment(step)
+            ),
+        ):
             value = step.build(run)
         elapsed = None if began is None else time.monotonic() - began
         reported = "reused" if member_reused else ("built" if type(step).recorded else None)
@@ -772,7 +787,10 @@ def _start_one(
             began = time.monotonic() if type(dependency).recorded else None
             with (
                 current_step(dependency),
-                command_stdin(inherit=_inherits_stdin(dependency, requested)),
+                command_context(
+                    inherit=_inherits_stdin(dependency, requested),
+                    environment=run.environment(dependency),
+                ),
             ):
                 value = dependency.build(run)
             elapsed = None if began is None else time.monotonic() - began
@@ -797,7 +815,9 @@ def _start_one(
 
 
 # (spec) Environment files
-def _apply_env(steps: Sequence[Step[Any]], env: Sequence[Path]) -> None:
+def _environments(
+    steps: Sequence[Step[Any]], env: Sequence[Path]
+) -> dict[int, dict[str, str]]:
     """Read env files once. ``config(env=...)`` applies first, then ``--env``."""
     cli_paths = tuple(_resolve_env_path(path) for path in env)
     cache: dict[Path, dict[str, str]] = {}
@@ -812,11 +832,13 @@ def _apply_env(steps: Sequence[Step[Any]], env: Sequence[Path]) -> None:
 
     for path in cli_paths:
         read(path)
+    environments: dict[int, dict[str, str]] = {}
     for step in steps:
         merged: dict[str, str] = {}
         for path in (*step.env_files, *cli_paths):
             merged.update(read(path))
-        step.env_values = merged
+        environments[id(step)] = merged
+    return environments
 
 
 def _resolve_env_path(path: Path) -> Path:

@@ -2,6 +2,7 @@ import io
 import json
 import os
 import signal
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from support import (
 from roadie import cli
 from roadie.build import (
     Binary,
+    Command,
     File,
     Files,
     RoadieError,
@@ -640,9 +642,9 @@ def test_changed_env_file_reruns_a_step(
     @dataclass(eq=False)
     class Note(File):
         def build(self, run: Run) -> Path:
-            built.append(self.env_values["MODE"])
+            built.append(run.environment(self)["MODE"])
             path = run.artifact(self, ".txt")
-            path.write_text(self.env_values["MODE"])
+            path.write_text(run.environment(self)["MODE"])
             return path
 
     note = Note()
@@ -654,6 +656,58 @@ def test_changed_env_file_reruns_a_step(
     env_file.write_text("MODE=two\n")
     execute([note])
     assert built == ["one", "two"]
+
+
+# (spec) Environment files
+def test_a_run_keeps_environment_values_off_the_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    env_file = root / "dev.env"
+    env_file.write_text("MODE=one\n")
+
+    class Note(Step[str]):
+        def build(self, run: Run) -> str:
+            return run.environment(self)["MODE"]
+
+    note = Note()
+    note.env_files = (env_file,)
+    before = dict(vars(note))
+    assert execute([note], root=root) == "one"
+    assert vars(note) == before
+
+
+# (spec) Environment files
+# (spec) Step helpers
+def test_each_run_sees_its_own_environment_in_values_and_commands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    first = root / "first.env"
+    second = root / "second.env"
+    first.write_text("MODE=first\n")
+    second.write_text("MODE=second\n")
+
+    class Probe(Step[tuple[str, str]]):
+        def build(self, run: Run) -> tuple[str, str]:
+            completed = Command(
+                (
+                    sys.executable,
+                    "-c",
+                    "import os; print(os.environ.get('MODE', 'missing'))",
+                ),
+                cwd=root,
+                label="probe",
+            ).run(capture_output=True)
+            return run.environment(self)["MODE"], (completed.stdout or "").strip()
+
+    probe = Probe()
+    assert execute([probe], root=root, env=(first,)) == ("first", "first")
+    assert execute([probe], root=root, env=(second,)) == ("second", "second")
 
 
 # (spec) Step hooks
@@ -759,7 +813,7 @@ def test_config_env_applies_before_cli_env(tmp_path: Path, monkeypatch: pytest.M
         "from pathlib import Path\n"
         "class Probe(Step[None]):\n"
         "    def build(self, run):\n"
-        "        Path('seen.txt').write_text(self.env_values['MODE'] + ' ' + self.env_values['TOKEN'])\n"
+        "        Path('seen.txt').write_text(run.environment(self)['MODE'] + ' ' + run.environment(self)['TOKEN'])\n"
         'config(env=["from-config.env"])\n'
         "probe = Probe()\n",
     )

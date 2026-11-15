@@ -99,7 +99,6 @@ class Step[T](ABC):
     variable: str | None
     build_variables: frozenset[str] | None
     env_files: tuple[Path, ...]
-    env_values: dict[str, str]
     name: str | None
 
     def __new__(cls, *args: object, **kwargs: object) -> Self:
@@ -111,7 +110,6 @@ class Step[T](ABC):
         instance.base_dir = base_directory()
         instance.build_dir = loading_directory()
         instance.env_files = configured_env()
-        instance.env_values = {}
         return instance
 
     def attributes(self) -> dict[str, object]:
@@ -127,7 +125,6 @@ class Step[T](ABC):
                 "variable",
                 "build_variables",
                 "env_files",
-                "env_values",
             }
         }
 
@@ -224,7 +221,7 @@ class Step[T](ABC):
         return Command(
             args,
             cwd=self.base_dir,
-            environment={**(environment or {}), **self.env_values},
+            environment=environment,
             label=self._label(),
         )
 

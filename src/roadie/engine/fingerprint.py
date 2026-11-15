@@ -53,7 +53,7 @@ def _fingerprint(
             "class": _class_id(step),
             "code": _code_hash(step),
             "base_dir": _relative(step.base_dir),
-            "env": dict(step.env_values if env is None else env),
+            "env": dict(env) if env is not None else {},
             "attributes": attributes,
             "inputs": {name: item.fingerprint(step.base_dir) for name, item in inputs.items()},
             "dependencies": dependency_hashes,
