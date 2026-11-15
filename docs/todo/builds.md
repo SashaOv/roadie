@@ -158,6 +158,26 @@ builds, then the one planned build. Unplanned work is in
   byte-identical to its `pnpm-lock.yaml`; in a scratch workspace with no
   external dependencies, pnpm 10.33.0 writes neither that file nor
   `node_modules/.modules.yaml`.
+- 2026-11-11: neither runner image readme lists strace (`ubuntu-24.04`
+  20261101.360.1, `ubuntu-26.04` 20261101.186.1). `ubuntu-latest` moves to
+  26.04 by 2026-11-19 (`actions/runner-images` issue 14748). Whether a hosted
+  runner lets strace trace its child is unverified.
+- 2026-11-11: in Docker 29.8.2 (aarch64) on `ubuntu:26.04`, apt's strace is
+  6.19 and has `--seccomp-bpf` and `--kill-on-exit`. `strace -f -y -e
+  trace=openat,openat2,open -e status=successful` follows child processes,
+  and prints each opened file's absolute path after the returned descriptor
+  (`= 3</w/p/src/a.txt>`). The path is resolved against the process's working
+  directory, after a `chdir` too. With `-xx`, both the path argument and that
+  descriptor path are all `\xHH`; without it, `>` prints as `\76` and
+  non-ASCII bytes print in octal. The flags show `O_RDONLY`, `O_RDWR` or
+  `O_WRONLY`. On `ubuntu:24.04` (strace 6.8), 300 starts of `true` took
+  0.05 s plain and 0.9 s traced.
+- 2026-11-11: in that 26.04 container, under that trace, Roadie's `uv run
+  ruff check`, `uv run mypy src build.py` and `uv run pytest -n auto` read
+  one file git lists outside `build.py`'s `sources`: `.gitignore`, read by
+  ruff. `uv run` reads `uv.lock`, which Roadie's `.gitignore` ignores. The
+  suite took 3.4 s plain and 6.2 s traced. 33 tests failed both times
+  because the container has no cargo, node or pnpm.
 
 --- Implemented / Next ---
 
@@ -1868,6 +1888,147 @@ Command `uv run roadie checks`. Verdict: pass.
   which it builds on, rather than Cargo packages; and `node --version` or
   `pnpm --version` exiting non-zero fails with `<command> failed: <standard
   error>`, the wording decision 5 gives `pnpm ls`.
+
+## R18: An enforcement run names the files a step reads but does not declare
+
+Status: planned, awaiting author checkpoint
+
+**Improvement.** `roadie --enforce [result]` on Linux builds the whole plan,
+reusing nothing, and traces every program a step runs. A step that reads a
+file it does not declare fails with `<name> reads files it does not declare:
+<paths>`. The other steps still build, so one run names every such step.
+Roadie's CI runs its own checks this way on Linux.
+
+Today a missing declaration goes unnoticed. If the file is a signature input
+(a path, an `Env`, an earlier step's value), the step fails. If the step finds
+it in the working tree, it passes, its fingerprint misses the file, and a
+later edit to that file replays a stale verdict. Roadie has such a gap
+itself: ruff reads `.gitignore`, which `sources` leaves out (Facts,
+2026-11-11).
+
+**Decisions.** Proposed for the checkpoint.
+
+1. `--enforce` runs the plan as a run does, with two differences. No step is
+   reused: a reusable step builds and records as usual. Each program a step
+   runs through `_cmd` runs under the trace (decision 4).
+2. Before the lock is taken and before anything runs, `--enforce` fails with
+   `--enforce needs Linux` on another platform, and with `--enforce needs
+   strace: cannot run strace: <reason>` when `strace -V` cannot start or
+   exits non-zero. `roadie.system` holds both checks, as a capability.
+3. Combined with `--dry`, `--enforce` fails with `--enforce does not apply
+   to --dry`. Combined with `--clean`, it fails with `--enforce does not
+   apply to --clean`. Both refusals come before anything runs, as for
+   `--report`.
+4. The program runs as `strace -f -qq -xx -y --seccomp-bpf --kill-on-exit -e
+   trace=open,openat,openat2 -e status=successful -o <log> <program>
+   <arguments>`. The log is a temporary file, deleted once it is read, also
+   when the step fails or is interrupted.
+5. The program reads a file when the log has an open of it without
+   `O_WRONLY`, and the file is a regular file inside the project root that
+   the `Files` listing lists (tracked, or untracked and not ignored). A path
+   the same trace also opens for writing is the program's own output, and is
+   not checked. Not checked: ignored files (`target/`, `.venv`,
+   `node_modules`), files outside the project root, directory listings,
+   `stat`, files executed but never opened, reads by Roadie's own process
+   (a step's Python code), and services (`_start_cmd`).
+6. A step declares a file when an input covers it or a dependency built it.
+   An input covers the files its fingerprint reads: `Input.declared_files(
+   base_dir)` (name proposed) returns them, and is empty by default. `Files`,
+   `CargoPackage`, `NodeEnv` and `PnpmPackage` implement it from the
+   listings their fingerprints already use. A dependency built a file when
+   its value is a `Path`, or a tuple of them: a file stands for itself, and
+   a directory for every file under it.
+7. A step with undeclared reads prints `<name> reads files it does not
+   declare: <paths>` once it has built. `<paths>` are relative to the project
+   root, in POSIX form, sorted, and joined with `, `. The step records
+   nothing, and its report `step-end` outcome is `failed`. Its value stays
+   live, so the steps that take it still build. Other steps keep starting.
+   After the last step, the run fails with `undeclared reads in <n> steps:
+   <names>`, in plan order, and exits 1. Any other failure keeps the
+   Failures rules, and a step that fails that way is not checked.
+8. CI's `ubuntu-latest` job installs strace with `sudo apt-get install -y
+   strace`. It then runs `uv run roadie --enforce checks` in place of `uv run
+   roadie checks`. macOS and Windows are unchanged. Roadie's `build.py` adds
+   `.gitignore` to `sources`.
+9. Tests that need the trace carry a `tracing_only` marker, which skips
+   where decision 2 would refuse. On CI's Linux job they must run, not skip.
+   The log parser is tested on every platform, from the lines in Facts
+   (2026-11-11).
+10. The executor pushes `main` after R18.1 and watches that CI run, then
+    pushes after R18.6 and watches the final run. A hosted runner's ptrace
+    permission can be observed nowhere else. Proposed for authorization at
+    the checkpoint, as R17's decision 8 was.
+
+Not in this build: when an enforcement run happens (nightly, or on a change
+to Roadie or a step's code); `Files(code=..., data=...)`; the restricted tree
+mode; marking earlier verdicts unverified; tracing on macOS or Windows;
+services; reads by Roadie's own process; and Niva's move to `--enforce`,
+which is Niva's change. R18.4 rewrites the backlog's design to these items.
+
+**Acceptance check.**
+
+- `uv run roadie checks` passes. CI passes on `ubuntu-latest`, `macos-latest`
+  and `windows-latest`, and the Linux job runs `roadie --enforce checks` with
+  the `tracing_only` tests not skipped. This is the live clause: a hosted
+  runner traces Roadie's own checks and finds no undeclared read.
+- The scenario in R18.5 runs the real `roadie --enforce` as a subprocess in
+  a temporary git project. Step `a` takes `Files("declared.txt")`. Its program
+  reads `declared.txt` and `undeclared.txt`, a git-ignored file, a file
+  outside the project, and a file it writes and then reads. It also reads
+  the file a dependency `gen` built. An independent step `b` reads only what
+  it declares. The run exits 1, prints `a reads files it does not declare:
+  undeclared.txt`, and builds `b`. A plain run of the same project passes.
+  After `a` declares `undeclared.txt`, `--enforce` passes. Run again, it
+  builds every step, reusing none.
+- On macOS, `roadie --enforce checks` prints `--enforce needs Linux` and
+  exits 1, observed by running the real command.
+- Each behaviour change is covered by a test that fails before its patch.
+
+**Author action required at completion.** None. The executor pushes and
+records both CI runs (decision 10), which discharges the CI clause.
+
+### Patches
+
+- [ ] **R18.1: Install strace on the Linux CI runner.** Decision 8's
+  install step, on `ubuntu-latest` only, before `uv sync`. A step runs
+  `strace -f -qq -xx -y --seccomp-bpf --kill-on-exit -e
+  trace=open,openat,openat2 -e status=successful -o trace.log python3 -c
+  "open('pyproject.toml').read()"`. A second step decodes `trace.log` with
+  Python and fails unless a descriptor path ends in `/pyproject.toml`. This
+  shows that a hosted runner can trace a child. The executor pushes and records the run here (decision
+  10).
+- [ ] **R18.2: Parse a trace into the files a program read and wrote.**
+  Decisions 2, 4 and 5's log reading, in `roadie.system`: the capability
+  check, the traced command line, and a parser that returns the paths read
+  and the paths written. Tests on every platform use the Facts lines: hex
+  paths holding a space, `>` and non-ASCII; `O_RDONLY`, `O_RDWR` and
+  `O_WRONLY`; lines from two processes; and a line that is not an open.
+  Patched `subprocess.run` covers a missing strace and a non-zero
+  `strace -V`, and a non-Linux platform.
+- [ ] **R18.3: Name the files each input covers.** Decision 6's
+  `declared_files` on `Input`, `Files`, `CargoPackage`, `NodeEnv` and
+  `PnpmPackage`. The spec's Input fingerprints section states it. Tests: for
+  each input, the files equal those its fingerprint reads. `Files` mixes
+  files, directories and a missing path. `CargoPackage` and `PnpmPackage`
+  each include a dependency package. A default `Input` declares nothing.
+- [ ] **R18.4: Add the --enforce option.** Decisions 1–3 and 5–7. The spec's
+  Command line lists `--enforce`. A new Enforcing declared inputs section
+  follows Reusing a step. The `_cmd` docstring states the trace. Tests
+  (`tracing_only`, real strace): an undeclared read, an ignored file, a file
+  outside the root, a written-then-read file, a dependency's file and a
+  dependency's directory, a `chdir` in the program, `--jobs` 1 and 2, the
+  report's `failed` outcome, no reuse on a second run, the log deleted after
+  success, failure and interrupt, and another failure that skips the check.
+  Tests on every platform: the `--dry` and `--clean` refusals, and the
+  refusal on a non-Linux platform (patched capability). The backlog's
+  enforcement design keeps only what this build leaves out.
+- [ ] **R18.5: Run the enforcement scenario through the CLI.** The R18.5
+  scenario from the acceptance check, as a `tracing_only` test that runs
+  `roadie` as a subprocess.
+- [ ] **R18.6: Enforce Roadie's own inputs on CI.** Decision 8: the Linux
+  job runs `uv run roadie --enforce checks`, and `build.py` declares
+  `.gitignore`. R18.1's probe step goes. The executor pushes and records
+  the final CI run (decision 10).
 
 ## Backlog
 

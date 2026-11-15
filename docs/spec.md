@@ -734,21 +734,27 @@ writes nothing. The file is written through a temporary file and renamed.
 ### Artifacts
 
 `run.artifact(step, suffix)` returns
-`<root>/target/roadie/<directory>/<variable><suffix>`, with `<directory>` as
-for the step's record, and notes that file's name for the step's record
-entry. `<variable>` is the step's variable or its derived name.
+`<root>/target/roadie/<directory>/<variable><suffix>` and adds that file's
+name to the step's record entry. `<directory>` is the same as for the step's
+record, and `<variable>` is the step's variable or derived name.
 
-After a successful run, while the run still holds its lock, Roadie reads
-`<root>/target/roadie/swept`. When the timestamp is missing, Roadie writes it
-and does not sweep. When it is missing a timezone, cannot be read, or is
-older than 24 hours, Roadie sweeps and then writes it. A failed run does not
-sweep. The sweep deletes each file in a record directory unless an entry
-lists its name, which includes every artifact of an unnamed step and every
-file of a record of another version, and deletes each record directory
-whose build file no longer exists. The root directory is kept, along with
-the lock and the timestamp; only its record and artifacts go. A directory
-under `_outside` is kept, because the sweep cannot recover the build file's
-path; a file no entry lists is still deleted.
+A **sweep** deletes leftovers from `target/roadie/`, at most once a day.
+
+When it runs: after a successful run, while that run still holds the lock.
+`<root>/target/roadie/swept` holds the time of the last sweep. Roadie sweeps
+when that time is more than 24 hours old, has no timezone, or cannot be read,
+and then writes the current time. When the file is missing, Roadie writes it
+and does not sweep. A failed run never sweeps.
+
+What it deletes:
+
+- in every record directory, each file that no record entry lists. That
+  includes the artifacts of unnamed steps and the files of a record of
+  another version;
+- every record directory whose build file no longer exists. In the root
+  directory, only the record and the artifacts go; the lock and `swept` stay.
+  A directory under `_outside` always stays, because its name does not say
+  where its build file is; its unlisted files are still deleted.
 
 ### Developing on Windows
 
