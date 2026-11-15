@@ -10,7 +10,9 @@ engine/build/system layering kept. The findings are in
 number (1–10, G1–G6, H1–H7) and does not restate them.
 
 The measure is the line count of `git ls-files 'src/roadie/*.py'`. Each
-build's record states the count it leaves.
+build's record states the count it leaves. The count is reported, not
+gated: code is not packed, inlined or stripped of its documentation to meet
+an estimate, and a build that misses its estimate says so at the checkpoint.
 
 The work has three kinds, done in this order within the sketch below:
 
@@ -423,6 +425,47 @@ No clause needs the author.
 
 CI on Ubuntu and macOS has not run; nothing is pushed. That clause stays
 open until the author pushes.
+
+### Review
+
+2026-11-15, at `6f15258`, by the planning agent.
+
+- The five patch commits carry their planned names. `6f15258`, named as
+  the record commit, also changes 243 lines of `src` and `tests`, which is
+  drift: unplanned code has to land as a patch commit, not inside the
+  record. That change does what CQ3.1 promised and did not deliver:
+  CQ3.1 left `RunningProcess.start` starting servers on its own, so the
+  start, track, read and untrack code was still written twice, and
+  `src/roadie` grew from 6,163 to 6,246 lines.
+- Some of `6f15258` is consolidation and stays: `Command.start` owns
+  server startup, `RunningProcess.start`, `spawn_server`, `_pump_server`,
+  `_decode_line`, `_Discarded` and the `stop_process_tree` wrapper go,
+  and `read_lines` takes `None` to keep nothing.
+- The rest was packing to meet the line bound. Uncommitted review fixes
+  undo it:
+  - `Step._cmd` and `Step._start_cmd` had each been given a copy of the
+    `Command` construction; `Step._command` builds it once again.
+  - Server output readers had become two 121-character lines;
+    `_print_server_lines` reads one pipe.
+  - `http_url_is_ready` had become a closure nested in `Command.start`;
+    it is a module function again, beside `port_is_busy`.
+  - `RunningProcess.stop`'s docstring had lost "up to" in "wait up to 10
+    seconds", which made it wrong; `run`'s docstring had lost "startup".
+- A second review fix: the 2000-character tail was a literal in three
+  places in `engine/process.py` and a constant in both `check.py` and
+  `pytest_step.py`. Decision 4 relies on all of them agreeing, so
+  `OUTPUT_TAIL` in `engine/process.py` is now the only definition.
+- With the fixes: `ruff check` and `mypy src build.py` pass, `uv run pytest
+  -q` (not sandboxed) has 455 passed and 2 skipped, both acceptance greps
+  print nothing, and `src/roadie` has 6,150 lines, 13 fewer than before
+  CQ3 and 10 over the 6,140 bound.
+- The line bound is waived. CQ3's own estimate was −25, and the
+  difference is code this review restored. Goal and design now says the
+  count is reported, not gated.
+
+- The author committed the review fixes as `2353c5c` ("CQ3 follow up:
+  minor fixes") and pushed. CI run 43756393773 passed on `ubuntu-latest`
+  and `macos-latest`. That discharges the last acceptance clause.
 
 ## Backlog
 
