@@ -146,7 +146,9 @@ def test_requested_service_stays_up_until_ctrl_c(capsys: pytest.CaptureFixture[s
 
 # (spec) Requested result
 @pytest.mark.parametrize("fail_start", [False, True])
-def test_ctrl_c_stops_a_requested_service_that_outlives_it(fail_start: bool) -> None:
+def test_ctrl_c_stops_a_requested_service_that_outlives_it(
+    fail_start: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     started: list[RunningProcess] = []
     ready = threading.Event()
     finished = threading.Event()
@@ -166,12 +168,15 @@ def test_ctrl_c_stops_a_requested_service_that_outlives_it(fail_start: bool) -> 
                 port=port,
                 timeout=5,
             )
+            wait = server.process.wait
+
+            def wait_until_interrupted(timeout: float | None = None) -> int:
+                ready.set()
+                return wait(timeout=timeout)
+
+            monkeypatch.setattr(server.process, "wait", wait_until_interrupted)
             started.append(server)
             return server
-
-        def serve(self, value: RunningProcess) -> None:
-            ready.set()
-            super().serve(value)
 
     def interrupt() -> None:
         if ready.wait(10) and not finished.is_set():
