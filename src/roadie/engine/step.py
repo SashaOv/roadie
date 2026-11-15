@@ -202,10 +202,9 @@ class Step[T](ABC):
         environment: Mapping[str, str] | None = None,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        return Command(
-            args, cwd=self.base_dir,
-            environment={**(environment or {}), **self.env_values}, label=self._label(),
-        ).run(capture_output=capture_output, show_output=show_output, check=check)
+        return self._command(args, environment).run(
+            capture_output=capture_output, show_output=show_output, check=check
+        )
 
     # (spec) Step helpers
     def _start_cmd(
@@ -216,10 +215,17 @@ class Step[T](ABC):
         timeout: float = 120,
         health_path: str | None = None,
     ) -> RunningProcess:
+        return self._command(args, environment).start(
+            port=port, timeout=timeout, health_path=health_path
+        )
+
+    def _command(self, args: tuple[str, ...], environment: Mapping[str, str] | None) -> Command:
         return Command(
-            args, cwd=self.base_dir,
-            environment={**(environment or {}), **self.env_values}, label=self._label(),
-        ).start(port=port, timeout=timeout, health_path=health_path)
+            args,
+            cwd=self.base_dir,
+            environment={**(environment or {}), **self.env_values},
+            label=self._label(),
+        )
 
 
 def _reserved_names() -> frozenset[str]:

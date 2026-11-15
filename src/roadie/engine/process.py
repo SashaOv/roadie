@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import IO, Any, TextIO
 
 from roadie.engine.errors import StepFailed
 from roadie.engine.lock import RUN_PID_VARIABLE
@@ -37,6 +37,7 @@ _interrupt = threading.Event()
 _before_stop: Callable[[], None] | None = None
 
 _COMMAND_NAME_WORDS = 3
+OUTPUT_TAIL = 2000
 
 
 # (spec) Step helpers
@@ -47,8 +48,8 @@ class RunningProcess:
     readers: tuple[threading.Thread, ...] = ()
 
     def stop(self) -> None:
-        """Signal the process tree with SIGTERM, wait 10 seconds, then send
-        SIGKILL, and kill any descendant that outlives its parent."""
+        """Signal the process tree with SIGTERM, wait up to 10 seconds, then
+        send SIGKILL, and kill any descendant that outlives its parent."""
         untrack_process(self.process)
         stop_process_tree(self.process)
         for reader in self.readers:
@@ -56,15 +57,15 @@ class RunningProcess:
 
 
 class _Tail(list[str]):
-    """Keep only the last 2000 characters appended."""
+    """Keep only the last `OUTPUT_TAIL` characters appended."""
 
     _size = 0
 
     def append(self, line: str) -> None:
         super().append(line)
         self._size += len(line)
-        while self._size > 2000:
-            excess = self._size - 2000
+        while self._size > OUTPUT_TAIL:
+            excess = self._size - OUTPUT_TAIL
             if len(self[0]) <= excess:
                 self._size -= len(self.pop(0))
             else:
@@ -102,7 +103,8 @@ class Command:
         exited with status <n>: <last 2000 characters of standard error>`. It
         keeps captured standard output in full, the last 2000 characters of
         standard error, and nothing of standard output it does not capture.
-        See docs/spec.md, "Step helpers", for command resolution and errors.
+        See docs/spec.md, "Step helpers", for command resolution and startup
+        errors.
         """
         print("+", shlex.join(self.args), flush=True)
         prefix = current_prefix()
@@ -162,7 +164,7 @@ class Command:
             stderr,
         )
         if check and completed.returncode != 0:
-            detail = (completed.stderr or "").strip()[-2000:]
+            detail = (completed.stderr or "").strip()[-OUTPUT_TAIL:]
             reason = f"{shlex.join(completed.args)} exited with status {completed.returncode}"
             raise StepFailed(self.label, f"{reason}: {detail}" if detail else reason)
         return completed
@@ -209,11 +211,10 @@ class Command:
             raise StepFailed(self.label, cannot_run_message(self.args[0], error)) from error
         readers: tuple[threading.Thread, ...] = ()
         if piped and sink is not None:
-            out_pipe, err_pipe = process.stdout, process.stderr
-            assert out_pipe is not None and err_pipe is not None
+            assert process.stdout is not None and process.stderr is not None
             readers = (
-                read_lines(lambda: out_pipe.readline().decode(errors="replace"), sink.stdout, prefix, None, daemon=True),
-                read_lines(lambda: err_pipe.readline().decode(errors="replace"), sink.stderr, prefix, None, daemon=True),
+                _print_server_lines(process.stdout, sink.stdout, prefix),
+                _print_server_lines(process.stderr, sink.stderr, prefix),
             )
         track_process(process, session=process_group_session())
         url = f"http://127.0.0.1:{port}"
@@ -222,16 +223,8 @@ class Command:
                 wait_for_port(process, port=port, timeout=timeout)
             else:
                 health_url = f"{url}{health_path}"
-
-                def ready() -> bool:
-                    try:
-                        with urllib.request.urlopen(health_url, timeout=0.2) as response:
-                            return response.status == 200
-                    except (OSError, urllib.error.URLError):
-                        return False
-
                 _wait_for_ready(
-                    process, ready, timeout,
+                    process, lambda: http_url_is_ready(health_url), timeout,
                     f"did not become ready at {health_url} within {timeout:g}s",
                 )
             return RunningProcess(process, url, readers)
@@ -276,6 +269,14 @@ def wait_for_port(
     )
 
 
+def http_url_is_ready(url: str) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=0.2) as response:
+            return response.status == 200
+    except (OSError, urllib.error.URLError):
+        return False
+
+
 def _wait_for_ready(
     process: subprocess.Popen[bytes],
     ready: Callable[[], bool],
@@ -311,6 +312,13 @@ def _process_name(process: subprocess.Popen[bytes]) -> str:
             break
         words.append(word)
     return shlex.join(words)
+
+
+def _print_server_lines(pipe: IO[bytes], stream: TextIO, prefix: str) -> threading.Thread:
+    """Print each line a server writes to `pipe`, keeping none."""
+    return read_lines(
+        lambda: pipe.readline().decode(errors="replace"), stream, prefix, None, daemon=True
+    )
 
 
 @contextmanager

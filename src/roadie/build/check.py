@@ -7,12 +7,11 @@ from typing import TYPE_CHECKING
 from roadie.build.tests import TestFailure, TestResults, Tests
 from roadie.engine.inputs import Input
 from roadie.engine.many import one_or_many
+from roadie.engine.process import OUTPUT_TAIL
 from roadie.engine.step import Step
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
-
-_OUTPUT_TAIL = 2000
 
 
 # (spec) Step kinds
@@ -45,5 +44,5 @@ class Check(Tests):
         if completed.returncode == 0:
             return TestResults()
         output = f"{completed.stdout or ''}{completed.stderr or ''}"
-        failure = TestFailure(shlex.join(self.command), output[-_OUTPUT_TAIL:])
+        failure = TestFailure(shlex.join(self.command), output[-OUTPUT_TAIL:])
         return TestResults(failures=(failure,))

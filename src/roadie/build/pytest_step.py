@@ -10,12 +10,11 @@ from roadie.build.tests import TestFailure, TestResults, Tests
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import Input
 from roadie.engine.many import one_or_many
+from roadie.engine.process import OUTPUT_TAIL
 from roadie.engine.step import Step
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
-
-_OUTPUT_TAIL = 2000
 
 
 def _junit_failures(report: Path) -> tuple[TestFailure, ...]:
@@ -30,7 +29,7 @@ def _junit_failures(report: Path) -> tuple[TestFailure, ...]:
 
 
 def _status_failure(status: int, stderr: str) -> str:
-    tail = stderr[-_OUTPUT_TAIL:]
+    tail = stderr[-OUTPUT_TAIL:]
     reason = f"pytest exited with status {status}"
     if tail:
         reason = f"{reason}: {tail}"
