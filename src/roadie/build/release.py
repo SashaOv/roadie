@@ -154,23 +154,13 @@ def _tracks(directory: Path, name: str) -> bool:
     return completed.returncode == 0
 
 
-# (spec) Step kinds
-class PyProject(Input):
-    """A version source read from `[project] version`.
-
-    The fingerprint is the file's content. A missing or dynamic version fails
-    with `<path> has no static [project] version`. Writing runs
-    `uv version --frozen <version>`, or `uv version <version>` when git tracks
-    a `uv.lock` beside the file; that lockfile then joins the release commit,
-    because `uv version` otherwise creates or rewrites it.
-    """
-
+class _ManifestSource(Input):
     def __init__(self, path: str | Path) -> None:
         self.path = path
 
     def __repr__(self) -> str:
         shown = self.path if isinstance(self.path, str) else os.fspath(self.path)
-        return f"PyProject({shown!r})"
+        return f"{type(self).__name__}({shown!r})"
 
     def _file(self, base_dir: Path) -> Path:
         path = Path(self.path)
@@ -181,6 +171,18 @@ class PyProject(Input):
         if not file.is_file():
             return hashlib.sha256(b"missing").hexdigest()
         return hashlib.sha256(file.read_bytes()).hexdigest()
+
+
+# (spec) Step kinds
+class PyProject(_ManifestSource):
+    """A version source read from `[project] version`.
+
+    The fingerprint is the file's content. A missing or dynamic version fails
+    with `<path> has no static [project] version`. Writing runs
+    `uv version --frozen <version>`, or `uv version <version>` when git tracks
+    a `uv.lock` beside the file; that lockfile then joins the release commit,
+    because `uv version` otherwise creates or rewrites it.
+    """
 
     def read_version(self, base_dir: Path) -> str:
         file = self._file(base_dir)
@@ -276,7 +278,7 @@ def _cargo(directory: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 # (spec) Step kinds
-class CargoManifest(Input):
+class CargoManifest(_ManifestSource):
     """A version source read from a `Cargo.toml`.
 
     The version is `[workspace.package] version`, or, without that table,
@@ -288,19 +290,6 @@ class CargoManifest(Input):
     `cargo update --workspace --offline` and that lockfile joins the release
     commit. A failing cargo fails with `cannot release: <cargo's message>`.
     """
-
-    def __init__(self, path: str | Path) -> None:
-        self.path = path
-
-    def _file(self, base_dir: Path) -> Path:
-        path = Path(self.path)
-        return path if path.is_absolute() else (base_dir / path).resolve()
-
-    def fingerprint(self, base_dir: Path) -> str:
-        file = self._file(base_dir)
-        if not file.is_file():
-            return hashlib.sha256(b"missing").hexdigest()
-        return hashlib.sha256(file.read_bytes()).hexdigest()
 
     def _located(self, file: Path) -> tuple[str, str]:
         try:
@@ -374,7 +363,7 @@ def _replace_json_version(text: str, old: str, new: str) -> str:
 
 
 # (spec) Step kinds
-class PackageJson(Input):
+class PackageJson(_ManifestSource):
     """A version source read from a `package.json`.
 
     The version is the top-level `version` string. A file without one fails
@@ -384,19 +373,6 @@ class PackageJson(Input):
     the file, the release fails before changing anything with `cannot release:
     <path> has a package-lock.json, which Roadie does not update`.
     """
-
-    def __init__(self, path: str | Path) -> None:
-        self.path = path
-
-    def _file(self, base_dir: Path) -> Path:
-        path = Path(self.path)
-        return path if path.is_absolute() else (base_dir / path).resolve()
-
-    def fingerprint(self, base_dir: Path) -> str:
-        file = self._file(base_dir)
-        if not file.is_file():
-            return hashlib.sha256(b"missing").hexdigest()
-        return hashlib.sha256(file.read_bytes()).hexdigest()
 
     def read_version(self, base_dir: Path) -> str:
         file = self._file(base_dir)

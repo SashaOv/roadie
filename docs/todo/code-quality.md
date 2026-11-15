@@ -289,7 +289,7 @@ No clause needs the author.
   `_cmd`'s docstring loses the Windows paragraph, decision 4 renames the
   helper, and `tests/engine/test_batch.py`'s quoting tests move to
   `tests/system/test_command.py` (G6).
-- [ ] **CQ2.6: Share the manifest sources' path and fingerprint.**
+- [x] **CQ2.6: Share the manifest sources' path and fingerprint.**
   `PyProject`, `CargoManifest` and `PackageJson` take `__init__`, `_file`,
   `__repr__` and `fingerprint` from one base class.
 
