@@ -619,7 +619,7 @@ No clause needs the author.
 
   Skip a case an existing test already covers, and cite that test in the
   record.
-- [ ] **CQ4.2: Declare that a kind serves.** Decision 1. Test: a kind whose
+- [x] **CQ4.2: Declare that a kind serves.** Decision 1. Test: a kind whose
   `serve` only calls `super().serve(value)` behaves like a kind that does
   not serve. It keeps the run lock until teardown, starts without the
   terminal when it is not requested, and an interrupt does not name it.

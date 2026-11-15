@@ -92,6 +92,7 @@ class Step[T](ABC):
     deferred: ClassVar[bool] = False
     once_per_run: ClassVar[bool] = False
     asks: ClassVar[bool] = False
+    serves: ClassVar[bool] = False
     serial: int
     base_dir: Path
     build_dir: Path | None

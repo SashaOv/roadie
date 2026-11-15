@@ -16,8 +16,11 @@ from roadie.build import Service, Step
 from roadie.engine import process as processes
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.inputs import run_state
+from roadie.engine.lock import lock_path
 from roadie.engine.process import RunningProcess, available_port
 from roadie.engine.run import Run
+from roadie.system import lock as lock_file
+from roadie.system import unlock as unlock_file
 
 _WAIT = 2
 
@@ -756,6 +759,95 @@ def test_an_interrupt_names_the_running_step(
     threading.Thread(target=_interrupt_when_pidfile_appears, args=(pidfile,), daemon=True).start()
     with pytest.raises(KeyboardInterrupt):
         execute([_named(Note(), "note")], root=root, jobs=jobs)
+    assert "interrupted: stopping note" in capsys.readouterr().out.splitlines()
+
+
+# (spec) Step hooks
+# (spec) Teardown
+def test_a_kind_that_only_calls_super_serve_keeps_the_lock_until_teardown(
+    tmp_path: Path,
+) -> None:
+    def lock_free() -> bool:
+        handle = lock_path(tmp_path.resolve()).open("a+b")
+        try:
+            if not lock_file(handle, blocking=False):
+                return False
+            unlock_file(handle)
+            return True
+        finally:
+            handle.close()
+
+    seen: list[bool] = []
+
+    class Almost(Step[str]):
+        def build(self, run: Run) -> str:
+            return "up"
+
+        def serve(self, value: str) -> None:
+            super().serve(value)
+
+        def teardown(self, value: str) -> None:
+            seen.append(lock_free())
+
+    class Other(Step[str]):
+        def build(self, run: Run) -> str:
+            return "other"
+
+    almost = _named(Almost(), "almost")
+    other = _named(Other(), "other")
+    execute([almost, other], root=tmp_path, targets=[almost, other])
+    assert seen == [False]
+
+
+# (spec) Step hooks
+# (spec) Requested result
+def test_a_kind_that_only_calls_super_serve_prints_the_total_after_serving(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class Almost(Step[str]):
+        def build(self, run: Run) -> str:
+            return "up"
+
+        def serve(self, value: str) -> None:
+            print("almost served", flush=True)
+            super().serve(value)
+
+    execute([_named(Almost(), "almost")], root=tmp_path)
+    output = capsys.readouterr().out
+    assert output.index("almost served") < output.index("finished in")
+
+
+# (spec) Step hooks
+# (spec) Teardown
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_an_interrupt_does_not_name_a_kind_that_only_calls_super_serve(
+    tmp_path: Path, jobs: int, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path.resolve()
+    pidfile = root / "child.pid"
+
+    class Almost(Step[str]):
+        deferred = True
+
+        def build(self, run: Run) -> str:
+            return "up"
+
+        def serve(self, value: str) -> None:
+            super().serve(value)
+
+    @dataclass(eq=False)
+    class Note(Step[None]):
+        api: Almost
+
+        def build(self, run: Run) -> None:
+            assert run[self.api] == "up"
+            self._cmd(sys.executable, "-c", _sleep_until_stopped(pidfile))
+
+    api = _named(Almost(), "api")
+    note = _named(Note(api), "note")
+    threading.Thread(target=_interrupt_when_pidfile_appears, args=(pidfile,), daemon=True).start()
+    with pytest.raises(KeyboardInterrupt):
+        execute([api, note], root=root, jobs=jobs)
     assert "interrupted: stopping note" in capsys.readouterr().out.splitlines()
 
 

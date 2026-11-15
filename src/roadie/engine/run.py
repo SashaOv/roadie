@@ -198,7 +198,7 @@ def _run_steps(
                     for step in steps
                     if id(step) in live_now
                     and id(step) not in running_now
-                    and type(step).serve is not Step.serve
+                    and step.serves
                 )
         line = f"interrupted: stopping {', '.join(names)}" if names else "interrupted"
         with unprefixed():
@@ -712,7 +712,7 @@ def _kept(
     if reported is not None:
         run._report_end(step, reported)
     if id(step) in requested and (
-        type(step).serve is not Step.serve or requested.issubset({id(step)})
+        step.serves or requested.issubset({id(step)})
     ):
         # A served result, such as a dev server, outlives the run and must not
         # keep the lock. The total is printed first, so a server does not hide it.
@@ -721,7 +721,7 @@ def _kept(
         if run_lock is not None:
             sweep_stale_state(project_root())
             run_lock.release()
-        if type(step).serve is not Step.serve:
+        if step.serves:
             _report_run(run)
         step.serve(value)
     return value, output
@@ -730,7 +730,7 @@ def _kept(
 # (spec) Deferred steps
 def _inherits_stdin(step: Step[Any], requested: set[int]) -> bool:
     """A service keeps the terminal only when it is a requested result."""
-    return type(step).serve is Step.serve or id(step) in requested
+    return not step.serves or id(step) in requested
 
 
 def _start_deferred(

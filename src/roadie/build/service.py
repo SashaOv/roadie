@@ -43,6 +43,7 @@ class Service(Step[Deployment]):
     reusable: ClassVar[bool] = False
     deferred: ClassVar[bool] = True
     once_per_run: ClassVar[bool] = True
+    serves: ClassVar[bool] = True
 
     def teardown(self, value: Deployment) -> None:
         value.stop()
