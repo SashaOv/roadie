@@ -242,7 +242,7 @@ Review, 2026-11-15, on `main` at `87311d1` (`cq1` fast-forwarded into
 
 ### CQ2: Nothing is written twice
 
-Status: planned, awaiting author checkpoint
+Status: planned, approved 2026-11-15
 
 **Improvement.** Each duplicate in Facts becomes one definition, and code
 nothing calls goes. `src/roadie` shrinks by about 110 lines, from 6,284, with
@@ -274,7 +274,7 @@ No clause needs the author.
 
 ### Patches
 
-- [ ] **CQ2.1: Wait for readiness in one loop.** `wait_for_port` and
+- [x] **CQ2.1: Wait for readiness in one loop.** `wait_for_port` and
   `wait_for_http_server` call one loop that takes the readiness test and the
   timeout message.
 - [ ] **CQ2.2: Read a marked step in one function.** `_marked_default` and

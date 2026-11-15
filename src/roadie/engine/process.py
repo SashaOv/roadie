@@ -74,7 +74,11 @@ class RunningProcess:
             if health_path is None:
                 wait_for_port(process, port=port, timeout=timeout)
             else:
-                wait_for_http_server(process, url=f"{url}{health_path}", timeout=timeout)
+                health_url = f"{url}{health_path}"
+                _wait_for_ready(
+                    process, lambda: http_url_is_ready(health_url), timeout,
+                    f"did not become ready at {health_url} within {timeout:g}s",
+                )
             return cls(process, url)
         except BaseException:
             untrack_process(process)
@@ -112,24 +116,10 @@ def wait_for_port(
     port: int,
     timeout: float = 120,
 ) -> None:
-    deadline = time.monotonic() + timeout
-    while True:
-        if port_is_busy(port):
-            return
-        return_code = process.poll()
-        if return_code is not None:
-            raise SystemExit(
-                f"{_process_name(process)} exited with status {return_code} before becoming ready"
-            )
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise SystemExit(
-                f"{_process_name(process)} did not start listening on port {port} within {timeout:g}s"
-            )
-        try:
-            process.wait(timeout=min(0.2, remaining))
-        except subprocess.TimeoutExpired:
-            pass
+    _wait_for_ready(
+        process, lambda: port_is_busy(port), timeout,
+        f"did not start listening on port {port} within {timeout:g}s",
+    )
 
 
 def http_url_is_ready(url: str) -> bool:
@@ -140,15 +130,15 @@ def http_url_is_ready(url: str) -> bool:
         return False
 
 
-def wait_for_http_server(
+def _wait_for_ready(
     process: subprocess.Popen[bytes],
-    *,
-    url: str,
-    timeout: float = 120,
+    ready: Callable[[], bool],
+    timeout: float,
+    timeout_message: str,
 ) -> None:
     deadline = time.monotonic() + timeout
     while True:
-        if http_url_is_ready(url):
+        if ready():
             return
         return_code = process.poll()
         if return_code is not None:
@@ -157,9 +147,7 @@ def wait_for_http_server(
             )
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise SystemExit(
-                f"{_process_name(process)} did not become ready at {url} within {timeout:g}s"
-            )
+            raise SystemExit(f"{_process_name(process)} {timeout_message}")
         try:
             process.wait(timeout=min(0.2, remaining))
         except subprocess.TimeoutExpired:
