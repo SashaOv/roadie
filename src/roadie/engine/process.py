@@ -41,7 +41,6 @@ _tracked: dict[int, tuple[subprocess.Popen[Any], bool]] = {}
 _tracked_lock = threading.Lock()
 _interrupt = threading.Event()
 _before_stop: Callable[[], None] | None = None
-_pumps: dict[int, list[threading.Thread]] = {}
 
 _COMMAND_NAME_WORDS = 3
 
@@ -51,6 +50,7 @@ _COMMAND_NAME_WORDS = 3
 class RunningProcess:
     process: subprocess.Popen[bytes]
     url: str
+    readers: tuple[threading.Thread, ...] = ()
 
     @classmethod
     def start(
@@ -73,9 +73,12 @@ class RunningProcess:
             stdout=subprocess.PIPE if piped else None,
             stderr=subprocess.PIPE if piped else None,
         )
+        readers: tuple[threading.Thread, ...] = ()
         if piped and sink is not None:
-            _pumps[process.pid] = _pump_server(
-                process, sink_stdout=sink.stdout, sink_stderr=sink.stderr, prefix=prefix
+            readers = tuple(
+                _pump_server(
+                    process, sink_stdout=sink.stdout, sink_stderr=sink.stderr, prefix=prefix
+                )
             )
         track_process(process, session=process_group_session())
         url = f"http://127.0.0.1:{port}"
@@ -88,11 +91,12 @@ class RunningProcess:
                     process, lambda: http_url_is_ready(health_url), timeout,
                     f"did not become ready at {health_url} within {timeout:g}s",
                 )
-            return cls(process, url)
+            return cls(process, url, readers)
         except BaseException:
             untrack_process(process)
             stop_process_tree(process)
-            _join_pumps(process)
+            for reader in readers:
+                reader.join()
             if interrupt_requested():
                 raise KeyboardInterrupt
             raise
@@ -102,7 +106,8 @@ class RunningProcess:
         send SIGKILL, and kill any descendant that outlives its parent."""
         untrack_process(self.process)
         stop_process_tree(self.process)
-        _join_pumps(self.process)
+        for reader in self.readers:
+            reader.join()
 
 
 class _Tail(list[str]):
@@ -368,14 +373,9 @@ def _pump_server(
     if stdout is None or stderr is None:
         return []
     return [
-        read_lines(lambda: _decode_line(stdout), sink_stdout, prefix, [], daemon=True),
-        read_lines(lambda: _decode_line(stderr), sink_stderr, prefix, [], daemon=True),
+        read_lines(lambda: _decode_line(stdout), sink_stdout, prefix, _Discarded(), daemon=True),
+        read_lines(lambda: _decode_line(stderr), sink_stderr, prefix, _Discarded(), daemon=True),
     ]
-
-
-def _join_pumps(process: subprocess.Popen[bytes]) -> None:
-    for thread in _pumps.pop(process.pid, []):
-        thread.join()
 
 
 @contextmanager

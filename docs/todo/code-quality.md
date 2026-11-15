@@ -390,7 +390,7 @@ No clause needs the author.
   5 MB to standard output it does not capture keeps under 1 MB; a `Check`
   whose output and error each exceed 2000 characters fails with the same
   text as before.
-- [ ] **CQ3.4: Keep a server's output readers with its process.** Decision 5.
+- [x] **CQ3.4: Keep a server's output readers with its process.** Decision 5.
   Tests: a server that prints 5 MB in a parallel run keeps under 1 MB; after
   `stop()` no reader thread is alive.
 - [ ] **CQ3.5: Name the extension functions Niva uses.** Decisions 6 and 8.

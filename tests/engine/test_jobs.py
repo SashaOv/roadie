@@ -4,6 +4,7 @@ import subprocess
 import sys
 import threading
 import time
+import tracemalloc
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from roadie.build import Service, Step
 from roadie.engine import process as processes
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.inputs import run_state
-from roadie.engine.process import available_port
+from roadie.engine.process import RunningProcess, available_port
 from roadie.engine.run import Run
 
 _WAIT = 2
@@ -157,6 +158,46 @@ def test_a_servers_output_is_prefixed(tmp_path: Path, capsys: pytest.CaptureFixt
 
     execute([_named(Up(), "up")], root=tmp_path, jobs=2)
     assert "[up] booting" in capsys.readouterr().out.splitlines()
+
+
+# (spec) Parallel steps
+def test_a_server_that_prints_five_megabytes_keeps_under_one(
+    tmp_path: Path,
+) -> None:
+    started: list[RunningProcess] = []
+    printed = tmp_path / "printed"
+
+    class Up(Step[str]):
+        def build(self, run: Run) -> str:
+            port = available_port()
+            server = self._start_cmd(
+                sys.executable,
+                "-c",
+                "import socket\n"
+                f"s = socket.create_server(('127.0.0.1', {port}))\n"
+                "for _ in range(5000): print('z' * 999, flush=True)\n"
+                f"open({str(printed)!r}, 'w').write('done')\n"
+                "s.accept()\n",
+                port=port,
+            )
+            started.append(server)
+            deadline = time.monotonic() + 10
+            while not printed.is_file():
+                assert time.monotonic() < deadline
+                time.sleep(0.05)
+            server.stop()
+            return "up"
+
+    tracemalloc.start()
+    try:
+        execute([_named(Up(), "up")], root=tmp_path, jobs=2)
+        _current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1_000_000
+    server = started[0]
+    assert server.readers
+    assert not any(reader.is_alive() for reader in server.readers)
 
 
 # (spec) Parallel steps
