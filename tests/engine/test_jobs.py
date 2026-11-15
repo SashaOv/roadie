@@ -409,6 +409,168 @@ def test_a_deferred_step_starts_once_while_consumers_run(tmp_path: Path) -> None
     assert starts == ["lazy"]
 
 
+def _shared_api(starts: list[str], teardowns: list[str]) -> Step[str]:
+    class Api(Step[str]):
+        deferred = True
+
+        def build(self, run: Run) -> str:
+            starts.append("api")
+            return "up"
+
+        def teardown(self, value: str) -> None:
+            teardowns.append("api")
+
+    api = Api()
+    api.name = api.variable = "api"
+    return api
+
+
+# (spec) Deferred steps
+# (spec) Teardown
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_a_shared_deferred_step_around_a_build_failure(
+    jobs: int, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    starts: list[str] = []
+    teardowns: list[str] = []
+    api = _shared_api(starts, teardowns)
+    first_failed = threading.Event()
+
+    @dataclass(eq=False)
+    class Uses(Step[str]):
+        api: Step[str]
+        label: str
+
+        def build(self, run: Run) -> str:
+            assert run[self.api] == "up"
+            if self.label == "one":
+                first_failed.set()
+                raise RuntimeError("one broke")
+            assert first_failed.wait(_WAIT)
+            raise RuntimeError("two broke")
+
+    with pytest.raises(StepFailed, match="one failed: one broke"):
+        execute(
+            [api, _named(Uses(api, "one"), "one"), _named(Uses(api, "two"), "two")],
+            root=tmp_path,
+            jobs=jobs,
+        )
+    assert starts == ["api"]
+    assert teardowns == ["api"]
+    if jobs == 2:
+        assert "two failed: two broke" in capsys.readouterr().err
+
+
+# (spec) Deferred steps
+# (spec) Teardown
+@pytest.mark.parametrize("jobs", [1, 2])
+@pytest.mark.parametrize("hook", ["publish", "report"])
+def test_a_shared_deferred_step_around_a_consumer_hook_failure(
+    jobs: int, hook: str, tmp_path: Path
+) -> None:
+    starts: list[str] = []
+    teardowns: list[str] = []
+    api = _shared_api(starts, teardowns)
+
+    @dataclass(eq=False)
+    class Uses(Step[str]):
+        api: Step[str]
+
+        def build(self, run: Run) -> str:
+            return run[self.api]
+
+        def publish(self, run: Run, value: str) -> str:
+            if hook == "publish":
+                raise RuntimeError("publish broke")
+            return value
+
+        def report(self, value: str) -> None:
+            if hook == "report":
+                raise RuntimeError("report broke")
+
+    @dataclass(eq=False)
+    class Other(Step[str]):
+        api: Step[str]
+
+        def build(self, run: Run) -> str:
+            return run[self.api]
+
+    with pytest.raises(StepFailed, match=f"one failed: {hook} broke"):
+        execute(
+            [api, _named(Uses(api), "one"), _named(Other(api), "two")],
+            root=tmp_path,
+            jobs=jobs,
+        )
+    assert starts == ["api"]
+    assert teardowns == ["api"]
+
+
+# (spec) Deferred steps
+# (spec) Teardown
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_a_shared_deferred_step_around_an_interrupt(
+    jobs: int, tmp_path: Path
+) -> None:
+    starts: list[str] = []
+    teardowns: list[str] = []
+    api = _shared_api(starts, teardowns)
+    pidfile = tmp_path / "child.pid"
+
+    @dataclass(eq=False)
+    class Uses(Step[None]):
+        api: Step[str]
+
+        def build(self, run: Run) -> None:
+            assert run[self.api] == "up"
+            self._cmd(sys.executable, "-c", _sleep_until_stopped(pidfile))
+
+    threading.Thread(
+        target=_interrupt_when_pidfile_appears, args=(pidfile,), daemon=True
+    ).start()
+    with pytest.raises(KeyboardInterrupt):
+        execute(
+            [api, _named(Uses(api), "one"), _named(Uses(api), "two")],
+            root=tmp_path,
+            jobs=jobs,
+        )
+    assert starts == ["api"]
+    assert teardowns == ["api"]
+
+
+# (spec) Deferred steps
+# (spec) Teardown
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_a_shared_deferred_step_whose_teardown_fails_after_a_consumer(
+    jobs: int, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    starts: list[str] = []
+
+    class Api(Step[str]):
+        deferred = True
+
+        def build(self, run: Run) -> str:
+            starts.append("api")
+            return "up"
+
+        def teardown(self, value: str) -> None:
+            raise RuntimeError("stop broke")
+
+    @dataclass(eq=False)
+    class Uses(Step[str]):
+        api: Step[str]
+
+        def build(self, run: Run) -> str:
+            assert run[self.api] == "up"
+            raise RuntimeError("one broke")
+
+    api = Api()
+    api.name = api.variable = "api"
+    with pytest.raises(StepFailed, match="one failed: one broke"):
+        execute([api, _named(Uses(api), "one")], root=tmp_path, jobs=jobs)
+    assert starts == ["api"]
+    assert "api failed: teardown: stop broke" in capsys.readouterr().err
+
+
 # (spec) Teardown
 def test_a_step_is_torn_down_after_every_step_that_takes_it(tmp_path: Path) -> None:
     stopped = threading.Event()

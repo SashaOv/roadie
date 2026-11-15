@@ -35,12 +35,12 @@ estimates are proposals.
 | Failures surface and state ends with its run | 1, G2, G3, G4, G5 | +40 |
 | Nothing is written twice | G1 (docstring), G6 (test layout), the duplicates in Facts | −110 |
 | One owner runs commands | 2, 6, G1, H1, the author's two finds | −25 |
-| The scheduler owns its state | 4, H2, H3, the serving flag, `env_values` | −230 |
+| The scheduler owns its state | 4, H3, the serving flag, `env_values` | −120 |
 | A step declares its attributes | 5, the selected `attributes()` approach | +50 |
 | Release plans before it changes anything | 8, H7 | −30 |
 
-That is about 310 lines, 5% of the source. `run.py` gives the largest share,
-from 912 lines to about 680.
+That is about 190 lines, 3% of the source, counting CQ2's and CQ3's actual
+results (−121 and −13). `run.py` gives the largest share.
 
 Order constraints:
 
@@ -101,6 +101,8 @@ Order constraints:
   `roadie.engine.process`, `roadie.engine.run.execute` and
   `roadie.build.rust._executable_from_cargo_messages`. Niva takes Roadie from
   branch `main`.
+- 2026-11-15: the author approved `__all__` in `build/__init__.py` and
+  `system/__init__.py` as exceptions to the initializer rule (G6).
 - 2026-11-14: `docs/spec.md` states the messages `… can each be requested only
   once per run; request one of them` (line 125) and `ignoring unreadable
   record <path>: <reason>` (line 727).
@@ -466,12 +468,193 @@ open until the author pushes.
 - The author committed the review fixes as `2353c5c` ("CQ3 follow up:
   minor fixes") and pushed. CI run 43756393773 passed on `ubuntu-latest`
   and `macos-latest`. That discharges the last acceptance clause.
+- Missed by CQ3's plan and review (found 2026-11-15, while planning CQ4):
+  Niva's `ContractFuzz.build` calls `self._check_cmd(completed)` twice.
+  CQ3.1 folded `_check_cmd` into `Command.run`, so Niva fails when it
+  upgrades past CQ3. The CQ3 Facts listed Niva's imports but not the
+  private `Step` methods it calls. See the backlog.
+
+### CQ4: The scheduler owns its state
+
+Status: planned, approved 2026-11-15
+
+**Improvement.** Today `run.py` keeps a run's scheduling state in 18 local
+variables and threads them through `_schedule`, `_execute_step`, `_run_one`,
+`_kept`, `_start_deferred` and `_start_one`, each taking 7 to 18 of them. A
+lifecycle rule has to be changed in every function that receives the state.
+The immediate and deferred paths each announce a step, report its start,
+time it, bind its parameters and standard input, build it and translate its
+failure, written twice (H3). After this build:
+
+- a plan, a live-value registry and a scheduler each own one part of that
+  state;
+- one invocation builds a step on both paths;
+- a kind declares that it serves instead of the engine comparing methods;
+- a run's environment-file values belong to the run, so a step object
+  keeps nothing from the runs it took part in.
+
+**Facts for this build** (2026-11-15):
+
+- Niva's lock still pins `4ee2b6a`. When Niva upgrades, its tests rely on
+  these, so CQ4 keeps them:
+  - Niva's tests assign `run._values[id(step)]` (`forge/tests/test_package.py`,
+    `jammer/ops/tests/test_jammer_build_steps.py`);
+  - they monkeypatch `roadie.engine.run.load_records`;
+  - they use `roadie.engine.parameters.current_step`.
+- Niva overrides no `serve`, `publish`, `teardown` or `report` hook and reads
+  no `env_values`. It calls `_cmd` and `_start_cmd` only from `build`, as
+  Roadie's own steps do.
+- `tests/` reads `self.env_values[...]` in two steps (`test_run.py` lines
+  643 and 762). `tests/engine/test_fingerprint.py` assigns it twice.
+- `run.py` is 928 lines. Outside it, `src` reads `run.locked`
+  (`File`, `Directory`) and `run.reused` (`Group`, `_Included`). It reads
+  none of `started_at`, `finish_reported`, `_report_start` or `_report_end`,
+  and neither do the tests.
+
+**Decisions.** Proposed for the checkpoint.
+
+1. **Serving is declared.** `Step.serves: ClassVar[bool] = False`, and
+   `Service` sets it to `True`. The engine uses it in the four places that
+   test `type(step).serve is not Step.serve`:
+   - whether a step keeps standard input;
+   - whether its lock is released before its result is served;
+   - whether its total is printed before its result is served;
+   - whether an interrupt names it while it is live.
+
+   `serve(value)` is still called on every requested result, whatever its
+   flag. The spec's "Step hooks" states the flag.
+2. **The run owns environment values.** `Step.env_values` goes.
+   - The run reads each step's environment files when it starts, with the
+     same order and messages as `_apply_env`.
+   - `run.environment(step)` returns them. "Step values" in the spec
+     documents it.
+   - `fingerprint(step, outputs=..., env=...)` receives them.
+   - A command run while a step builds takes them through a context in
+     `engine/process.py`. That context replaces `command_stdin` and holds
+     both standard input and the environment values. `Command._environment`
+     applies them after `environment` and before `ROADIE_RUN_PID`, the same
+     order as today.
+   - A `Command` run while a step builds therefore gets the step's
+     environment files too. The `Command.run` docstring says so.
+3. **The plan is immutable.** A frozen `_Plan` holds:
+   - the steps, the requested ids, `leading`, `jobs` and `dry`;
+   - the prerequisite and blocker tables.
+
+   `_next_ready`, `_depends_on` and `_blockers` become its methods.
+4. **Live values have one registry.** A `_Live` object owns the live steps
+   in start order, their entries in `run._values`, and handing them back in
+   reverse order for teardown:
+   - `add` adds a step;
+   - `replace` swaps in the value `publish` returns;
+   - `take_due(finished)` returns the steps every holder has finished with;
+   - `take_all()` returns every live step;
+   - `serving()` lists the serving steps for the interrupt line.
+
+   Only `_Live` and `Run.__getitem__` touch `Run._values`. `_teardown` is
+   unchanged.
+5. **One scheduler holds the mutable state.** `_Scheduler` holds:
+   - the condition, `finished`, `running`, `failures`, `interrupted`,
+     `outputs`, `started`, `marks`, the deferred guards and the result;
+   - the run's report writer, the report start times, `started_at` and
+     whether the total was printed. These leave `Run`, which keeps
+     `_values`, `reused`, `locked`, its artifacts and `environment`.
+
+   `_schedule`'s worker loop, `_execute_step`, `_run_one`, `_kept`,
+   `_start_deferred`, `_start_one` and `announce_interrupt` become its
+   methods. Each one reads the state from the scheduler instead of taking
+   it as arguments. `_run_steps` builds the plan, the registry and the
+   scheduler, and keeps the run's outcome, report and teardown handling.
+   The record functions `_matching` and `_remember` stay module functions
+   in `run.py`.
+6. **One invocation builds a step.** `_Scheduler._invoke(step)` builds a step
+   on both the immediate and the deferred path. It:
+   - announces the step and starts its report entry when the kind is
+     recorded;
+   - times the step;
+   - binds `current_step` and the command context, then calls `build`;
+   - on failure, ends the report entry as `failed` or `interrupted`, and
+     translates the error as `_execute_step` does today.
+
+   Each path keeps what differs: a deferred step starts once under its
+   guard and publishes nothing, while an immediate step publishes, reports
+   and records.
+7. **What stays.** Messages, output order, report contents and the order
+   of teardown stay as they are. H2 (an outcome object that the terminal
+   and the report both render) is not part of this build; it is backlog.
+
+**Acceptance check.**
+
+- `uv run roadie` passes on Ubuntu and macOS CI.
+- `git grep -n 'Step\.serve\b\|env_values' src` prints nothing.
+- `grep -c 'current_step(' src/roadie/engine/run.py` prints `1`.
+- No function or method in `src/roadie/engine/run.py` takes more than six
+  parameters, `self` included. The one exception is the public `execute`,
+  whose keywords are the CLI's options and Niva's API. `execute` builds the
+  `_Plan` and passes it on:
+  `uv run python -c "import ast,sys; t=ast.parse(open('src/roadie/engine/run.py').read()); bad=[n.name for n in ast.walk(t) if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef)) and n.name!='execute' and len(n.args.args)+len(n.args.kwonlyargs)>6]; print(bad); sys.exit(bool(bad))"`
+  prints `[]`. On 2026-11-15 it printed `_run_steps`, `_schedule`,
+  `_execute_step`, `_run_one`, `_kept`, `_start_deferred` and
+  `_start_one`.
+- The CQ4.1 tests pass at every patch. The tests CQ4.2 and CQ4.3 add fail
+  before their patches and pass after.
+- The record states the line count of `src/roadie`. The estimate is −120,
+  mostly from `run.py`'s argument lists. The count is reported, not gated.
+
+No clause needs the author.
+
+### Patches
+
+- [x] **CQ4.1: Pin how a shared deferred step behaves around its
+  consumers.** Tests only; they pass before and after every later patch.
+  Two consumers share a deferred service, under `--jobs 1` and
+  `--jobs 2`, synchronized with `threading.Event` or `Barrier` and bounded
+  waits, never sleeps. Each case asserts that the service starts once and
+  is torn down once, that the first failure is the run's error, and that
+  any later failure is printed. The cases:
+  - one consumer's `build` fails;
+  - one consumer's `publish` fails;
+  - one consumer's `report` fails;
+  - Ctrl-C arrives while both consumers run;
+  - the service's teardown fails after a consumer failed.
+
+  Skip a case an existing test already covers, and cite that test in the
+  record.
+- [ ] **CQ4.2: Declare that a kind serves.** Decision 1. Test: a kind whose
+  `serve` only calls `super().serve(value)` behaves like a kind that does
+  not serve. It keeps the run lock until teardown, starts without the
+  terminal when it is not requested, and an interrupt does not name it.
+  Today it behaves like a service.
+- [ ] **CQ4.3: Keep environment values with the run.** Decision 2. Tests:
+  - after a run, the step's `vars()` are what they were before it;
+  - the same step run twice, with different `--env` files, sees each run's
+    values in `run.environment(self)` and in its command's environment;
+  - a `Command` run inside `build` gets the step's environment files.
+
+  The steps in `test_run.py` and `test_fingerprint.py` that read or set
+  `env_values` move to `run.environment(...)` and `fingerprint(env=...)`.
+- [ ] **CQ4.4: Keep live values in one registry.** Decisions 3 and 4. No
+  behavior change; the suite and the CQ4.1 tests cover it.
+- [ ] **CQ4.5: Hold scheduling state in one scheduler.** Decision 5. No
+  behavior change. After this patch, run.py passes the parameter-count
+  check.
+- [ ] **CQ4.6: Build a step through one invocation.** Decision 6. No
+  behavior change. Test: a parameter bound to a deferred step and to an
+  immediate step is visible in both builds and is released when either
+  build fails. The test fails on neither path before the patch; it pins
+  the H3 risk.
 
 ## Backlog
 
 - Niva, when it upgrades Roadie past CQ3: import the process helpers and
   `cargo_executable` from `roadie.build`, and run `gh` through `Command`
-  instead of passing a step to `_gh_json`.
+  instead of passing a step to `_gh_json`. Its `ContractFuzz` calls
+  `self._check_cmd(completed)`, which CQ3 removed. Either Roadie gives
+  `Command` a public exit check, or `ContractFuzz` raises its own failure.
+- Separate execution outcomes from their presentation (H2). Execution
+  produces an outcome: identity, reused or built, timing, failure. The
+  terminal and the report render that outcome, and the run computes a
+  composite step's reuse once, instead of `_reports_reused` and printing in
+  `Group.build` and `_Included.build`.
 - One helper for Roadie's own `git`, `cargo` and `uv` queries, which repeat
   `subprocess.run`, the exit check and a message with git's error in five
   modules.
@@ -483,15 +666,11 @@ open until the author pushes.
   `keyboard-interrupt`; `87311d1` holds the unverified start), then restore
   `windows-latest` to CI's matrix.
 
-- Decide before the attributes build: explicit `attributes()` on every step
-  adds about 320 lines to `tests/`, two per attribute-less subclass. The
-  alternatives are a base `attributes()` that returns `{}`, or one that reads
-  dataclass fields; the review rejected both as fallbacks.
-<--A: `attributes()` that returns `{}` is OK -->
-<--A: if the docstring is implementation-related and doesn't belong in spec, remove it. Otherwise, replace copies with links to the spec -->
-- Decide whether `__all__` in `build/__init__.py` and `system/__init__.py` is
-  an approved exception to the initializer rule (G6).
-<--A: approved both exceptions -->
+- Attributes build: the base `Step.attributes()` returns `{}` (author,
+  2026-11-15), so steps without attributes declare nothing.
+- Docstrings (author, 2026-11-15): remove a docstring that describes only
+  the implementation and does not belong in the spec. Replace a copy of
+  spec text with a link to the spec.
 - Share one JUnit reader between `Pytest` and Niva's `ContractFuzz`, after
   the naming and aggregation differences are settled (7).
 - Share the input normalization of `Check` and `Pytest` (H4).
