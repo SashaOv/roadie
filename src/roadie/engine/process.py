@@ -16,9 +16,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, BinaryIO, TextIO
 
-from roadie.engine.prefix import current_prefix, current_sink, read_lines
+from roadie.engine.errors import StepFailed
+from roadie.engine.lock import RUN_PID_VARIABLE
+from roadie.engine.prefix import (
+    current_prefix,
+    current_sink,
+    output_streams,
+    read_lines,
+)
 from roadie.system import (
+    cannot_run_message,
     interrupt_process,
+    prepare_command,
     process_group_session,
     signal_process_tree,
     spawn_in_own_group,
@@ -94,6 +103,152 @@ class RunningProcess:
         untrack_process(self.process)
         stop_process_tree(self.process)
         _join_pumps(self.process)
+
+
+# (spec) Step helpers
+@dataclass(frozen=True)
+class Command:
+    """A command with the directory, environment and label it runs with."""
+
+    args: tuple[str, ...]
+    cwd: Path
+    environment: Mapping[str, str] | None = None
+    label: str = ""
+
+    def run(
+        self,
+        *,
+        capture_output: bool = False,
+        show_output: bool = False,
+        check: bool = True,
+    ) -> subprocess.CompletedProcess[str]:
+        """Print `+ <command>` and run the command in `cwd`.
+
+        Its environment is the process environment, then `environment`, then
+        `ROADIE_RUN_PID` set to this process's PID. It inherits standard
+        input. Standard error is shown as it arrives, each line prefixed
+        with `[<label>] ` when the run uses more than one job. Standard
+        output is shown the same way, unless `capture_output` is set: then
+        it is returned, unprefixed, and not printed. `show_output` prints
+        that captured output as it arrives, with the same prefix, and still
+        returns it. Unless `check` is false, a non-zero exit fails with
+        `<label> failed: <command> exited with status <n>: <last 2000
+        characters of standard error>`. See docs/spec.md, "Step helpers",
+        for command resolution and startup errors.
+        """
+        print("+", shlex.join(self.args), flush=True)
+        prefix = current_prefix()
+        out, err = output_streams()
+        env = self._environment()
+        try:
+            process = subprocess.Popen(
+                prepare_command(self.args, env),
+                cwd=self.cwd,
+                env=env,
+                stdout=subprocess.PIPE if capture_output or prefix else None,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except OSError as error:
+            raise StepFailed(self.label, cannot_run_message(self.args[0], error)) from error
+        track_process(process, session=False)
+        readers: list[threading.Thread] = []
+        stdout_parts: list[str] = []
+        stderr_parts: list[str] = []
+        try:
+            assert process.stderr is not None
+            readers.append(read_lines(process.stderr.readline, err, prefix, stderr_parts))
+            if process.stdout is not None:
+                readers.append(
+                    read_lines(
+                        process.stdout.readline,
+                        out,
+                        prefix,
+                        stdout_parts,
+                        echo=not capture_output or show_output,
+                    )
+                )
+            try:
+                wait_interruptibly(process)
+                for reader in readers:
+                    reader.join()
+                stdout = "".join(stdout_parts) if capture_output else None
+                stderr = "".join(stderr_parts)
+            except KeyboardInterrupt:
+                note_interrupt()
+                if process.poll() is None:
+                    process.terminate()
+                process.wait()
+                raise
+        finally:
+            for reader in readers:
+                reader.join()
+            untrack_process(process)
+        if interrupt_requested():
+            raise KeyboardInterrupt
+        completed = subprocess.CompletedProcess(
+            self.args,
+            process.returncode if process.returncode is not None else 1,
+            stdout,
+            stderr,
+        )
+        if check:
+            self._check(completed)
+        return completed
+
+    def start(
+        self,
+        *,
+        port: int,
+        timeout: float = 120,
+        health_path: str | None = None,
+    ) -> RunningProcess:
+        """Print `+ <command>`, start a server, and return it once it is ready.
+
+        The command runs in `cwd` with the environment of `run`, inherits
+        standard input, and starts in a new session (POSIX) so its whole
+        process tree can be signalled. When the run uses more than one job,
+        each line the server prints is shown as it arrives, prefixed with
+        `[<label>] `. The result holds the process and the URL
+        `http://127.0.0.1:<port>`; it is ready once the port accepts
+        connections, or, with `health_path`, once `GET <url><health_path>`
+        answers 200.
+
+        If the process exits first, it fails with `<process> exited with
+        status <n> before becoming ready`; if `timeout` seconds pass, with
+        `<process> did not start listening on port <port> within <timeout>s`
+        (or `did not become ready at <url> within <timeout>s`). `<process>`
+        is the executable's file name and up to two following arguments that
+        are not options. In both cases the process tree is stopped. A
+        command that cannot start fails as `run` does. The program is found
+        as `run` finds it.
+        """
+        print("+", shlex.join(self.args), flush=True)
+        try:
+            return RunningProcess.start(
+                self.args,
+                port=port,
+                environment=self._environment(),
+                timeout=timeout,
+                cwd=self.cwd,
+                health_path=health_path,
+            )
+        except OSError as error:
+            raise StepFailed(self.label, cannot_run_message(self.args[0], error)) from error
+
+    def _environment(self) -> dict[str, str]:
+        merged = {**os.environ, **(self.environment or {})}
+        merged[RUN_PID_VARIABLE] = str(os.getpid())
+        return merged
+
+    def _check(self, completed: subprocess.CompletedProcess[str]) -> None:
+        if completed.returncode != 0:
+            detail = (completed.stderr or "").strip()[-2000:]
+            reason = f"{shlex.join(completed.args)} exited with status {completed.returncode}"
+            raise StepFailed(
+                self.label,
+                f"{reason}: {detail}" if detail else reason,
+            )
 
 
 def port_is_busy(port: int) -> bool:

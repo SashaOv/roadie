@@ -1,10 +1,7 @@
 """Declare steps, the hooks Roadie calls on them, and the commands they run."""
 
 import itertools
-import os
-import shlex
 import subprocess
-import threading
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -22,19 +19,9 @@ from typing import (
 from pydantic import TypeAdapter
 
 from roadie.engine.config import base_directory, configured_env, loading_directory
-from roadie.engine.errors import RoadieError, StepFailed
+from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import digest
-from roadie.engine.lock import RUN_PID_VARIABLE
-from roadie.engine.prefix import current_prefix, output_streams, read_lines
-from roadie.engine.process import (
-    RunningProcess,
-    interrupt_requested,
-    note_interrupt,
-    track_process,
-    untrack_process,
-    wait_interruptibly,
-)
-from roadie.system.command import cannot_run_message, prepare_command
+from roadie.engine.process import Command, RunningProcess
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -215,88 +202,9 @@ class Step[T](ABC):
         environment: Mapping[str, str] | None = None,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        """Print `+ <command>` and run the command in the step's base directory.
-
-        Its environment is the process environment, then `environment`, then
-        the step's environment files, then `ROADIE_RUN_PID` set to this
-        process's PID. It inherits standard input. Standard error is shown
-        as it arrives, each line prefixed with `[<name>] ` when the run uses
-        more than one job. Standard output is shown the same way, unless
-        `capture_output` is set: then it is returned, unprefixed, and not
-        printed. `show_output` prints that captured output as it arrives,
-        with the same prefix, and still returns it. Unless `check` is false,
-        a non-zero exit fails the step with `<name> failed: <command>
-        exited with status <n>: <last 2000 characters of standard error>`.
-        See docs/spec.md, "Step helpers", for command resolution and startup errors.
-        """
-        print("+", shlex.join(args), flush=True)
-        prefix = current_prefix()
-        out, err = output_streams()
-        env = self._command_env(environment)
-        try:
-            process = subprocess.Popen(
-                prepare_command(args, env),
-                cwd=self.base_dir,
-                env=env,
-                stdout=subprocess.PIPE if capture_output or prefix else None,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-        except OSError as error:
-            raise StepFailed(self._label(), cannot_run_message(args[0], error)) from error
-        track_process(process, session=False)
-        readers: list[threading.Thread] = []
-        stdout_parts: list[str] = []
-        stderr_parts: list[str] = []
-        try:
-            assert process.stderr is not None
-            readers.append(read_lines(process.stderr.readline, err, prefix, stderr_parts))
-            if process.stdout is not None:
-                readers.append(
-                    read_lines(
-                        process.stdout.readline,
-                        out,
-                        prefix,
-                        stdout_parts,
-                        echo=not capture_output or show_output,
-                    )
-                )
-            try:
-                wait_interruptibly(process)
-                for reader in readers:
-                    reader.join()
-                stdout = "".join(stdout_parts) if capture_output else None
-                stderr = "".join(stderr_parts)
-            except KeyboardInterrupt:
-                note_interrupt()
-                if process.poll() is None:
-                    process.terminate()
-                process.wait()
-                raise
-        finally:
-            for reader in readers:
-                reader.join()
-            untrack_process(process)
-        if interrupt_requested():
-            raise KeyboardInterrupt
-        completed = subprocess.CompletedProcess(
-            args,
-            process.returncode if process.returncode is not None else 1,
-            stdout,
-            stderr,
+        return self._command(args, environment).run(
+            capture_output=capture_output, show_output=show_output, check=check
         )
-        if check:
-            self._check_cmd(completed)
-        return completed
-
-    def _check_cmd(self, completed: subprocess.CompletedProcess[str]) -> None:
-        if completed.returncode != 0:
-            detail = (completed.stderr or "").strip()[-2000:]
-            reason = f"{shlex.join(completed.args)} exited with status {completed.returncode}"
-            raise StepFailed(
-                self._label(),
-                f"{reason}: {detail}" if detail else reason,
-            )
 
     # (spec) Step helpers
     def _start_cmd(
@@ -307,44 +215,19 @@ class Step[T](ABC):
         timeout: float = 120,
         health_path: str | None = None,
     ) -> RunningProcess:
-        """Print `+ <command>`, start a server, and return it once it is ready.
+        return self._command(args, environment).start(
+            port=port, timeout=timeout, health_path=health_path
+        )
 
-        The command runs in the step's base directory with the environment of
-        `_cmd`, inherits standard input, and starts in a new session (POSIX)
-        so its whole process tree can be signalled. When the run uses more
-        than one job, each line the server prints is shown as it arrives,
-        prefixed with `[<name>] `. The result holds the
-        process and the URL `http://127.0.0.1:<port>`; it is ready once the
-        port accepts connections, or, with `health_path`, once
-        `GET <url><health_path>` answers 200.
-
-        If the process exits first, the step fails with `<process> exited with
-        status <n> before becoming ready`; if `timeout` seconds pass, with
-        `<process> did not start listening on port <port> within <timeout>s`
-        (or `did not become ready at <url> within <timeout>s`). `<process>` is
-        the executable's file name and up to two following arguments that are
-        not options. In both cases the process tree is stopped. A command that
-        cannot start fails as `_cmd` does. The program is found as `_cmd` finds it.
-        """
-        print("+", shlex.join(args), flush=True)
-        try:
-            return RunningProcess.start(
-                args,
-                port=port,
-                environment=self._command_env(environment),
-                timeout=timeout,
-                cwd=self.base_dir,
-                health_path=health_path,
-            )
-        except OSError as error:
-            raise StepFailed(self._label(), cannot_run_message(args[0], error)) from error
-
-    def _command_env(self, environment: Mapping[str, str] | None) -> dict[str, str]:
-        # Process environment, then the step's settings, then env files.
-        # This run's PID is last, so a nested roadie can tell who started it.
-        merged = {**os.environ, **(environment or {}), **self.env_values}
-        merged[RUN_PID_VARIABLE] = str(os.getpid())
-        return merged
+    def _command(
+        self, args: tuple[str, ...], environment: Mapping[str, str] | None
+    ) -> Command:
+        return Command(
+            args,
+            cwd=self.base_dir,
+            environment={**(environment or {}), **self.env_values},
+            label=self._label(),
+        )
 
 
 def _reserved_names() -> frozenset[str]:

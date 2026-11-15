@@ -310,7 +310,7 @@ writing this record:
 
 ### CQ3: One owner runs commands
 
-Status: planned, awaiting author checkpoint
+Status: planned, approved 2026-11-15
 
 **Improvement.** One `Command` object in `engine/process.py` runs a command
 to completion and starts a server. Today `Step._cmd` and
@@ -376,7 +376,7 @@ No clause needs the author.
 
 ### Patches
 
-- [ ] **CQ3.1: Run and start commands through one `Command`.** Decisions 1
+- [x] **CQ3.1: Run and start commands through one `Command`.** Decisions 1
   and 2. `Step._cmd`, `Step._start_cmd` and `HttpService._start_cmd` build a
   `Command`; the shared start, track, read and untrack code exists once. No
   test changes beyond imports; the suite covers both paths.
