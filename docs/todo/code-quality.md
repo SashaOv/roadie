@@ -145,7 +145,7 @@ No clause needs the author.
   Tests: invalid JSON; valid JSON of the wrong shape; an unreadable file; two
   reads in one run print once; a second run in the same process prints again.
   `docs/spec.md` changes with it.
-- [ ] **CQ1.4: Keep each value adapter with its step class.** Test: a step
+- [x] **CQ1.4: Keep each value adapter with its step class.** Test: a step
   class defined in a function, used once and dropped, is gone after
   `gc.collect()`, observed through a weak reference.
 - [ ] **CQ1.5: Wait on an event before interrupting the service test.**

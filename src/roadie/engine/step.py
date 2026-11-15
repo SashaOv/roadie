@@ -40,7 +40,6 @@ if TYPE_CHECKING:
     from roadie.engine.run import Run
 
 _serials = itertools.count()
-_value_adapters: dict[type, TypeAdapter[Any] | None] = {}
 
 
 def _type_params(cls: type) -> tuple[Any, ...]:
@@ -88,18 +87,19 @@ def _concrete_value_type(cls: type) -> Any:
     return arg
 
 
-def _value_adapter(cls: type) -> TypeAdapter[Any] | None:
+def _value_adapter(cls: "type[Step[Any]]") -> TypeAdapter[Any] | None:
     try:
-        return _value_adapters[cls]
+        return cls.__dict__["_adapter"]
     except KeyError:
         value_type = _concrete_value_type(cls)
         adapter = None if value_type is None else TypeAdapter(value_type)
-        _value_adapters[cls] = adapter
+        cls._adapter = adapter
         return adapter
 
 
 # (spec) Dependencies and attributes
 class Step[T](ABC):
+    _adapter: ClassVar[TypeAdapter[Any] | None]
     reusable: ClassVar[bool] = True
     recorded: ClassVar[bool] = True
     deferred: ClassVar[bool] = False

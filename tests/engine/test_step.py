@@ -1,6 +1,8 @@
+import gc
 import os
 import subprocess
 import sys
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -270,3 +272,20 @@ def test_requested_service_reads_the_terminal_input(
         assert "dev exited" in output
     else:
         assert "exited with status 5" in output
+
+
+# (spec) Step hooks
+def test_value_adapter_does_not_retain_a_dropped_step_class(tmp_path: Path) -> None:
+    def build_once() -> weakref.ReferenceType[type]:
+        class Temporary(Step[int]):
+            def build(self, run: Run) -> int:
+                return 7
+
+        step = Temporary()
+        step.name = step.variable = "temporary"
+        assert execute([step], root=tmp_path) == 7
+        return weakref.ref(Temporary)
+
+    reference = build_once()
+    gc.collect()
+    assert reference() is None
