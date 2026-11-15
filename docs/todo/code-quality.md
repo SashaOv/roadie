@@ -266,8 +266,8 @@ no change in behavior, messages or public names.
 
 - `uv run roadie` passes on Ubuntu and macOS CI with no test changed except
   by CQ2.5's move and by imports of the renamed function.
-- `git grep -n 'plan_results\|_marked_setup\|wait_for_http_server\|tracked_files' src`
-  prints nothing.
+- `git grep -n 'plan_results\|_marked_setup\|wait_for_http_server' src`
+  prints nothing. `tracked` and `tracked_files` keep their names (CQ2.4).
 - The record states the line count of `src/roadie`; it is at most 6,200.
 
 No clause needs the author.
@@ -277,7 +277,7 @@ No clause needs the author.
 - [x] **CQ2.1: Wait for readiness in one loop.** `wait_for_port` and
   `wait_for_http_server` call one loop that takes the readiness test and the
   timeout message.
-- [ ] **CQ2.2: Read a marked step in one function.** `_marked_default` and
+- [x] **CQ2.2: Read a marked step in one function.** `_marked_default` and
   `_marked_setup` become one function that takes the mark's name for its
   messages; `Graph.plan_results` goes.
 - [ ] **CQ2.3: Make a path relative in one function.** `_relative` and

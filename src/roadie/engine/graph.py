@@ -70,18 +70,6 @@ class Graph:
         return ordered
 
     # (spec) Command line
-    def plan_results(self, names: Sequence[str]) -> list[Step[Any]]:
-        """The union of each named result's plan, in the order the names are given."""
-        ordered: list[Step[Any]] = []
-        seen: set[int] = set()
-        for name in names:
-            for step in self.plan(name):
-                if id(step) not in seen:
-                    seen.add(id(step))
-                    ordered.append(step)
-        return ordered
-
-    # (spec) Command line
     def scheduled(self, names: Sequence[str]) -> tuple[list[Step[Any]], int]:
         """The run's steps, setup plans first, and how many of those leading steps are setup."""
         ordered: list[Step[Any]] = []
@@ -205,8 +193,8 @@ def _load(session: _Session, build_file: Path) -> Graph:
     results = {
         name: value for name, value in namespace.items() if isinstance(value, Step)
     }
-    default = _marked_default(session, build_file, build_file, results)
-    marked_setup = _marked_setup(session, build_file, build_file, results)
+    default = _marked_step(session.marks.get(build_file, []), build_file, results, "default result")
+    marked_setup = _marked_step(session.setups.get(build_file, []), build_file, results, "setup step")
     if not results:
         raise RoadieError(f"{build_file} defines no results")
 
@@ -232,47 +220,24 @@ def _loading(session: _Session, directory: Path) -> Iterator[None]:
         session.loading.pop()
 
 
-def _marked_default(
-    session: _Session,
-    directory: Path,
+def _marked_step(
+    marked: Sequence[Step[Any]],
     path: Path,
     results: Mapping[str, Step[Any]],
+    kind: str,
 ) -> Step[Any] | None:
-    marked = session.marks.get(directory, [])
     if not marked:
         return None
     bound: list[tuple[str, Step[Any]]] = []
     for step in marked:
         name = next((item for item, value in results.items() if value is step), None)
         if name is None:
-            raise RoadieError(f"{path}: the default result is not bound to a variable")
+            raise RoadieError(f"{path}: the {kind} is not bound to a variable")
         if all(item is not step for _, item in bound):
             bound.append((name, step))
     if len(bound) > 1:
         names = ", ".join(name for name, _ in bound)
-        raise RoadieError(f"{path} marks more than one default result: {names}")
-    return bound[0][1]
-
-
-def _marked_setup(
-    session: _Session,
-    directory: Path,
-    path: Path,
-    results: Mapping[str, Step[Any]],
-) -> Step[Any] | None:
-    marked = session.setups.get(directory, [])
-    if not marked:
-        return None
-    bound: list[tuple[str, Step[Any]]] = []
-    for step in marked:
-        name = next((item for item, value in results.items() if value is step), None)
-        if name is None:
-            raise RoadieError(f"{path}: the setup step is not bound to a variable")
-        if all(item is not step for _, item in bound):
-            bound.append((name, step))
-    if len(bound) > 1:
-        names = ", ".join(name for name, _ in bound)
-        raise RoadieError(f"{path} marks more than one setup step: {names}")
+        raise RoadieError(f"{path} marks more than one {kind}: {names}")
     return bound[0][1]
 
 
