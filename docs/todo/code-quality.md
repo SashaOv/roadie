@@ -380,7 +380,7 @@ No clause needs the author.
   and 2. `Step._cmd`, `Step._start_cmd` and `HttpService._start_cmd` build a
   `Command`; the shared start, track, read and untrack code exists once. No
   test changes beyond imports; the suite covers both paths.
-- [ ] **CQ3.2: Stop an interrupted command through the system layer.**
+- [x] **CQ3.2: Stop an interrupted command through the system layer.**
   Decision 3. Test: Ctrl-C in the command's thread calls `interrupt_process`
   with `session=False`, and the run exits 130.
 - [ ] **CQ3.3: Keep only the output a command's caller reads.** Decision 4.

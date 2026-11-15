@@ -1,5 +1,6 @@
 import _thread
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -11,6 +12,7 @@ from support import FakeDeployment, execute, write_build
 
 from roadie import cli
 from roadie.build import Service, Step
+from roadie.engine import process as processes
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.inputs import run_state
 from roadie.engine.process import available_port
@@ -489,6 +491,33 @@ def test_an_interrupt_stops_the_program_a_step_is_running(tmp_path: Path, jobs: 
         time.sleep(0.05)
     else:
         pytest.fail(f"child {pid} survived the interrupt")
+
+
+# (spec) Teardown
+def test_ctrl_c_stops_a_command_through_the_system_layer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    pidfile = root / "child.pid"
+    calls: list[tuple[int, bool]] = []
+    real_interrupt = processes.interrupt_process
+
+    def recording(process: subprocess.Popen[bytes], *, session: bool) -> None:
+        calls.append((process.pid, session))
+        real_interrupt(process, session=session)
+
+    monkeypatch.setattr(processes, "interrupt_process", recording)
+
+    class Note(Step[None]):
+        def build(self, run: Run) -> None:
+            self._cmd(sys.executable, "-c", _sleep_until_stopped(pidfile))
+
+    threading.Thread(
+        target=_interrupt_when_pidfile_appears, args=(pidfile,), daemon=True
+    ).start()
+    with pytest.raises(KeyboardInterrupt):
+        execute([_named(Note(), "note")], root=root, jobs=1)
+    assert calls == [(int(pidfile.read_text()), False)]
 
 
 def _interrupt_when_pidfile_appears(pidfile: Path) -> None:

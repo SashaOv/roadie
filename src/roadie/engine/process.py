@@ -177,7 +177,7 @@ class Command:
             except KeyboardInterrupt:
                 note_interrupt()
                 if process.poll() is None:
-                    process.terminate()
+                    interrupt_process(process, session=False)
                 process.wait()
                 raise
         finally:
