@@ -105,6 +105,33 @@ class RunningProcess:
         _join_pumps(self.process)
 
 
+class _Tail(list[str]):
+    """Keep only the last 2000 characters appended."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._size = 0
+
+    def append(self, line: str) -> None:
+        super().append(line)
+        self._size += len(line)
+        while self._size > 2000:
+            excess = self._size - 2000
+            if len(self[0]) <= excess:
+                self._size -= len(self[0])
+                del self[0]
+            else:
+                self[0] = self[0][excess:]
+                self._size -= excess
+
+
+class _Discarded(list[str]):
+    """Accept lines without keeping them."""
+
+    def append(self, _line: str) -> None:
+        pass
+
+
 # (spec) Step helpers
 @dataclass(frozen=True)
 class Command:
@@ -133,8 +160,10 @@ class Command:
         that captured output as it arrives, with the same prefix, and still
         returns it. Unless `check` is false, a non-zero exit fails with
         `<label> failed: <command> exited with status <n>: <last 2000
-        characters of standard error>`. See docs/spec.md, "Step helpers",
-        for command resolution and startup errors.
+        characters of standard error>`. It keeps captured standard output
+        in full, the last 2000 characters of standard error, and nothing
+        of standard output it does not capture. See docs/spec.md, "Step
+        helpers", for command resolution and startup errors.
         """
         print("+", shlex.join(self.args), flush=True)
         prefix = current_prefix()
@@ -153,8 +182,8 @@ class Command:
             raise StepFailed(self.label, cannot_run_message(self.args[0], error)) from error
         track_process(process, session=False)
         readers: list[threading.Thread] = []
-        stdout_parts: list[str] = []
-        stderr_parts: list[str] = []
+        stdout_parts: list[str] = [] if capture_output else _Discarded()
+        stderr_parts: list[str] = _Tail()
         try:
             assert process.stderr is not None
             readers.append(read_lines(process.stderr.readline, err, prefix, stderr_parts))

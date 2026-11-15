@@ -2,6 +2,7 @@ import gc
 import os
 import subprocess
 import sys
+import tracemalloc
 import weakref
 from dataclasses import dataclass
 from pathlib import Path
@@ -272,6 +273,58 @@ def test_requested_service_reads_the_terminal_input(
         assert "dev exited" in output
     else:
         assert "exited with status 5" in output
+
+
+# (spec) Step helpers
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_a_failing_command_keeps_only_the_stderr_tail(
+    jobs: int, tmp_path: Path
+) -> None:
+    class Command(Step[None]):
+        def build(self, run: Run) -> None:
+            self._cmd(
+                sys.executable,
+                "-c",
+                "import sys\n"
+                "for _ in range(5000): sys.stderr.write('x' * 999 + '\\n')\n"
+                "sys.stderr.write('reason')\n"
+                "sys.exit(7)",
+            )
+
+    step = Command()
+    step.name = "tool"
+    tracemalloc.start()
+    try:
+        with pytest.raises(StepFailed) as error:
+            execute([step], root=tmp_path, jobs=jobs)
+        _current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1_000_000
+    assert str(error.value).endswith("reason")
+    assert "x" * 2001 not in str(error.value)
+
+
+# (spec) Step helpers
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_an_uncaptured_command_keeps_no_stdout(jobs: int, tmp_path: Path) -> None:
+    class Command(Step[None]):
+        def build(self, run: Run) -> None:
+            self._cmd(
+                sys.executable,
+                "-c",
+                "for _ in range(5000): print('y' * 999, flush=True)",
+            )
+
+    step = Command()
+    step.name = "tool"
+    tracemalloc.start()
+    try:
+        execute([step], root=tmp_path, jobs=jobs)
+        _current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1_000_000
 
 
 # (spec) Step hooks

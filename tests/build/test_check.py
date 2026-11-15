@@ -63,6 +63,23 @@ def test_check_failure_names_the_command_and_keeps_the_output_tail(
 
 
 # (spec) Step kinds
+def test_check_failure_tail_is_the_same_when_output_and_error_each_exceed_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    code = (
+        "import sys; sys.stdout.write('o' * 3000 + 'OUT'); "
+        "sys.stderr.write('e' * 3000 + 'ERR'); sys.exit(1)"
+    )
+    step = _check(sys.executable, "-c", code)
+    tail = "e" * 1997 + "ERR"
+    command = shlex.join((sys.executable, "-c", code))
+    with pytest.raises(StepFailed) as error:
+        execute([step], root=tmp_path)
+    assert str(error.value) == f"lint failed: {command}: {tail}"
+
+
+# (spec) Step kinds
 def test_check_fails_when_the_command_cannot_start(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

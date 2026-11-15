@@ -383,7 +383,7 @@ No clause needs the author.
 - [x] **CQ3.2: Stop an interrupted command through the system layer.**
   Decision 3. Test: Ctrl-C in the command's thread calls `interrupt_process`
   with `session=False`, and the run exits 130.
-- [ ] **CQ3.3: Keep only the output a command's caller reads.** Decision 4.
+- [x] **CQ3.3: Keep only the output a command's caller reads.** Decision 4.
   Tests, each with `--jobs 1` and `--jobs 2`, measuring the peak with
   `tracemalloc`: a failing command that writes 5 MB to standard error keeps
   under 1 MB and fails with the last 2000 characters; a command that writes
