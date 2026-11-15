@@ -100,7 +100,6 @@ def run(
         names = tuple(name for name, _own in ordered)
         graph = load(directory, base_dir=base_dir)
         targets = _targets(graph, names)
-        _one_requested(targets)
         steps, leading = graph.scheduled(names)
         own = (
             {id(step): params for step, (_name, params) in zip(targets, ordered, strict=True)}
@@ -166,21 +165,6 @@ def _targets(graph: Graph, results: tuple[str, ...]) -> list[Step[Any]]:
             )
         chosen.append(graph.result(word))
     return chosen
-
-
-def _one_requested(targets: list[Step[Any]]) -> None:
-    limited: list[Step[Any]] = []
-    for step in targets:
-        if type(step).once_per_run and all(item is not step for item in limited):
-            limited.append(step)
-    if len(limited) < 2:
-        return
-    labels = [step._label() for step in limited]
-    if len(labels) == 2:
-        shown = f"{labels[0]} and {labels[1]}"
-    else:
-        shown = ", ".join(labels[:-1]) + f" and {labels[-1]}"
-    raise RoadieError(f"{shown} can each be requested only once per run; request one of them")
 
 
 def main() -> None:

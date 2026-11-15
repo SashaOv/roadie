@@ -116,6 +116,7 @@ def execute(
 ) -> object:
     if jobs < 1:
         raise RoadieError("--jobs must be at least 1")
+    _one_requested(targets if targets is not None else steps[-1:])
     with use_project_root(root):
         writer = Report(report) if report is not None else None
         try:
@@ -910,3 +911,18 @@ def _teardown(expired: list[tuple[Step[Any], object]]) -> None:
             raise errors[0]
         for failure in errors:
             print(failure, file=sys.stderr)
+
+
+def _one_requested(targets: Sequence[Step[Any]]) -> None:
+    limited: list[Step[Any]] = []
+    for step in targets:
+        if type(step).once_per_run and all(item is not step for item in limited):
+            limited.append(step)
+    if len(limited) < 2:
+        return
+    labels = [step._label() for step in limited]
+    if len(labels) == 2:
+        shown = f"{labels[0]} and {labels[1]}"
+    else:
+        shown = ", ".join(labels[:-1]) + f" and {labels[-1]}"
+    raise RoadieError(f"{shown} can each be requested only once per run; request one of them")

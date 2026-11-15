@@ -770,3 +770,41 @@ def test_config_env_applies_before_cli_env(tmp_path: Path, monkeypatch: pytest.M
     cli_env.write_text("MODE=cli\n")
     execute(load(tmp_path).plan(), env=(cli_env,))
     assert (tmp_path / "seen.txt").read_text() == "cli from-config"
+
+
+# (spec) Command line
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_engine_refuses_restricted_targets_before_setup(tmp_path: Path, jobs: int) -> None:
+    marker = tmp_path / "setup"
+
+    class Setup(Step[None]):
+        def build(self, run: Run) -> None:
+            marker.touch()
+
+    class Limited(Step[None]):
+        once_per_run = True
+
+        def build(self, run: Run) -> None:
+            pytest.fail("restricted targets must be refused before building")
+
+    setup, api, web = Setup(), Limited(), Limited()
+    api.name, web.name = "api", "web"
+    with pytest.raises(RoadieError) as error:
+        execute([setup, api, web], root=tmp_path, targets=[api, web], leading=1, jobs=jobs)
+    assert str(error.value) == "api and web can each be requested only once per run; request one of them"
+    assert not marker.exists()
+    assert not (tmp_path / "target").exists()
+
+
+# (spec) Command line
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_engine_accepts_one_restricted_target(tmp_path: Path, duplicate: bool) -> None:
+    class Limited(Step[str]):
+        once_per_run = True
+
+        def build(self, run: Run) -> str:
+            return "limited"
+
+    limited, ordinary = Limited(), Value("ordinary")
+    targets = [limited, limited] if duplicate else [ordinary, limited]
+    assert execute([ordinary, limited], root=tmp_path, targets=targets) == "limited"

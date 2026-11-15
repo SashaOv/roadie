@@ -137,7 +137,7 @@ No clause needs the author.
   destination's hash fails; the built file's hash fails; both fail; the hash
   is empty. Each asserts the message and an unchanged destination, for `File`
   and for `Directory`.
-- [ ] **CQ1.2: Refuse two once-per-run targets in the engine.** Tests call
+- [x] **CQ1.2: Refuse two once-per-run targets in the engine.** Tests call
   `execute` with two such targets and a setup step that writes a file, and
   assert the message and no file. Also: one such target with ordinary
   targets; one target named twice.
