@@ -419,7 +419,7 @@ def test_unreadable_record_is_ignored_and_the_step_rebuilds(
     execute([note])
     assert built == ["note", "note"]
     message = (
-        f"ignoring unreadable record {record}: Expecting value: line 1 column 1 (char 0)"
+        f"ignoring unreadable record {record}: invalid JSON"
     )
     assert message in capsys.readouterr().out
 

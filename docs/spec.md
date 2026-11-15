@@ -724,8 +724,10 @@ name to its step fingerprint, its output fingerprint, its encoded value, and the
 names of the artifact files `run.artifact` returned while the step built. A
 reused step keeps those names. A record of another version counts as empty,
 so its steps rebuild. A record that cannot be read counts as empty too, and
-Roadie prints `ignoring unreadable record <path>: <reason>`, so a damaged
-file never fails the run.
+Roadie prints `ignoring unreadable record <path>: <reason>` once per record
+file per run, so a damaged file never fails the run. The reason is `invalid
+JSON`, `not a Roadie record`, or the operating system's message when the file
+cannot be read.
 
 A successful step replaces its entry; entries the build file no longer
 defines, whether a variable or a derived name, are dropped. A failed step

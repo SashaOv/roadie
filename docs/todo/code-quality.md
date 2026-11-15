@@ -141,7 +141,7 @@ No clause needs the author.
   `execute` with two such targets and a setup step that writes a file, and
   assert the message and no file. Also: one such target with ordinary
   targets; one target named twice.
-- [ ] **CQ1.3: Report a damaged record in the user's terms, once per run.**
+- [x] **CQ1.3: Report a damaged record in the user's terms, once per run.**
   Tests: invalid JSON; valid JSON of the wrong shape; an unreadable file; two
   reads in one run print once; a second run in the same process prints again.
   `docs/spec.md` changes with it.

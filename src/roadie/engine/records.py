@@ -8,8 +8,9 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from roadie.engine.inputs import run_state
+
 RECORD_VERSION = 2
-_reported_unreadable: set[Path] = set()
 
 
 class RecordEntry(BaseModel):
@@ -154,12 +155,14 @@ def load_record_at(path: Path) -> dict[str, Any]:
         return {}
     try:
         parsed = json.loads(path.read_text())
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        return _unreadable(path, str(error))
+    except OSError as error:
+        return _unreadable(path, error.strerror or "cannot read file")
+    except (UnicodeError, json.JSONDecodeError):
+        return _unreadable(path, "invalid JSON")
     try:
         loaded = RecordFile.model_validate(parsed)
-    except ValidationError as error:
-        return _unreadable(path, "; ".join(str(item["msg"]) for item in error.errors()))
+    except ValidationError:
+        return _unreadable(path, "not a Roadie record")
     if loaded.version != RECORD_VERSION:
         return {}
     return {name: entry.model_dump() for name, entry in loaded.entries.items()}
@@ -167,7 +170,8 @@ def load_record_at(path: Path) -> dict[str, Any]:
 
 def _unreadable(path: Path, reason: str) -> dict[str, Any]:
     resolved = path.resolve()
-    if resolved not in _reported_unreadable:
-        _reported_unreadable.add(resolved)
+    reported: set[Path] = run_state(_unreadable, set)
+    if resolved not in reported:
+        reported.add(resolved)
         print(f"ignoring unreadable record {path}: {reason}", flush=True)
     return {}
