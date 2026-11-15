@@ -283,7 +283,7 @@ No clause needs the author.
 - [x] **CQ2.3: Make a path relative in one function.** `_relative` and
   `_path_attribute` in `engine/fingerprint.py` become one, as decision 3
   says.
-- [ ] **CQ2.4: List tracked files in one git call.** `tracked` and
+- [x] **CQ2.4: List tracked files in one git call.** `tracked` and
   `tracked_files` share one `git ls-files` helper; their messages stay.
 - [ ] **CQ2.5: Keep Windows command rules in the system layer and the spec.**
   `_cmd`'s docstring loses the Windows paragraph, decision 4 renames the

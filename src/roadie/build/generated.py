@@ -14,16 +14,22 @@ def tracked(path: Path) -> bool:
     repository_path = repository(path)
     if repository_path is None:
         return False
+    return bool(_listed(repository_path, path))
+
+
+def tracked_files(directory: Path) -> list[Path]:
+    """Tracked files that exist under `directory`."""
+    repository_path = repository(directory)
+    if repository_path is None or not directory.is_dir():
+        return []
+    return [path for path in _listed(repository_path, directory) if path.exists()]
+
+
+def _listed(repository_path: Path, path: Path) -> list[Path]:
     completed = subprocess.run(
         (
-            "git",
-            "--literal-pathspecs",
-            "-C",
-            str(repository_path),
-            "ls-files",
-            "-z",
-            "--",
-            path.relative_to(repository_path).as_posix(),
+            "git", "--literal-pathspecs", "-C", str(repository_path),
+            "ls-files", "-z", "--", path.relative_to(repository_path).as_posix(),
         ),
         capture_output=True,
         text=True,
@@ -33,35 +39,7 @@ def tracked(path: Path) -> bool:
         raise RoadieError(
             f"cannot check whether {path} is tracked: {completed.stderr.strip()}"
         )
-    return bool(completed.stdout)
-
-
-def tracked_files(directory: Path) -> list[Path]:
-    """Tracked files that exist under `directory`."""
-    repository_path = repository(directory)
-    if repository_path is None or not directory.is_dir():
-        return []
-    completed = subprocess.run(
-        (
-            "git",
-            "--literal-pathspecs",
-            "-C",
-            str(repository_path),
-            "ls-files",
-            "-z",
-            "--",
-            directory.relative_to(repository_path).as_posix(),
-        ),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise RoadieError(
-            f"cannot check whether {directory} is tracked: {completed.stderr.strip()}"
-        )
-    names = [item for item in completed.stdout.split("\0") if item]
-    return [repository_path / name for name in names if (repository_path / name).exists()]
+    return [repository_path / name for name in completed.stdout.split("\0") if name]
 
 
 def same_as_git_stores(destination: Path, built: Path) -> bool:
