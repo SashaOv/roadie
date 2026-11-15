@@ -31,19 +31,22 @@ estimates are proposals.
 | Build | Covers | Lines |
 |---|---|---:|
 | Failures surface and state ends with its run | 1, G2, G3, G4, G5 | +40 |
-| Nothing is written twice | G1 (docstring), G6 (test layout), the duplicates in Facts | −330 |
+| Nothing is written twice | G1 (docstring), G6 (test layout), the duplicates in Facts | −110 |
 | One owner runs commands | 2, 6, G1, H1, the author's two finds | −30 |
 | The scheduler owns its state | 4, H2, H3, the serving flag, `env_values` | −230 |
 | A step declares its attributes | 5, the selected `attributes()` approach | +50 |
 | Release plans before it changes anything | 8, H7 | −30 |
 
-That is about 530 lines, 8% of the source. `run.py` gives the largest share,
+That is about 310 lines, 5% of the source. `run.py` gives the largest share,
 from 912 lines to about 680.
 
 Order constraints:
 
 - "One owner runs commands" lands before R18, so that tracing wraps one
   command path.
+- Windows is suspended (2026-11-15): CI runs Ubuntu and macOS, and acceptance
+  names those two. Windows tests resume as their own build, on a Windows
+  machine.
 - "A step declares its attributes" and the public API part of "One owner runs
   commands" change what Niva imports. Each needs a paired Niva change, after
   Niva's `ws25` branch merges.
@@ -76,6 +79,21 @@ Order constraints:
 - 2026-11-14: docstrings restate `docs/spec.md`: `Release` has 50 lines,
   `Step._cmd` 27 and `Step._start_cmd` 19. The spec holds the Windows command
   rules at lines 624–626.
+- 2026-11-15: correction to the fact above. A step kind's docstring is its
+  spec: `docs/spec.md` "Step kinds" and "Step helpers" say so, and the
+  messages in `Release`'s docstring (`nothing to release`, `holds different
+  versions`, …) appear nowhere in `docs/spec.md`. Only `_cmd`'s Windows
+  paragraph (10 lines) and its `cannot run` sentence restate the spec.
+  Docstrings of five lines or more total 374 lines.
+- 2026-11-15: Niva imports `wait_for_port` and `signal_server` from
+  `roadie.engine.process`, and `_executable_from_cargo_messages` from
+  `roadie.build.rust`; it imports none of `plan_results`, `tracked`,
+  `tracked_files`, `batch_command_line` or the `graph`/`fingerprint`
+  helpers. A repeated five-line window scan of `src/roadie` finds, besides
+  the Facts duplicates, `run.py`'s state-argument lists and
+  `HttpService._start_cmd`, which restates `Step._start_cmd`'s signature to
+  change one default; moving that default onto `Step` would reserve the name
+  `health_path` on every step, so it stays.
 - 2026-11-14: `tests/` defines 189 step subclasses, about 160 of them with no
   attributes, and `src` defines 15. Niva defines 23 and imports
   `roadie.engine.process`, `roadie.engine.run.execute` and
@@ -91,7 +109,7 @@ Order constraints:
 
 ### CQ1: Failures surface and state ends with its run
 
-Status: planned, approved 2026-11-15
+Status: implemented 2026-11-15 (commits CQ1.*)
 
 **Improvement.** A generated file that git cannot hash fails the step; today
 two failed hashes compare equal and the old file is kept as unchanged. Two
@@ -129,7 +147,10 @@ that is dropped is collected; today the adapter cache keeps it.
 - `git grep -n '_value_adapters\|_reported_unreadable' src` prints nothing.
 - The record states the line count of `src/roadie`.
 
-No clause needs the author.
+Author action required at completion (2026-11-15): reproduce and fix the
+Windows acceptance failure on a Windows machine, then verify the full gate
+there. Discharged 2026-11-15 by suspension: the author suspended Windows
+tests, and the Windows fix is a backlog item.
 
 ### Patches
 
@@ -154,16 +175,136 @@ No clause needs the author.
   failure too. The `Sleeper.wait` fake blocks on an event instead of sleeping
   five seconds.
 
+### Execution and acceptance
+
+2026-11-15: committed CQ1.1–CQ1.5 as `356f273`, `288396c`, `59191f2`,
+`27b162d`, and `858b302`. Each patch passed `uv run roadie` before commit.
+The full-suite results were respectively 436, 440, 444, 445, and 446 passed,
+with 2 skipped on this host. The Git-hash, restricted-target, damaged-record,
+and dropped-class regression tests failed before their corresponding fixes.
+CQ1.5 changes test synchronization; its success and startup-failure cases pass.
+
+Final-head acceptance, after `uv run roadie --clean`:
+
+- Head: `858b30238f32ddf6e5eb81200a987bac32704b3c`.
+- Tree: `540e8037c26ffeb8155c2272126b3a6341cefc76`.
+- Gate script `build.py` Git blob:
+  `51797c00949844d85e3921d4c375e24299cc944c`.
+- CI workflow Git blob: `613a812531e064fd71441d0da16f1345a13e4a69`.
+- Host: `L25.local`, macOS 26.6.2, arm64; Python 3.13.13; pytest 9.2.0,
+  pytest-xdist 3.8.0, Ruff 0.17.3, mypy 2.4.1, Pydantic 2.14.2.
+- Command: `uv run roadie --report /private/tmp/cq1-acceptance-858b302.jsonl`.
+  PASS: Ruff, mypy, pytest (446 passed, 2 skipped); all three gates executed,
+  with no reused gate results.
+- `git grep -n '_value_adapters\|_reported_unreadable' src`: PASS, no matches
+  (exit 1).
+- Source measure: 6,284 lines in 43 tracked Python files, +7 from the baseline.
+- Raw local event report: `/private/tmp/cq1-acceptance-858b302.jsonl`;
+  provenance, environment lock snapshot, and JUnit report:
+  `/private/tmp/cq1-acceptance-858b302/`. The uv lock is untracked; the saved
+  provenance records its SHA-256 and installed package versions.
+- Three-platform CI, [run 43746398695](https://github.com/SashaOv/roadie/actions/runs/43746398695)
+  on the same head: Ubuntu PASS; macOS PASS; Windows FAIL. Windows ran
+  Python 3.15.2 and its pytest worker crashed with `keyboard-interrupt` while
+  running `test_ctrl_c_stops_a_requested_service_that_outlives_it[False]`.
+  Ruff and mypy passed there; pytest stopped at 205 passed, 9 skipped,
+  1 failed. Hosted setup, environment, and per-check logs remain with the run.
+
+**Verdict: acceptance remains open.** On 2026-11-15 the author directed that
+Windows failures be fixed on a Windows machine. No further Windows fixes or
+CI retries were attempted after that instruction.
+
+A tentative test-only change had already been made before the handoff: it
+signals readiness from the process's `wait()` rather than at entry to
+`Service.serve`. The working hypothesis is that SIGINT can arrive before the
+service enters its protected wait. This is not yet verified on Windows.
+The diff remains uncommitted in `tests/build/test_service.py`, as required
+for acceptance fixes by `onebuild`. Local verification of that diff passed
+Ruff, mypy, and 446 tests with 2 skipped; its event report is
+`/private/tmp/cq1-acceptance-fix-858b302.jsonl`. This local pass does not close
+the Windows clause. A copy of the candidate diff and its JUnit report is
+saved beside the committed-head provenance. The acceptance record also
+remains uncommitted; no commits beyond the five planned patches were made.
+
+Review, 2026-11-15, on `main` at `87311d1` (`cq1` fast-forwarded into
+`main`):
+
+- The author committed the tentative test change as `87311d1` "Beginning of
+  fix on Windows, will continue in a separate build", outside the patch list.
+- Subject drift: CQ1.3 landed as "Report damaged records once per run in user
+  terms" and CQ1.5 as "Coordinate service interruption tests with events";
+  the other three match their patch names.
+- `uv run roadie` after `--clean` on macOS: 446 passed, 2 skipped. The grep
+  prints nothing. `src/roadie` is 6,284 lines.
+- The author suspended Windows tests; CI's matrix drops `windows-latest`.
+  Ubuntu and macOS passed in run 43746398695, so acceptance passes on the
+  platforms CI runs.
+
+### CQ2: Nothing is written twice
+
+Status: planned, awaiting author checkpoint
+
+**Improvement.** Each duplicate in Facts becomes one definition, and code
+nothing calls goes. `src/roadie` shrinks by about 110 lines, from 6,284, with
+no change in behavior, messages or public names.
+
+**Decisions.** Proposed for the checkpoint.
+
+1. Step-kind docstrings stay: they are the spec. Only `_cmd`'s Windows
+   paragraph and `cannot run` sentence go, replaced by a pointer to "Step
+   helpers".
+2. Names Niva imports keep their signatures: `wait_for_port`,
+   `signal_server`, `_executable_from_cargo_messages`.
+3. `_relative` and `_path_attribute` become one function that returns POSIX
+   form outside the root too. This changes the code-hash key of a build file
+   outside the project root on Windows only; any Roadie change already
+   changes every code hash.
+4. `batch_command_line` becomes `_batch_command_line` and leaves the
+   `roadie.system` exports (G1); its tests call it from its module.
+
+**Acceptance check.**
+
+- `uv run roadie` passes on Ubuntu and macOS CI with no test changed except
+  by CQ2.5's move and by imports of the renamed function.
+- `git grep -n 'plan_results\|_marked_setup\|wait_for_http_server\|tracked_files' src`
+  prints nothing.
+- The record states the line count of `src/roadie`; it is at most 6,200.
+
+No clause needs the author.
+
+### Patches
+
+- [ ] **CQ2.1: Wait for readiness in one loop.** `wait_for_port` and
+  `wait_for_http_server` call one loop that takes the readiness test and the
+  timeout message.
+- [ ] **CQ2.2: Read a marked step in one function.** `_marked_default` and
+  `_marked_setup` become one function that takes the mark's name for its
+  messages; `Graph.plan_results` goes.
+- [ ] **CQ2.3: Make a path relative in one function.** `_relative` and
+  `_path_attribute` in `engine/fingerprint.py` become one, as decision 3
+  says.
+- [ ] **CQ2.4: List tracked files in one git call.** `tracked` and
+  `tracked_files` share one `git ls-files` helper; their messages stay.
+- [ ] **CQ2.5: Keep Windows command rules in the system layer and the spec.**
+  `_cmd`'s docstring loses the Windows paragraph, decision 4 renames the
+  helper, and `tests/engine/test_batch.py`'s quoting tests move to
+  `tests/system/test_command.py` (G6).
+- [ ] **CQ2.6: Share the manifest sources' path and fingerprint.**
+  `PyProject`, `CargoManifest` and `PackageJson` take `__init__`, `_file`,
+  `__repr__` and `fingerprint` from one base class.
+
 ## Backlog
+
+- Resume Windows tests: fix `test_ctrl_c_stops_a_requested_service_that_outlives_it`
+  on a Windows machine (CI's Python 3.15.2 worker crashed with
+  `keyboard-interrupt`; `87311d1` holds the unverified start), then restore
+  `windows-latest` to CI's matrix.
 
 - Decide before the attributes build: explicit `attributes()` on every step
   adds about 320 lines to `tests/`, two per attribute-less subclass. The
   alternatives are a base `attributes()` that returns `{}`, or one that reads
   dataclass fields; the review rejected both as fallbacks.
 <--A: `attributes()` that returns `{}` is OK -->
-- Decide whether docstrings that restate `docs/spec.md` go, leaving the
-  `# (spec) <section>` anchor. This is about 200 of the 330 lines the
-  deletion build estimates.
 <--A: if the docstring is implementation-related and doesn't belong in spec, remove it. Otherwise, replace copies with links to the spec -->
 - Decide whether `__all__` in `build/__init__.py` and `system/__init__.py` is
   an approved exception to the initializer rule (G6).
