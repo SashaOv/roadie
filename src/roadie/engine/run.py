@@ -56,24 +56,8 @@ class Run:
         self._environments: dict[int, dict[str, str]] = environments or {}
         self.reused: set[int] = set()
         self.locked = locked
-        self.started_at = 0.0
-        self.finish_reported = False
         self._artifacts: dict[int, list[str]] = {}
         self._artifact_lock = threading.Lock()
-        self._report: Report | None = None
-        self._report_began: dict[int, float] = {}
-
-    def _report_start(self, step: Step[Any]) -> None:
-        if self._report is None or id(step) in self._report_began:
-            return
-        self._report_began[id(step)] = time.monotonic()
-        self._report.step_start(step._label())
-
-    def _report_end(self, step: Step[Any], outcome: str) -> None:
-        if self._report is None or id(step) not in self._report_began:
-            return
-        began = self._report_began.pop(id(step))
-        self._report.step_end(step._label(), outcome, time.monotonic() - began)
 
     # (spec) Step values
     def environment(self, step: Step[Any]) -> dict[str, str]:
@@ -214,14 +198,6 @@ class _Live:
         return id(step) in self._run._values
 
 
-def _report_run(run: Run) -> None:
-    if run.finish_reported:
-        return
-    run.finish_reported = True
-    with unprefixed():
-        print(f"finished in {format_elapsed(time.monotonic() - run.started_at)}", flush=True)
-
-
 def execute(
     steps: Sequence[Step[Any]],
     *,
@@ -243,18 +219,19 @@ def execute(
         try:
             held = acquire_run_lock(root)
             try:
-                return _run_steps(
-                    steps,
-                    locked=locked,
-                    env=env,
-                    run_lock=held,
-                    dry=dry,
-                    jobs=jobs,
-                    targets=targets,
-                    parameters=parameters,
-                    leading=leading,
-                    report=writer,
+                run = Run(locked=locked, environments=_environments(steps, env))
+                if targets is None:
+                    requested = {id(steps[-1])} if steps else set()
+                    names = [steps[-1]._label()] if steps else []
+                else:
+                    requested = {id(step) for step in targets}
+                    names = [step._label() for step in targets]
+                plan = _Plan.build(
+                    steps, requested=requested, leading=leading, jobs=jobs, dry=dry
                 )
+                live = _Live(run, plan.blockers)
+                scheduler = _Scheduler(plan, run, live, run_lock=held, report=writer)
+                return _run_steps(scheduler, parameters, names)
             finally:
                 held.release()
         finally:
@@ -263,63 +240,21 @@ def execute(
 
 
 def _run_steps(
-    steps: Sequence[Step[Any]],
-    *,
-    locked: bool = False,
-    env: Sequence[Path] = (),
-    run_lock: HeldLock | None = None,
-    dry: bool = False,
-    jobs: int = 1,
-    targets: Sequence[Step[Any]] | None = None,
-    parameters: ParameterValues | None = None,
-    leading: int = 0,
-    report: Report | None = None,
+    scheduler: "_Scheduler",
+    parameters: ParameterValues | None,
+    names: list[str],
 ) -> object:
-    run = Run(locked=locked, environments=_environments(steps, env))
-    run.started_at = time.monotonic()
-    if targets is None:
-        requested = {id(steps[-1])} if steps else set()
-    else:
-        requested = {id(step) for step in targets}
-    plan = _Plan.build(steps, requested=requested, leading=leading, jobs=jobs, dry=dry)
-    live = _Live(run, plan.blockers)
-    outputs: dict[int, str] = {}
-    started: set[int] = set()
-    marks: dict[int, str] = {}
-    finished: set[int] = set()
-    running: set[int] = set()
-    failures: list[BaseException] = []
-    interrupted: list[bool] = []
-    guards = {id(step): threading.Lock() for step in steps if step.deferred}
-    schedule = threading.Condition(threading.RLock())
-
-    run._report = report
+    plan = scheduler.plan
+    steps = plan.steps
+    live = scheduler.live
+    report = scheduler.report
+    dry = plan.dry
+    requested = plan.requested
     reset_interrupt()
-    announced = False
-    announce_lock = threading.RLock()
-
-    def announce_interrupt() -> None:
-        nonlocal announced
-        with announce_lock:
-            if announced:
-                return
-            announced = True
-            with schedule:
-                running_now = set(running)
-                names = [step._label() for step in steps if id(step) in running_now]
-                names.extend(
-                    step._label()
-                    for step in live.serving()
-                    if id(step) not in running_now
-                )
-        line = f"interrupted: stopping {', '.join(names)}" if names else "interrupted"
-        with unprefixed():
-            print(line, flush=True)
-
     succeeded = False
     outcome = "succeeded"
     reported_run = False
-    previous_before_stop = set_before_stop(announce_interrupt)
+    previous_before_stop = set_before_stop(scheduler.announce_interrupt)
     try:
         with run_scope(), interrupt_on_terminate():
             bound = None
@@ -329,39 +264,21 @@ def _run_steps(
                     parameters if parameters is not None else ParameterValues({}, {}),
                 )
                 if report is not None:
-                    if targets is None:
-                        names = [steps[-1]._label()] if steps else []
-                    else:
-                        names = [step._label() for step in targets]
-                    report.run_start(names, jobs)
+                    report.run_start(names, plan.jobs)
                     reported_run = True
-                value = _schedule(
-                    plan,
-                    run=run,
-                    live=live,
-                    outputs=outputs,
-                    started=started,
-                    marks=marks,
-                    finished=finished,
-                    running=running,
-                    failures=failures,
-                    interrupted=interrupted,
-                    guards=guards,
-                    schedule=schedule,
-                    run_lock=run_lock,
-                )
-                if interrupted:
+                value = scheduler.schedule()
+                if scheduler.interrupted:
                     outcome = "interrupted"
                     raise KeyboardInterrupt
-                if failures:
+                if scheduler.failures:
                     outcome = "failed"
-                    raise failures[0]
+                    raise scheduler.failures[0]
                 if dry:
                     for step in steps:
-                        print(f"{format_step(step)}  # {marks[id(step)]}", flush=True)
+                        print(f"{format_step(step)}  # {scheduler.marks[id(step)]}", flush=True)
                 else:
                     for step in steps:
-                        if step.deferred and id(step) not in requested and id(step) not in started:
+                        if step.deferred and id(step) not in requested and id(step) not in scheduler.started:
                             name = step._label()
                             print(f"not started {name}: no step that takes it runs", flush=True)
                 if dry:
@@ -369,7 +286,7 @@ def _run_steps(
                 succeeded = True
             except KeyboardInterrupt:
                 outcome = "interrupted"
-                announce_interrupt()
+                scheduler.announce_interrupt()
                 raise
             except BaseException:
                 if outcome == "succeeded":
@@ -378,7 +295,7 @@ def _run_steps(
             finally:
                 try:
                     if not dry:
-                        with schedule:
+                        with scheduler.condition:
                             expired = live.take_all()
                         _teardown(expired)
                 except KeyboardInterrupt:
@@ -390,294 +307,378 @@ def _run_steps(
                     raise
                 finally:
                     if report is not None and reported_run:
-                        report.run_end(outcome, time.monotonic() - run.started_at)
+                        report.run_end(outcome, time.monotonic() - scheduler.started_at)
                     if bound is not None:
                         reset_parameters(bound)
                     reset_interrupt()
     except KeyboardInterrupt:
-        announce_interrupt()
+        scheduler.announce_interrupt()
         raise
     finally:
         set_before_stop(previous_before_stop)
     if succeeded:
-        _report_run(run)
+        scheduler._report_run()
     return value
 
 
-def _schedule(
-    plan: _Plan,
-    *,
-    run: Run,
-    live: _Live,
-    outputs: dict[int, str],
-    started: set[int],
-    marks: dict[int, str],
-    finished: set[int],
-    running: set[int],
-    failures: list[BaseException],
-    interrupted: list[bool],
-    guards: dict[int, threading.Lock],
-    schedule: threading.Condition,
-    run_lock: HeldLock | None,
-) -> object:
-    steps = plan.steps
-    requested: set[int] = set(plan.requested)
-    dry = plan.dry
-    jobs = plan.jobs
-    result: list[object] = []
 
-    def loop(*, propagate: bool) -> None:
-        token = None
+class _Scheduler:
+    """Hold one run's scheduling state and build its steps."""
 
-        def end_prefix() -> None:
-            nonlocal token
-            if token is not None:
-                sys.stdout.flush()
-                reset_prefix(token)
-                token = None
+    def __init__(
+        self,
+        plan: _Plan,
+        run: Run,
+        live: _Live,
+        *,
+        run_lock: HeldLock | None,
+        report: Report | None,
+    ) -> None:
+        self.plan = plan
+        self.run = run
+        self.live = live
+        self.run_lock = run_lock
+        self.condition = threading.Condition(threading.RLock())
+        self.finished: set[int] = set()
+        self.running: set[int] = set()
+        self.failures: list[BaseException] = []
+        self.interrupted: list[bool] = []
+        self.outputs: dict[int, str] = {}
+        self.started: set[int] = set()
+        self.marks: dict[int, str] = {}
+        self.guards = {
+            id(step): threading.Lock() for step in plan.steps if step.deferred
+        }
+        self.result: list[object] = []
+        self.report = report
+        self._report_began: dict[int, float] = {}
+        self.started_at = time.monotonic()
+        self.finish_reported = False
+        self._announced = False
+        self._announce_lock = threading.RLock()
 
-        while True:
-            with schedule:
-                if failures:
-                    return
-                step = plan.next_ready(finished, running)
-                if step is None:
-                    if running:
-                        schedule.wait()
-                        continue
-                    if any(id(item) not in finished for item in steps):
-                        raise RoadieError("cannot schedule the plan")
-                    return
-                running.add(id(step))
-                schedule.notify_all()
-                # Claim the other ready steps before this one starts, so both
-                # step-start times are written before either step runs.
-                while (
-                    not failures
-                    and len(running) < jobs
-                    and plan.next_ready(finished, running) is not None
-                ):
-                    schedule.wait()
-                if failures:
-                    running.discard(id(step))
-                    schedule.notify_all()
-                    return
-            token = set_prefix(step._label()) if jobs > 1 else None
-            try:
-                try:
-                    _execute_step(
-                        step,
-                        run=run,
-                        live=live,
-                        outputs=outputs,
-                        started=started,
-                        marks=marks,
-                        guards=guards,
-                        schedule=schedule,
-                        requested=requested,
-                        run_lock=run_lock,
-                        dry=dry,
-                    )
-                except KeyboardInterrupt:
-                    run._report_end(step, "interrupted")
-                    end_prefix()
-                    request_stop()
-                    with schedule:
-                        running.discard(id(step))
-                        finished.add(id(step))
-                        interrupted.append(True)
-                        schedule.notify_all()
-                    if propagate:
-                        raise
-                    return
-                except BaseException as error:  # noqa: BLE001 — SystemExit is a step failure
-                    run._report_end(step, "failed")
-                    end_prefix()
-                    failure = (
-                        error
-                        if isinstance(error, StepFailed)
-                        else StepFailed(step._label(), _reason(error))
-                    )
-                    with schedule:
-                        names = [
-                            item._label()
-                            for item in steps
-                            if id(item) in running and item is not step
-                        ]
-                        running.discard(id(step))
-                        finished.add(id(step))
-                        if not failures:
-                            if names:
-                                print(f"waiting for {', '.join(names)}", flush=True)
-                            failures.append(failure)
-                        else:
-                            print(failure, file=sys.stderr)
-                        schedule.notify_all()
-                    if propagate:
-                        raise failure
-                    return
-                else:
-                    with schedule:
-                        running.discard(id(step))
-                        finished.add(id(step))
-                        if id(step) in requested and step in live:
-                            result.append(run[step])
-                        expired = [] if failures else live.take_due(finished)
-                        schedule.notify_all()
-                    _teardown(expired)
-            finally:
-                end_prefix()
+    def _report_start(self, step: Step[Any]) -> None:
+        if self.report is None or id(step) in self._report_began:
+            return
+        self._report_began[id(step)] = time.monotonic()
+        self.report.step_start(step._label())
 
-    with parallel_output() if jobs > 1 else nullcontext():
-        if jobs == 1:
-            loop(propagate=True)
-            return result[-1] if result else None
-        threads = [
-            threading.Thread(
-                target=contextvars.copy_context().run,
-                args=(loop,),
-                kwargs={"propagate": False},
+    def _report_end(self, step: Step[Any], outcome: str) -> None:
+        if self.report is None or id(step) not in self._report_began:
+            return
+        began = self._report_began.pop(id(step))
+        self.report.step_end(step._label(), outcome, time.monotonic() - began)
+
+    def _report_run(self) -> None:
+        if self.finish_reported:
+            return
+        self.finish_reported = True
+        with unprefixed():
+            print(
+                f"finished in {format_elapsed(time.monotonic() - self.started_at)}",
+                flush=True,
             )
-            for _ in range(jobs)
-        ]
+
+    def announce_interrupt(self) -> None:
+        with self._announce_lock:
+            if self._announced:
+                return
+            self._announced = True
+            with self.condition:
+                running_now = set(self.running)
+                names = [
+                    step._label() for step in self.plan.steps if id(step) in running_now
+                ]
+                names.extend(
+                    step._label()
+                    for step in self.live.serving()
+                    if id(step) not in running_now
+                )
+        line = f"interrupted: stopping {', '.join(names)}" if names else "interrupted"
+        with unprefixed():
+            print(line, flush=True)
+
+    def schedule(self) -> object:
+        steps = self.plan.steps
+        requested: set[int] = set(self.plan.requested)
+        jobs = self.plan.jobs
+
+        def loop(*, propagate: bool) -> None:
+            token = None
+
+            def end_prefix() -> None:
+                nonlocal token
+                if token is not None:
+                    sys.stdout.flush()
+                    reset_prefix(token)
+                    token = None
+
+            while True:
+                with self.condition:
+                    if self.failures:
+                        return
+                    step = self.plan.next_ready(self.finished, self.running)
+                    if step is None:
+                        if self.running:
+                            self.condition.wait()
+                            continue
+                        if any(id(item) not in self.finished for item in steps):
+                            raise RoadieError("cannot schedule the plan")
+                        return
+                    self.running.add(id(step))
+                    self.condition.notify_all()
+                    # Claim the other ready steps before this one starts, so both
+                    # step-start times are written before either step runs.
+                    while (
+                        not self.failures
+                        and len(self.running) < jobs
+                        and self.plan.next_ready(self.finished, self.running) is not None
+                    ):
+                        self.condition.wait()
+                    if self.failures:
+                        self.running.discard(id(step))
+                        self.condition.notify_all()
+                        return
+                token = set_prefix(step._label()) if jobs > 1 else None
+                try:
+                    try:
+                        self._execute_step(step)
+                    except KeyboardInterrupt:
+                        self._report_end(step, "interrupted")
+                        end_prefix()
+                        request_stop()
+                        with self.condition:
+                            self.running.discard(id(step))
+                            self.finished.add(id(step))
+                            self.interrupted.append(True)
+                            self.condition.notify_all()
+                        if propagate:
+                            raise
+                        return
+                    except BaseException as error:  # noqa: BLE001 — SystemExit is a step failure
+                        self._report_end(step, "failed")
+                        end_prefix()
+                        failure = (
+                            error
+                            if isinstance(error, StepFailed)
+                            else StepFailed(step._label(), _reason(error))
+                        )
+                        with self.condition:
+                            names = [
+                                item._label()
+                                for item in steps
+                                if id(item) in self.running and item is not step
+                            ]
+                            self.running.discard(id(step))
+                            self.finished.add(id(step))
+                            if not self.failures:
+                                if names:
+                                    print(f"waiting for {', '.join(names)}", flush=True)
+                                self.failures.append(failure)
+                            else:
+                                print(failure, file=sys.stderr)
+                            self.condition.notify_all()
+                        if propagate:
+                            raise failure
+                        return
+                    else:
+                        with self.condition:
+                            self.running.discard(id(step))
+                            self.finished.add(id(step))
+                            if id(step) in requested and step in self.live:
+                                self.result.append(self.run[step])
+                            expired = [] if self.failures else self.live.take_due(self.finished)
+                            self.condition.notify_all()
+                        _teardown(expired)
+                finally:
+                    end_prefix()
+
+        with parallel_output() if jobs > 1 else nullcontext():
+            if jobs == 1:
+                loop(propagate=True)
+                return self.result[-1] if self.result else None
+            threads = [
+                threading.Thread(
+                    target=contextvars.copy_context().run,
+                    args=(loop,),
+                    kwargs={"propagate": False},
+                )
+                for _ in range(jobs)
+            ]
+            try:
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    while thread.is_alive():
+                        thread.join(0.1)
+            except KeyboardInterrupt:
+                request_stop()
+                for thread in threads:
+                    while thread.is_alive():
+                        thread.join(0.1)
+                raise
+            if self.interrupted:
+                raise KeyboardInterrupt
+            return self.result[-1] if self.result else None
+
+    def _execute_step(self, step: Step[Any]) -> None:
         try:
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                while thread.is_alive():
-                    thread.join(0.1)
+            self._run_one(step)
         except KeyboardInterrupt:
-            request_stop()
-            for thread in threads:
-                while thread.is_alive():
-                    thread.join(0.1)
             raise
-        if interrupted:
-            raise KeyboardInterrupt
-        return result[-1] if result else None
+        except StepFailed:
+            if interrupt_requested():
+                raise KeyboardInterrupt
+            raise
+        except BaseException as error:
+            if interrupt_requested():
+                raise KeyboardInterrupt from error
+            raise StepFailed(step._label(), _reason(error)) from error
 
+    def _run_one(self, step: Step[Any]) -> None:
+        if step.deferred and id(step) not in self.plan.requested:
+            # A deferred step's output fingerprint is its step fingerprint, so a
+            # consumer can be reused without it. The consumer builds it.
+            step_fingerprint = fingerprint(step, outputs=self.outputs, env=self.run.environment(step))
+            with self.condition:
+                self.outputs[id(step)] = step_fingerprint
+                if self.plan.dry:
+                    self.marks[id(step)] = "not started"
+            return
+        step_fingerprint = fingerprint(step, outputs=self.outputs, env=self.run.environment(step))
+        record = _matching(step, step_fingerprint)
+        if record is not None and self.plan.dry:
+            with self.condition:
+                self.run.reused.add(id(step))
+                self.marks[id(step)] = "reuse"
+                self.outputs[id(step)] = str(record["output"])
+        elif record is not None:
+            value = step.decode(record["value"])
+            with self.condition:
+                self.run.reused.add(id(step))
+            self._report_start(step)
+            print(f"reused {step._label()}", flush=True)
+            _value, output = self._kept(
+                step, value, built=False, step_fingerprint=step_fingerprint
+            )
+            with self.condition:
+                self.outputs[id(step)] = output
+        elif self.plan.dry and _reuses_without_record(step, self.run):
+            with self.condition:
+                self.run.reused.add(id(step))
+                self.marks[id(step)] = "reuse"
+                self.outputs[id(step)] = step_fingerprint
+        elif self.plan.dry:
+            _dry_start_deferred(step, self.marks)
+            with self.condition:
+                self.marks[id(step)] = "run"
+                self.outputs[id(step)] = "dry"
+        else:
+            self._start_deferred(step)
+            member_reused = step._reports_reused(self.run.reused)
+            if member_reused:
+                self._report_start(step)
+            announce(step)
+            if type(step).recorded:
+                self._report_start(step)
+            began = time.monotonic() if type(step).recorded else None
+            with (
+                current_step(step),
+                command_context(
+                    inherit=_inherits_stdin(step, self.plan.requested), environment=self.run.environment(step)
+                ),
+            ):
+                value = step.build(self.run)
+            elapsed = None if began is None else time.monotonic() - began
+            _value, output = self._kept(
+                step, value, built=True,
+                step_fingerprint=step_fingerprint, elapsed=elapsed,
+            )
+            with self.condition:
+                if step.deferred:
+                    self.started.add(id(step))
+                self.outputs[id(step)] = output
 
-def _execute_step(
-    step: Step[Any],
-    *,
-    run: Run,
-    live: _Live,
-    outputs: dict[int, str],
-    started: set[int],
-    marks: dict[int, str],
-    guards: dict[int, threading.Lock],
-    schedule: threading.Condition,
-    requested: set[int],
-    run_lock: HeldLock | None,
-    dry: bool,
-) -> None:
-    try:
-        _run_one(
-            step,
-            run=run,
-            live=live,
-            outputs=outputs,
-            started=started,
-            marks=marks,
-            guards=guards,
-            schedule=schedule,
-            requested=requested,
-            run_lock=run_lock,
-            dry=dry,
-        )
-    except KeyboardInterrupt:
-        raise
-    except StepFailed:
-        if interrupt_requested():
-            raise KeyboardInterrupt
-        raise
-    except BaseException as error:
-        if interrupt_requested():
-            raise KeyboardInterrupt from error
-        raise StepFailed(step._label(), _reason(error)) from error
-
-
-def _run_one(
-    step: Step[Any],
-    *,
-    run: Run,
-    live: _Live,
-    outputs: dict[int, str],
-    started: set[int],
-    marks: dict[int, str],
-    guards: dict[int, threading.Lock],
-    schedule: threading.Condition,
-    requested: set[int],
-    run_lock: HeldLock | None,
-    dry: bool,
-) -> None:
-    if step.deferred and id(step) not in requested:
-        # A deferred step's output fingerprint is its step fingerprint, so a
-        # consumer can be reused without it. The consumer builds it.
-        step_fingerprint = fingerprint(step, outputs=outputs, env=run.environment(step))
-        with schedule:
-            outputs[id(step)] = step_fingerprint
-            if dry:
-                marks[id(step)] = "not started"
-        return
-    step_fingerprint = fingerprint(step, outputs=outputs, env=run.environment(step))
-    record = _matching(step, step_fingerprint)
-    if record is not None and dry:
-        with schedule:
-            run.reused.add(id(step))
-            marks[id(step)] = "reuse"
-            outputs[id(step)] = str(record["output"])
-    elif record is not None:
-        value = step.decode(record["value"])
-        with schedule:
-            run.reused.add(id(step))
-        run._report_start(step)
-        print(f"reused {step._label()}", flush=True)
-        _value, output = _kept(
-            step, run, live, value, built=False,
-            step_fingerprint=step_fingerprint, requested=requested, run_lock=run_lock,
-            schedule=schedule, reported="reused",
-        )
-        with schedule:
-            outputs[id(step)] = output
-    elif dry and _reuses_without_record(step, run):
-        with schedule:
-            run.reused.add(id(step))
-            marks[id(step)] = "reuse"
-            outputs[id(step)] = step_fingerprint
-    elif dry:
-        _dry_start_deferred(step, marks)
-        with schedule:
-            marks[id(step)] = "run"
-            outputs[id(step)] = "dry"
-    else:
-        _start_deferred(step, run, live, started, guards, schedule, requested)
-        member_reused = step._reports_reused(run.reused)
-        if member_reused:
-            run._report_start(step)
-        announce(step)
-        if type(step).recorded:
-            run._report_start(step)
-        began = time.monotonic() if type(step).recorded else None
-        with (
-            current_step(step),
-            command_context(
-                inherit=_inherits_stdin(step, requested), environment=run.environment(step)
-            ),
+    def _kept(
+        self, step: Step[Any], value: object, *, built: bool,
+        step_fingerprint: str, elapsed: float | None = None,
+    ) -> tuple[object, str]:
+        with self.condition:
+            self.live.add(step, value)
+        if built:
+            value = step.publish(self.run, value)
+            with self.condition:
+                self.live.replace(step, value)
+        step.report(value)
+        output = _output_fingerprint(step, value, step_fingerprint)
+        _remember(step, step_fingerprint, output, value, run=self.run, built=built)
+        if elapsed is not None:
+            report_built(step, elapsed)
+        if not built or step._reports_reused(self.run.reused):
+            self._report_end(step, "reused")
+        elif elapsed is not None:
+            self._report_end(step, "built")
+        if id(step) in self.plan.requested and (
+            step.serves or self.plan.requested.issubset({id(step)})
         ):
-            value = step.build(run)
-        elapsed = None if began is None else time.monotonic() - began
-        reported = "reused" if member_reused else ("built" if type(step).recorded else None)
-        _value, output = _kept(
-            step, run, live, value, built=True,
-            step_fingerprint=step_fingerprint, requested=requested, run_lock=run_lock,
-            schedule=schedule, elapsed=elapsed, reported=reported,
-        )
-        with schedule:
-            if step.deferred:
-                started.add(id(step))
-            outputs[id(step)] = output
+            # A served result, such as a dev server, outlives the run and must not
+            # keep the lock. The total is printed first, so a server does not hide it.
+            # With several results, release when the one that serves is ready, or
+            # when the only requested result is kept.
+            if self.run_lock is not None:
+                sweep_stale_state(project_root())
+                self.run_lock.release()
+            if step.serves:
+                self._report_run()
+            step.serve(value)
+        return value, output
 
+    def _start_deferred(self, step: Step[Any]) -> None:
+        """Build the deferred steps `step` takes, just before `step` builds.
+
+        A deferred step starts once. A consumer that needs it while it starts waits.
+        """
+        for dependency in step.dependencies():
+            if not dependency.deferred:
+                continue
+            self._start_one(dependency)
+
+    def _start_one(self, dependency: Step[Any]) -> None:
+        self._start_deferred(dependency)
+        with self.guards[id(dependency)]:
+            if id(dependency) in self.started:
+                return
+            try:
+                announce(dependency)
+                if type(dependency).recorded:
+                    self._report_start(dependency)
+                began = time.monotonic() if type(dependency).recorded else None
+                with (
+                    current_step(dependency),
+                    command_context(
+                        inherit=_inherits_stdin(dependency, self.plan.requested),
+                        environment=self.run.environment(dependency),
+                    ),
+                ):
+                    value = dependency.build(self.run)
+                elapsed = None if began is None else time.monotonic() - began
+            except KeyboardInterrupt:
+                self._report_end(dependency, "interrupted")
+                raise
+            except StepFailed:
+                self._report_end(dependency, "failed")
+                raise
+            except BaseException as error:
+                self._report_end(dependency, "failed")
+                raise StepFailed(
+                    dependency._label(), _reason(error)
+                ) from error
+            if elapsed is not None:
+                report_built(dependency, elapsed)
+            self._report_end(dependency, "built")
+            with self.condition:
+                self.live.add(dependency, value)
+                self.started.add(id(dependency))
 
 def _blockers(steps: Sequence[Step[Any]], requested: set[int]) -> dict[int, set[int]]:
     present = {id(step) for step in steps}
@@ -717,118 +718,10 @@ def _dry_start_deferred(step: Step[Any], marks: dict[int, str]) -> None:
         marks[id(dependency)] = "run"
 
 
-def _kept(
-    step: Step[Any],
-    run: Run,
-    live: _Live,
-    value: object,
-    *,
-    built: bool,
-    step_fingerprint: str,
-    requested: set[int],
-    run_lock: HeldLock | None,
-    schedule: threading.Condition,
-    elapsed: float | None = None,
-    reported: str | None = None,
-) -> tuple[object, str]:
-    with schedule:
-        live.add(step, value)
-    if built:
-        value = step.publish(run, value)
-        with schedule:
-            live.replace(step, value)
-    step.report(value)
-    output = _output_fingerprint(step, value, step_fingerprint)
-    _remember(step, step_fingerprint, output, value, run=run, built=built)
-    if elapsed is not None:
-        report_built(step, elapsed)
-    if reported is not None:
-        run._report_end(step, reported)
-    if id(step) in requested and (
-        step.serves or requested.issubset({id(step)})
-    ):
-        # A served result, such as a dev server, outlives the run and must not
-        # keep the lock. The total is printed first, so a server does not hide it.
-        # With several results, release when the one that serves is ready, or
-        # when the only requested result is kept.
-        if run_lock is not None:
-            sweep_stale_state(project_root())
-            run_lock.release()
-        if step.serves:
-            _report_run(run)
-        step.serve(value)
-    return value, output
-
-
 # (spec) Deferred steps
-def _inherits_stdin(step: Step[Any], requested: set[int]) -> bool:
+def _inherits_stdin(step: Step[Any], requested: frozenset[int]) -> bool:
     """A service keeps the terminal only when it is a requested result."""
     return not step.serves or id(step) in requested
-
-
-def _start_deferred(
-    step: Step[Any],
-    run: Run,
-    live: _Live,
-    started: set[int],
-    guards: dict[int, threading.Lock],
-    schedule: threading.Condition,
-    requested: set[int],
-) -> None:
-    """Build the deferred steps `step` takes, just before `step` builds.
-
-    A deferred step starts once. A consumer that needs it while it starts waits.
-    """
-    for dependency in step.dependencies():
-        if not dependency.deferred:
-            continue
-        _start_one(dependency, run, live, started, guards, schedule, requested)
-
-
-def _start_one(
-    dependency: Step[Any],
-    run: Run,
-    live: _Live,
-    started: set[int],
-    guards: dict[int, threading.Lock],
-    schedule: threading.Condition,
-    requested: set[int],
-) -> None:
-    _start_deferred(dependency, run, live, started, guards, schedule, requested)
-    with guards[id(dependency)]:
-        if id(dependency) in started:
-            return
-        try:
-            announce(dependency)
-            if type(dependency).recorded:
-                run._report_start(dependency)
-            began = time.monotonic() if type(dependency).recorded else None
-            with (
-                current_step(dependency),
-                command_context(
-                    inherit=_inherits_stdin(dependency, requested),
-                    environment=run.environment(dependency),
-                ),
-            ):
-                value = dependency.build(run)
-            elapsed = None if began is None else time.monotonic() - began
-        except KeyboardInterrupt:
-            run._report_end(dependency, "interrupted")
-            raise
-        except StepFailed:
-            run._report_end(dependency, "failed")
-            raise
-        except BaseException as error:
-            run._report_end(dependency, "failed")
-            raise StepFailed(
-                dependency._label(), _reason(error)
-            ) from error
-        if elapsed is not None:
-            report_built(dependency, elapsed)
-        run._report_end(dependency, "built")
-        with schedule:
-            live.add(dependency, value)
-            started.add(id(dependency))
 
 
 # (spec) Environment files
