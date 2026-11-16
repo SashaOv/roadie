@@ -535,6 +535,31 @@ class _Scheduler:
                 raise KeyboardInterrupt from error
             raise StepFailed(step._label(), _reason(error)) from error
 
+    def _invoke(self, step: Step[Any]) -> tuple[object, float | None]:
+        announce(step)
+        if type(step).recorded:
+            self._report_start(step)
+        began = time.monotonic() if type(step).recorded else None
+        try:
+            with (
+                current_step(step),
+                command_context(
+                    inherit=_inherits_stdin(step, self.plan.requested),
+                    environment=self.run.environment(step),
+                ),
+            ):
+                value = step.build(self.run)
+        except KeyboardInterrupt:
+            self._report_end(step, "interrupted")
+            raise
+        except StepFailed:
+            self._report_end(step, "failed")
+            raise
+        except BaseException as error:
+            self._report_end(step, "failed")
+            raise StepFailed(step._label(), _reason(error)) from error
+        return value, None if began is None else time.monotonic() - began
+
     def _run_one(self, step: Step[Any]) -> None:
         if step.deferred and id(step) not in self.plan.requested:
             # A deferred step's output fingerprint is its step fingerprint, so a
@@ -578,18 +603,7 @@ class _Scheduler:
             member_reused = step._reports_reused(self.run.reused)
             if member_reused:
                 self._report_start(step)
-            announce(step)
-            if type(step).recorded:
-                self._report_start(step)
-            began = time.monotonic() if type(step).recorded else None
-            with (
-                current_step(step),
-                command_context(
-                    inherit=_inherits_stdin(step, self.plan.requested), environment=self.run.environment(step)
-                ),
-            ):
-                value = step.build(self.run)
-            elapsed = None if began is None else time.monotonic() - began
+            value, elapsed = self._invoke(step)
             _value, output = self._kept(
                 step, value, built=True,
                 step_fingerprint=step_fingerprint, elapsed=elapsed,
@@ -648,31 +662,7 @@ class _Scheduler:
         with self.guards[id(dependency)]:
             if id(dependency) in self.started:
                 return
-            try:
-                announce(dependency)
-                if type(dependency).recorded:
-                    self._report_start(dependency)
-                began = time.monotonic() if type(dependency).recorded else None
-                with (
-                    current_step(dependency),
-                    command_context(
-                        inherit=_inherits_stdin(dependency, self.plan.requested),
-                        environment=self.run.environment(dependency),
-                    ),
-                ):
-                    value = dependency.build(self.run)
-                elapsed = None if began is None else time.monotonic() - began
-            except KeyboardInterrupt:
-                self._report_end(dependency, "interrupted")
-                raise
-            except StepFailed:
-                self._report_end(dependency, "failed")
-                raise
-            except BaseException as error:
-                self._report_end(dependency, "failed")
-                raise StepFailed(
-                    dependency._label(), _reason(error)
-                ) from error
+            value, elapsed = self._invoke(dependency)
             if elapsed is not None:
                 report_built(dependency, elapsed)
             self._report_end(dependency, "built")

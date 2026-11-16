@@ -637,7 +637,7 @@ No clause needs the author.
 - [x] **CQ4.5: Hold scheduling state in one scheduler.** Decision 5. No
   behavior change. After this patch, run.py passes the parameter-count
   check.
-- [ ] **CQ4.6: Build a step through one invocation.** Decision 6. No
+- [x] **CQ4.6: Build a step through one invocation.** Decision 6. No
   behavior change. Test: a parameter bound to a deferred step and to an
   immediate step is visible in both builds and is released when either
   build fails. The test fails on neither path before the patch; it pins

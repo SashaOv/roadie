@@ -1,9 +1,12 @@
 from pathlib import Path
 
 import pytest
-from support import run_cli, write_build
+from support import execute, run_cli, write_build
 
-from roadie.build import Param, RoadieError
+from roadie.build import Param, RoadieError, Step
+from roadie.engine.errors import StepFailed
+from roadie.engine.parameters import ParameterValues
+from roadie.engine.run import Run
 
 
 # (spec) Parameters
@@ -21,6 +24,51 @@ def test_param_default_is_a_string_or_none() -> None:
     assert repr(Param("mode", default="prod")) == "Param('mode', default='prod')"
     with pytest.raises(RoadieError, match="Param default takes a string or None: got int"):
         Param("mode", default=1)  # type: ignore[arg-type]
+
+
+# (spec) Parameters
+@pytest.mark.parametrize("fail_on", [None, "api", "job"])
+def test_a_parameter_reaches_a_deferred_and_an_immediate_step(
+    fail_on: str | None, tmp_path: Path
+) -> None:
+    seen: list[tuple[str, str | None]] = []
+
+    class Api(Step[str]):
+        deferred = True
+
+        def __init__(self) -> None:
+            self.mode = Param("mode", default="dep")
+
+        def build(self, run: Run) -> str:
+            seen.append(("api", self.mode.value))
+            if fail_on == "api":
+                raise RuntimeError("api broke")
+            return self.mode.value or ""
+
+    class Job(Step[str]):
+        def __init__(self, api: Api) -> None:
+            self.api = api
+            self.mode = Param("mode", default="job")
+
+        def build(self, run: Run) -> str:
+            seen.append(("job", self.mode.value))
+            if fail_on == "job":
+                raise RuntimeError("job broke")
+            return run[self.api]
+
+    api = Api()
+    job = Job(api)
+    values = ParameterValues({"mode": "given"}, {})
+    if fail_on is None:
+        assert execute([api, job], root=tmp_path, parameters=values) == "given"
+    else:
+        with pytest.raises(StepFailed, match=f"{fail_on}.*broke"):
+            execute([api, job], root=tmp_path, parameters=values)
+    assert ("api", "given") in seen
+    if fail_on != "api":
+        assert ("job", "given") in seen
+    with pytest.raises(RoadieError, match="has no value outside a run"):
+        _ = api.mode.value
 
 
 # (spec) Parameters
