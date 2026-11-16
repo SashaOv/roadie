@@ -632,7 +632,7 @@ No clause needs the author.
 
   The steps in `test_run.py` and `test_fingerprint.py` that read or set
   `env_values` move to `run.environment(...)` and `fingerprint(env=...)`.
-- [ ] **CQ4.4: Keep live values in one registry.** Decisions 3 and 4. No
+- [x] **CQ4.4: Keep live values in one registry.** Decisions 3 and 4. No
   behavior change; the suite and the CQ4.1 tests cover it.
 - [ ] **CQ4.5: Hold scheduling state in one scheduler.** Decision 5. No
   behavior change. After this patch, run.py passes the parameter-count

@@ -6,6 +6,7 @@ import threading
 import time
 from collections.abc import Sequence
 from contextlib import nullcontext
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -104,6 +105,115 @@ class Run:
             return list(self._artifacts.get(id(step), ()))
 
 
+@dataclass(frozen=True)
+class _Plan:
+    steps: tuple[Step[Any], ...]
+    requested: frozenset[int]
+    leading: int
+    jobs: int
+    dry: bool
+    prerequisites: dict[int, set[int]]
+    blockers: dict[int, set[int]]
+
+    @classmethod
+    def build(
+        cls,
+        steps: Sequence[Step[Any]],
+        *,
+        requested: set[int],
+        leading: int,
+        jobs: int,
+        dry: bool,
+    ) -> "_Plan":
+        present = {id(step) for step in steps}
+        prerequisites = {
+            id(step): {id(item) for item in step.dependencies() if id(item) in present}
+            for step in steps
+        }
+        return cls(
+            steps=tuple(steps),
+            requested=frozenset(requested),
+            leading=leading,
+            jobs=jobs,
+            dry=dry,
+            prerequisites=prerequisites,
+            blockers=_blockers(steps, requested),
+        )
+
+    def next_ready(self, finished: set[int], running: set[int]) -> Step[Any] | None:
+        if any(type(item).asks for item in self.steps if id(item) in running):
+            return None
+        prefix_done = all(id(step) in finished for step in self.steps[: self.leading])
+        for index, step in enumerate(self.steps):
+            if id(step) in finished or id(step) in running:
+                continue
+            if type(step).asks and running:
+                continue
+            if index < self.leading:
+                if any(id(earlier) not in finished for earlier in self.steps[:index]):
+                    continue
+            elif not prefix_done:
+                continue
+            if (
+                id(step) in self.requested
+                and type(step).once_per_run
+                and any(
+                    id(other) not in finished
+                    and other is not step
+                    and not self._depends_on(id(other), id(step), set())
+                    for other in self.steps
+                )
+            ):
+                continue
+            if self.prerequisites[id(step)].issubset(finished):
+                return step
+        return None
+
+    def _depends_on(self, step_id: int, target: int, seen: set[int]) -> bool:
+        if step_id in seen:
+            return False
+        seen.add(step_id)
+        dependencies = self.prerequisites.get(step_id, set())
+        if target in dependencies:
+            return True
+        return any(
+            self._depends_on(dependency, target, seen) for dependency in dependencies
+        )
+
+
+class _Live:
+    """The steps a run has built and not yet torn down, in start order."""
+
+    def __init__(self, run: Run, blockers: dict[int, set[int]]) -> None:
+        self._run = run
+        self._blockers = blockers
+        self._steps: list[Step[Any]] = []
+
+    def add(self, step: Step[Any], value: object) -> None:
+        self._run._values[id(step)] = value
+        self._steps.append(step)
+
+    def replace(self, step: Step[Any], value: object) -> None:
+        self._run._values[id(step)] = value
+
+    def take_due(self, finished: set[int]) -> list[tuple[Step[Any], object]]:
+        due = [step for step in self._steps if self._blockers[id(step)].issubset(finished)]
+        for step in due:
+            self._steps.remove(step)
+        return [(step, self._run._values.pop(id(step))) for step in reversed(due)]
+
+    def take_all(self) -> list[tuple[Step[Any], object]]:
+        expired = [(step, self._run._values.pop(id(step))) for step in reversed(self._steps)]
+        self._steps.clear()
+        return expired
+
+    def serving(self) -> list[Step[Any]]:
+        return [step for step in self._steps if step.serves]
+
+    def __contains__(self, step: Step[Any]) -> bool:
+        return id(step) in self._run._values
+
+
 def _report_run(run: Run) -> None:
     if run.finish_reported:
         return
@@ -167,12 +277,12 @@ def _run_steps(
 ) -> object:
     run = Run(locked=locked, environments=_environments(steps, env))
     run.started_at = time.monotonic()
-    live: list[Step[Any]] = []
     if targets is None:
         requested = {id(steps[-1])} if steps else set()
     else:
         requested = {id(step) for step in targets}
-    blockers = _blockers(steps, requested)
+    plan = _Plan.build(steps, requested=requested, leading=leading, jobs=jobs, dry=dry)
+    live = _Live(run, plan.blockers)
     outputs: dict[int, str] = {}
     started: set[int] = set()
     marks: dict[int, str] = {}
@@ -180,11 +290,6 @@ def _run_steps(
     running: set[int] = set()
     failures: list[BaseException] = []
     interrupted: list[bool] = []
-    present = {id(step) for step in steps}
-    prerequisites = {
-        id(step): {id(item) for item in step.dependencies() if id(item) in present}
-        for step in steps
-    }
     guards = {id(step): threading.Lock() for step in steps if step.deferred}
     schedule = threading.Condition(threading.RLock())
 
@@ -201,14 +306,11 @@ def _run_steps(
             announced = True
             with schedule:
                 running_now = set(running)
-                live_now = {id(step) for step in live}
                 names = [step._label() for step in steps if id(step) in running_now]
                 names.extend(
                     step._label()
-                    for step in steps
-                    if id(step) in live_now
-                    and id(step) not in running_now
-                    and step.serves
+                    for step in live.serving()
+                    if id(step) not in running_now
                 )
         line = f"interrupted: stopping {', '.join(names)}" if names else "interrupted"
         with unprefixed():
@@ -234,7 +336,7 @@ def _run_steps(
                     report.run_start(names, jobs)
                     reported_run = True
                 value = _schedule(
-                    steps,
+                    plan,
                     run=run,
                     live=live,
                     outputs=outputs,
@@ -244,15 +346,9 @@ def _run_steps(
                     running=running,
                     failures=failures,
                     interrupted=interrupted,
-                    prerequisites=prerequisites,
-                    blockers=blockers,
                     guards=guards,
                     schedule=schedule,
-                    requested=requested,
                     run_lock=run_lock,
-                    dry=dry,
-                    jobs=jobs,
-                    leading=leading,
                 )
                 if interrupted:
                     outcome = "interrupted"
@@ -283,7 +379,7 @@ def _run_steps(
                 try:
                     if not dry:
                         with schedule:
-                            expired = _take_live(run, live)
+                            expired = live.take_all()
                         _teardown(expired)
                 except KeyboardInterrupt:
                     outcome = "interrupted"
@@ -309,10 +405,10 @@ def _run_steps(
 
 
 def _schedule(
-    steps: Sequence[Step[Any]],
+    plan: _Plan,
     *,
     run: Run,
-    live: list[Step[Any]],
+    live: _Live,
     outputs: dict[int, str],
     started: set[int],
     marks: dict[int, str],
@@ -320,16 +416,14 @@ def _schedule(
     running: set[int],
     failures: list[BaseException],
     interrupted: list[bool],
-    prerequisites: dict[int, set[int]],
-    blockers: dict[int, set[int]],
     guards: dict[int, threading.Lock],
     schedule: threading.Condition,
-    requested: set[int],
     run_lock: HeldLock | None,
-    dry: bool,
-    jobs: int,
-    leading: int,
 ) -> object:
+    steps = plan.steps
+    requested: set[int] = set(plan.requested)
+    dry = plan.dry
+    jobs = plan.jobs
     result: list[object] = []
 
     def loop(*, propagate: bool) -> None:
@@ -346,7 +440,7 @@ def _schedule(
             with schedule:
                 if failures:
                     return
-                step = _next_ready(steps, finished, running, prerequisites, requested, leading)
+                step = plan.next_ready(finished, running)
                 if step is None:
                     if running:
                         schedule.wait()
@@ -361,10 +455,7 @@ def _schedule(
                 while (
                     not failures
                     and len(running) < jobs
-                    and _next_ready(
-                        steps, finished, running, prerequisites, requested, leading
-                    )
-                    is not None
+                    and plan.next_ready(finished, running) is not None
                 ):
                     schedule.wait()
                 if failures:
@@ -429,9 +520,9 @@ def _schedule(
                     with schedule:
                         running.discard(id(step))
                         finished.add(id(step))
-                        if id(step) in requested and id(step) in run._values:
-                            result.append(run._values[id(step)])
-                        expired = [] if failures else _take_due(run, live, blockers, finished)
+                        if id(step) in requested and step in live:
+                            result.append(run[step])
+                        expired = [] if failures else live.take_due(finished)
                         schedule.notify_all()
                     _teardown(expired)
             finally:
@@ -466,65 +557,11 @@ def _schedule(
         return result[-1] if result else None
 
 
-def _depends_on(
-    step_id: int,
-    target: int,
-    prerequisites: dict[int, set[int]],
-    seen: set[int],
-) -> bool:
-    if step_id in seen:
-        return False
-    seen.add(step_id)
-    dependencies = prerequisites.get(step_id, set())
-    if target in dependencies:
-        return True
-    return any(
-        _depends_on(dependency, target, prerequisites, seen) for dependency in dependencies
-    )
-
-
-def _next_ready(
-    steps: Sequence[Step[Any]],
-    finished: set[int],
-    running: set[int],
-    prerequisites: dict[int, set[int]],
-    requested: set[int],
-    leading: int,
-) -> Step[Any] | None:
-    if any(type(item).asks for item in steps if id(item) in running):
-        return None
-    prefix_done = all(id(step) in finished for step in steps[:leading])
-    for index, step in enumerate(steps):
-        if id(step) in finished or id(step) in running:
-            continue
-        if type(step).asks and running:
-            continue
-        if index < leading:
-            if any(id(earlier) not in finished for earlier in steps[:index]):
-                continue
-        elif not prefix_done:
-            continue
-        if (
-            id(step) in requested
-            and type(step).once_per_run
-            and any(
-                id(other) not in finished
-                and other is not step
-                and not _depends_on(id(other), id(step), prerequisites, set())
-                for other in steps
-            )
-        ):
-            continue
-        if prerequisites[id(step)].issubset(finished):
-            return step
-    return None
-
-
 def _execute_step(
     step: Step[Any],
     *,
     run: Run,
-    live: list[Step[Any]],
+    live: _Live,
     outputs: dict[int, str],
     started: set[int],
     marks: dict[int, str],
@@ -564,7 +601,7 @@ def _run_one(
     step: Step[Any],
     *,
     run: Run,
-    live: list[Step[Any]],
+    live: _Live,
     outputs: dict[int, str],
     started: set[int],
     marks: dict[int, str],
@@ -664,24 +701,6 @@ def _blockers(steps: Sequence[Step[Any]], requested: set[int]) -> dict[int, set[
     return blockers
 
 
-def _take_due(
-    run: Run,
-    live: list[Step[Any]],
-    blockers: dict[int, set[int]],
-    finished: set[int],
-) -> list[tuple[Step[Any], object]]:
-    due = [step for step in live if blockers[id(step)].issubset(finished)]
-    for step in due:
-        live.remove(step)
-    return [(step, run._values.pop(id(step))) for step in reversed(due)]
-
-
-def _take_live(run: Run, live: list[Step[Any]]) -> list[tuple[Step[Any], object]]:
-    expired = [(step, run._values.pop(id(step))) for step in reversed(live)]
-    live.clear()
-    return expired
-
-
 def _reuses_without_record(step: Step[Any], run: Run) -> bool:
     """True when a run would print `reused` for a step that keeps no record."""
     if type(step).recorded or not type(step).reusable:
@@ -701,7 +720,7 @@ def _dry_start_deferred(step: Step[Any], marks: dict[int, str]) -> None:
 def _kept(
     step: Step[Any],
     run: Run,
-    live: list[Step[Any]],
+    live: _Live,
     value: object,
     *,
     built: bool,
@@ -713,12 +732,11 @@ def _kept(
     reported: str | None = None,
 ) -> tuple[object, str]:
     with schedule:
-        run._values[id(step)] = value
-        live.append(step)
+        live.add(step, value)
     if built:
         value = step.publish(run, value)
         with schedule:
-            run._values[id(step)] = value
+            live.replace(step, value)
     step.report(value)
     output = _output_fingerprint(step, value, step_fingerprint)
     _remember(step, step_fingerprint, output, value, run=run, built=built)
@@ -751,7 +769,7 @@ def _inherits_stdin(step: Step[Any], requested: set[int]) -> bool:
 def _start_deferred(
     step: Step[Any],
     run: Run,
-    live: list[Step[Any]],
+    live: _Live,
     started: set[int],
     guards: dict[int, threading.Lock],
     schedule: threading.Condition,
@@ -770,7 +788,7 @@ def _start_deferred(
 def _start_one(
     dependency: Step[Any],
     run: Run,
-    live: list[Step[Any]],
+    live: _Live,
     started: set[int],
     guards: dict[int, threading.Lock],
     schedule: threading.Condition,
@@ -809,8 +827,7 @@ def _start_one(
             report_built(dependency, elapsed)
         run._report_end(dependency, "built")
         with schedule:
-            run._values[id(dependency)] = value
-            live.append(dependency)
+            live.add(dependency, value)
             started.add(id(dependency))
 
 
