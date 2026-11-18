@@ -278,9 +278,10 @@ def _run_steps(
                         print(f"{format_step(step)}  # {scheduler.marks[id(step)]}", flush=True)
                 else:
                     for step in steps:
-                        if step.deferred and id(step) not in requested and id(step) not in scheduler.started:
-                            name = step._label()
-                            print(f"not started {name}: no step that takes it runs", flush=True)
+                        if not step.deferred or id(step) in requested | scheduler.started:
+                            continue
+                        name = step._label()
+                        print(f"not started {name}: no step that takes it runs", flush=True)
                 if dry:
                     return None
                 succeeded = True
@@ -321,7 +322,6 @@ def _run_steps(
     return value
 
 
-
 class _Scheduler:
     """Hold one run's scheduling state and build its steps."""
 
@@ -342,7 +342,7 @@ class _Scheduler:
         self.finished: set[int] = set()
         self.running: set[int] = set()
         self.failures: list[BaseException] = []
-        self.interrupted: list[bool] = []
+        self.interrupted = False
         self.outputs: dict[int, str] = {}
         self.started: set[int] = set()
         self.marks: dict[int, str] = {}
@@ -399,108 +399,15 @@ class _Scheduler:
             print(line, flush=True)
 
     def schedule(self) -> object:
-        steps = self.plan.steps
-        requested: set[int] = set(self.plan.requested)
         jobs = self.plan.jobs
-
-        def loop(*, propagate: bool) -> None:
-            token = None
-
-            def end_prefix() -> None:
-                nonlocal token
-                if token is not None:
-                    sys.stdout.flush()
-                    reset_prefix(token)
-                    token = None
-
-            while True:
-                with self.condition:
-                    if self.failures:
-                        return
-                    step = self.plan.next_ready(self.finished, self.running)
-                    if step is None:
-                        if self.running:
-                            self.condition.wait()
-                            continue
-                        if any(id(item) not in self.finished for item in steps):
-                            raise RoadieError("cannot schedule the plan")
-                        return
-                    self.running.add(id(step))
-                    self.condition.notify_all()
-                    # Claim the other ready steps before this one starts, so both
-                    # step-start times are written before either step runs.
-                    while (
-                        not self.failures
-                        and len(self.running) < jobs
-                        and self.plan.next_ready(self.finished, self.running) is not None
-                    ):
-                        self.condition.wait()
-                    if self.failures:
-                        self.running.discard(id(step))
-                        self.condition.notify_all()
-                        return
-                token = set_prefix(step._label()) if jobs > 1 else None
-                try:
-                    try:
-                        self._execute_step(step)
-                    except KeyboardInterrupt:
-                        self._report_end(step, "interrupted")
-                        end_prefix()
-                        request_stop()
-                        with self.condition:
-                            self.running.discard(id(step))
-                            self.finished.add(id(step))
-                            self.interrupted.append(True)
-                            self.condition.notify_all()
-                        if propagate:
-                            raise
-                        return
-                    except BaseException as error:  # noqa: BLE001 — SystemExit is a step failure
-                        self._report_end(step, "failed")
-                        end_prefix()
-                        failure = (
-                            error
-                            if isinstance(error, StepFailed)
-                            else StepFailed(step._label(), _reason(error))
-                        )
-                        with self.condition:
-                            names = [
-                                item._label()
-                                for item in steps
-                                if id(item) in self.running and item is not step
-                            ]
-                            self.running.discard(id(step))
-                            self.finished.add(id(step))
-                            if not self.failures:
-                                if names:
-                                    print(f"waiting for {', '.join(names)}", flush=True)
-                                self.failures.append(failure)
-                            else:
-                                print(failure, file=sys.stderr)
-                            self.condition.notify_all()
-                        if propagate:
-                            raise failure
-                        return
-                    else:
-                        with self.condition:
-                            self.running.discard(id(step))
-                            self.finished.add(id(step))
-                            if id(step) in requested and step in self.live:
-                                self.result.append(self.run[step])
-                            expired = [] if self.failures else self.live.take_due(self.finished)
-                            self.condition.notify_all()
-                        _teardown(expired)
-                finally:
-                    end_prefix()
-
         with parallel_output() if jobs > 1 else nullcontext():
             if jobs == 1:
-                loop(propagate=True)
+                self._work(propagate=True)
                 return self.result[-1] if self.result else None
             threads = [
                 threading.Thread(
                     target=contextvars.copy_context().run,
-                    args=(loop,),
+                    args=(self._work,),
                     kwargs={"propagate": False},
                 )
                 for _ in range(jobs)
@@ -520,6 +427,97 @@ class _Scheduler:
             if self.interrupted:
                 raise KeyboardInterrupt
             return self.result[-1] if self.result else None
+
+    def _work(self, *, propagate: bool) -> None:
+        """Claim and build ready steps until none is left or one fails."""
+        token = None
+
+        def end_prefix() -> None:
+            nonlocal token
+            if token is not None:
+                sys.stdout.flush()
+                reset_prefix(token)
+                token = None
+
+        while True:
+            with self.condition:
+                if self.failures:
+                    return
+                step = self.plan.next_ready(self.finished, self.running)
+                if step is None:
+                    if self.running:
+                        self.condition.wait()
+                        continue
+                    if any(id(item) not in self.finished for item in self.plan.steps):
+                        raise RoadieError("cannot schedule the plan")
+                    return
+                self.running.add(id(step))
+                self.condition.notify_all()
+                # Claim the other ready steps before this one starts, so both
+                # step-start times are written before either step runs.
+                while (
+                    not self.failures
+                    and len(self.running) < self.plan.jobs
+                    and self.plan.next_ready(self.finished, self.running) is not None
+                ):
+                    self.condition.wait()
+                if self.failures:
+                    self.running.discard(id(step))
+                    self.condition.notify_all()
+                    return
+            token = set_prefix(step._label()) if self.plan.jobs > 1 else None
+            try:
+                try:
+                    self._execute_step(step)
+                except KeyboardInterrupt:
+                    self._report_end(step, "interrupted")
+                    end_prefix()
+                    request_stop()
+                    with self.condition:
+                        self.running.discard(id(step))
+                        self.finished.add(id(step))
+                        self.interrupted = True
+                        self.condition.notify_all()
+                    if propagate:
+                        raise
+                    return
+                except BaseException as error:  # noqa: BLE001 — SystemExit is a step failure
+                    self._report_end(step, "failed")
+                    end_prefix()
+                    failure = (
+                        error
+                        if isinstance(error, StepFailed)
+                        else StepFailed(step._label(), _reason(error))
+                    )
+                    with self.condition:
+                        names = [
+                            item._label()
+                            for item in self.plan.steps
+                            if id(item) in self.running and item is not step
+                        ]
+                        self.running.discard(id(step))
+                        self.finished.add(id(step))
+                        if not self.failures:
+                            if names:
+                                print(f"waiting for {', '.join(names)}", flush=True)
+                            self.failures.append(failure)
+                        else:
+                            print(failure, file=sys.stderr)
+                        self.condition.notify_all()
+                    if propagate:
+                        raise failure
+                    return
+                else:
+                    with self.condition:
+                        self.running.discard(id(step))
+                        self.finished.add(id(step))
+                        if id(step) in self.plan.requested and step in self.live:
+                            self.result.append(self.run[step])
+                        expired = [] if self.failures else self.live.take_due(self.finished)
+                        self.condition.notify_all()
+                    _teardown(expired)
+            finally:
+                end_prefix()
 
     def _execute_step(self, step: Step[Any]) -> None:
         try:
@@ -549,28 +547,25 @@ class _Scheduler:
                 ),
             ):
                 value = step.build(self.run)
-        except KeyboardInterrupt:
-            self._report_end(step, "interrupted")
-            raise
-        except StepFailed:
-            self._report_end(step, "failed")
-            raise
         except BaseException as error:
-            self._report_end(step, "failed")
+            # A program can fail because Ctrl-C stopped it; that step was interrupted.
+            stopped = isinstance(error, KeyboardInterrupt) or interrupt_requested()
+            self._report_end(step, "interrupted" if stopped else "failed")
+            if isinstance(error, (KeyboardInterrupt, StepFailed)):
+                raise
             raise StepFailed(step._label(), _reason(error)) from error
         return value, None if began is None else time.monotonic() - began
 
     def _run_one(self, step: Step[Any]) -> None:
+        step_fingerprint = fingerprint(step, outputs=self.outputs, env=self.run.environment(step))
         if step.deferred and id(step) not in self.plan.requested:
             # A deferred step's output fingerprint is its step fingerprint, so a
             # consumer can be reused without it. The consumer builds it.
-            step_fingerprint = fingerprint(step, outputs=self.outputs, env=self.run.environment(step))
             with self.condition:
                 self.outputs[id(step)] = step_fingerprint
                 if self.plan.dry:
                     self.marks[id(step)] = "not started"
             return
-        step_fingerprint = fingerprint(step, outputs=self.outputs, env=self.run.environment(step))
         record = _matching(step, step_fingerprint)
         if record is not None and self.plan.dry:
             with self.condition:
@@ -669,6 +664,7 @@ class _Scheduler:
             with self.condition:
                 self.live.add(dependency, value)
                 self.started.add(id(dependency))
+
 
 def _blockers(steps: Sequence[Step[Any]], requested: set[int]) -> dict[int, set[int]]:
     present = {id(step) for step in steps}

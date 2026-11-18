@@ -98,8 +98,7 @@ class Command:
         Its environment is the process environment, then `environment`, then
         the environment values of the step in whose build it runs, when any,
         then `ROADIE_RUN_PID` set to this process's PID. It inherits standard
-        input.
-        Standard error is shown as it arrives, each line prefixed with
+        input. Standard error is shown as it arrives, each line prefixed with
         `[<label>] ` when the run uses more than one job. Standard output is
         shown the same way, unless `capture_output` is set: then it is returned,
         unprefixed, and not printed. `show_output` prints that captured output

@@ -666,8 +666,10 @@ A step class sets these class attributes:
 - `recorded = False`: the kind keeps no record; the step's output fingerprint
   is its own fingerprint.
 - `deferred = True`: the kind is deferred.
-- `serves = True`: the kind serves its requested result, so the run releases
-  its lock and prints its total before `serve` is called on it.
+- `serves = True`: the kind serves its requested result. The run releases
+  its lock and prints its total before `serve` is called on it. A step of
+  the kind that is not a requested result runs its commands with standard
+  input from the null device, and an interrupt names it while it is live.
 
 ### Input fingerprints
 

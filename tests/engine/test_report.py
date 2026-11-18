@@ -15,6 +15,7 @@ from support import FakeDeployment, execute, write_build
 from roadie import cli
 from roadie.build import Group, Service, Step
 from roadie.engine.errors import StepFailed
+from roadie.engine.process import request_stop
 from roadie.engine.run import Run
 
 _TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
@@ -254,6 +255,30 @@ def test_an_interrupt_records_interrupted(
     threading.Thread(target=interrupt_when_ready, daemon=True).start()
     with pytest.raises(KeyboardInterrupt):
         execute([note], root=root, jobs=jobs, report=report)
+    events = _events(report)
+    assert [event["outcome"] for event in events if event["event"] == "step-end"] == ["interrupted"]
+    assert events[-1]["outcome"] == "interrupted"
+
+
+# (spec) Run report
+# (spec) Failures
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_a_step_that_fails_after_an_interrupt_records_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, jobs: int
+) -> None:
+    """A program a step runs can fail because Ctrl-C stopped it."""
+    _patch_disk(monkeypatch)
+
+    class Note(Step[None]):
+        def build(self, run: Run) -> None:
+            request_stop()
+            raise RuntimeError("stopped")
+
+    note = Note()
+    note.name = note.variable = "note"
+    report = tmp_path / "report.json"
+    with pytest.raises(KeyboardInterrupt):
+        execute([note], root=tmp_path, jobs=jobs, report=report)
     events = _events(report)
     assert [event["outcome"] for event in events if event["event"] == "step-end"] == ["interrupted"]
     assert events[-1]["outcome"] == "interrupted"

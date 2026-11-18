@@ -476,7 +476,7 @@ open until the author pushes.
 
 ### CQ4: The scheduler owns its state
 
-Status: planned, approved 2026-11-15
+Status: executed, pending author verification
 
 **Improvement.** Today `run.py` keeps a run's scheduling state in 18 local
 variables and threads them through `_schedule`, `_execute_step`, `_run_one`,
@@ -642,6 +642,76 @@ No clause needs the author.
   immediate step is visible in both builds and is released when either
   build fails. The test fails on neither path before the patch; it pins
   the H3 risk.
+
+### Execution and acceptance
+
+2026-11-15 (uncommitted record):
+
+- Commits `9b8fc04`, `4cd2b55`, `6b21fa2`, `b682e70`, `cc205e5` and
+  `6a147c7` carry the six patch names exactly.
+- Head `6a147c78e08a0305be23406ff835b42d0bf1379e`, tree
+  `fab6cd98ec37fbab4a95c77a14c54c36d95815d5`; `build.py` blob
+  `51797c00949844d85e3921d4c375e24299cc944c`. Host Darwin 25.6.0 arm64,
+  Python 3.13.13.
+- `grep -c 'current_step(' src/roadie/engine/run.py` prints `1`; the
+  parameter-count check prints `[]`.
+- `git grep -n 'Step\.serve\b\|env_values' src` prints only the two
+  `dotenv_values` library lines in `run.py`; no step member remains.
+- CQ4.1's ten cases pass at the final head, as they did before the build;
+  CQ4.2's and CQ4.3's tests failed before their patches and pass after.
+- Sandbox-only final run: `ruff check` and `mypy src build.py` pass;
+  pytest shows 437 passed, 2 skipped and 37 failures, all in the sandbox's
+  socket/pty/release categories, the same count as before CQ4. CI on
+  Ubuntu and macOS has not run; nothing is pushed.
+- `src/roadie`: 6,084 lines, 66 fewer than CQ3 left. The estimate was
+  −120; the count is reported, not gated.
+
+**Author action required at completion.**
+
+- Push `main` and confirm CI on `ubuntu-latest` and `macos-latest` runs
+  `uv run roadie` and passes. That discharges the last acceptance clause.
+
+### Review
+
+2026-11-15, at `6a147c7`, by the planning agent.
+
+- The six commits carry their planned names. The record commit changes only
+  the spec, and the line count was reported, not met by packing. The
+  executor ran pytest in a sandbox. Run here without one, `6a147c7` passes
+  474 tests with 2 skipped.
+- Plan defect: the acceptance grep `env_values` also matches
+  `dotenv_values`. `\benv_values` is the check that was meant; it prints
+  nothing.
+- Behavior drift, against decision 7. `_invoke` ended a failed build's
+  report entry as `failed` before `_execute_step` turned the failure into
+  an interrupt. A step whose program failed because Ctrl-C stopped it was
+  reported `interrupted` before CQ4 and `failed` after. The new
+  `test_a_step_that_fails_after_an_interrupt_records_interrupted`
+  (`--jobs 1` and `2`) passes at `cb25f8f`, fails at `6a147c7`, and passes
+  with the fix. `_invoke` now reports `interrupted` whenever an interrupt
+  was requested. That rule covers the deferred path too: before CQ4,
+  `_start_one` reported a deferred step stopped this way as `failed`.
+- The plan was carried out only in part. Decision 5 made the worker loop a
+  method, but it was left as a closure inside `schedule`. It is now
+  `_Scheduler._work`. `interrupted` was a one-element list only so the old
+  closures could set it; it is now a flag.
+- Smaller fixes:
+  - `_run_one` computed the step fingerprint in two branches; it now
+    computes it once.
+  - A 109-character line in `_run_steps` is wrapped.
+  - The blank lines around `_Scheduler` and `_blockers` are fixed.
+  - A broken docstring wrap in `Command.run` is fixed.
+  - The spec's `serves` line named two of the four behaviors the flag
+    controls; it now names all four.
+- With the fixes, `ruff check`, `mypy src build.py` and the parameter check
+  pass, `uv run pytest -q` has 476 passed and 2 skipped, and `src/roadie`
+  has 6,079 lines, 71 fewer than CQ3 left.
+- Open for the author: before CQ4, a command a step ran from `publish`,
+  `report` or `serve` got the step's environment files. Now only commands
+  run from `build` do. No Roadie or Niva step runs a command from those
+  hooks (Facts for this build), but the spec's "Step helpers" still says a
+  helper runs "with its environment files". Either the command context
+  also covers those hooks, or the spec limits the rule to `build`.
 
 ## Backlog
 
