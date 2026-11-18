@@ -476,7 +476,7 @@ open until the author pushes.
 
 ### CQ4: The scheduler owns its state
 
-Status: executed, pending author verification
+Status: implemented 2026-11-17 (commits CQ4.*)
 
 **Improvement.** Today `run.py` keeps a run's scheduling state in 18 local
 variables and threads them through `_schedule`, `_execute_step`, `_run_one`,
@@ -721,11 +721,24 @@ No clause needs the author.
   test's second `wait_for_port` raced the server's exit. Locally, the old
   server exits (status 0) right after `start` returns. The fixed server
   keeps accepting, as the `test_process.py` servers do, and is still
-  running two seconds later. The fixed test passed 20 runs of 20. The fix
-  is not committed yet.
+  running two seconds later. The fixed test passed 20 runs of 20.
+- The fix landed as `0420a4d`. CI run 44215409522 passed on
+  `ubuntu-latest` and `macos-latest`, which discharges the last acceptance
+  clause.
 
 ## Backlog
 
+- One environment per run (author, 2026-11-17). Today a step's environment-file
+  values reach only commands run from `build` (CQ4 review), never Python code,
+  a missing file is an error, and file values override the process environment.
+  Proposed: load the files into the process environment for the whole run and
+  restore it afterwards. The process environment wins over the files. A
+  `config(env=...)` file can be marked optional, and only the root build file
+  declares them. Fingerprints keep the values that came from files. Niva then
+  drops its three readers (`forge/build_box.py`, `forge/environment.py`,
+  `jammer/ops/pulumi_util.py`). This replaces the CQ4 question about
+  `publish`, `report` and `serve`. The precedence, optional-file and
+  root-only parts need the author's decision.
 - Niva, when it upgrades Roadie past CQ3: import the process helpers and
   `cargo_executable` from `roadie.build`, and run `gh` through `Command`
   instead of passing a step to `_gh_json`. Its `ContractFuzz` calls
