@@ -38,9 +38,10 @@ def test_a_command_runs_and_starts_a_server_without_a_step(tmp_path: Path) -> No
             sys.executable,
             "-c",
             (
+                # Keep accepting: the readiness poll is itself a connection.
                 "import socket\n"
                 f"s = socket.create_server(('127.0.0.1', {port}))\n"
-                "s.accept()\n"
+                "while True: s.accept()[0].close()\n"
             ),
         ),
         cwd=tmp_path,

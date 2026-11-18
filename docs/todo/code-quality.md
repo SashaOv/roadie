@@ -712,6 +712,17 @@ No clause needs the author.
   hooks (Facts for this build), but the spec's "Step helpers" still says a
   helper runs "with its environment files". Either the command context
   also covers those hooks, or the spec limits the rule to `build`.
+- 2026-11-17: `ae95df6` pushed. In CI run 44214439409, `ubuntu-latest`
+  passed and `macos-latest` failed in
+  `test_a_command_runs_and_starts_a_server_without_a_step`, with
+  `python exited with status 0 before becoming ready`. The test came with
+  CQ3.5. Its server accepted one connection and exited, but
+  `Command.start`'s readiness probe is already a connection, so the
+  test's second `wait_for_port` raced the server's exit. Locally, the old
+  server exits (status 0) right after `start` returns. The fixed server
+  keeps accepting, as the `test_process.py` servers do, and is still
+  running two seconds later. The fixed test passed 20 runs of 20. The fix
+  is not committed yet.
 
 ## Backlog
 
