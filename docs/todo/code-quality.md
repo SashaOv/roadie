@@ -731,14 +731,29 @@ No clause needs the author.
 - One environment per run (author, 2026-11-17). Today a step's environment-file
   values reach only commands run from `build` (CQ4 review), never Python code,
   a missing file is an error, and file values override the process environment.
-  Proposed: load the files into the process environment for the whole run and
-  restore it afterwards. The process environment wins over the files. A
-  `config(env=...)` file can be marked optional, and only the root build file
-  declares them. Fingerprints keep the values that came from files. Niva then
-  drops its three readers (`forge/build_box.py`, `forge/environment.py`,
-  `jammer/ops/pulumi_util.py`). This replaces the CQ4 question about
-  `publish`, `report` and `serve`. The precedence, optional-file and
-  root-only parts need the author's decision.
+  Proposed (author, 2026-11-22): `os.environ` is the one mechanism, and `Run`
+  owns its lifetime.
+  - At run start, `Run` loads the env files and sets only the keys the
+    process environment lacks, so the process environment wins. It records
+    which values came from files; fingerprints hash those values and no
+    inherited ones.
+  - At run end, on success, failure or interrupt, it removes exactly the keys
+    it added. A test compares `os.environ` before and after a run for each
+    ending, including a failure before any step starts.
+  - `Command` takes no environment parameter: subprocesses inherit
+    `os.environ`, so `build`, `publish`, `report` and `serve` see the same
+    values. Every hook receives `run` (`report(run, value)`,
+    `serve(run, value)`), and `run.env` names the file-derived values. The
+    signature change needs a paired Niva change.
+  - Every named env file must exist, as today (author, 2026-11-22).
+  - Only the root build file may call `config(env=...)`; another build file
+    that does fails with a message naming it, so the environment is one per
+    run (author, 2026-11-22, until a use case for merging appears). No Niva
+    build file calls `config(env=...)`; Niva passes `--env` only.
+  - Niva then drops its three readers (`forge/build_box.py`,
+    `forge/environment.py`, `jammer/ops/pulumi_util.py`).
+
+  This replaces the CQ4 question about `publish`, `report` and `serve`.
 - Niva, when it upgrades Roadie past CQ3: import the process helpers and
   `cargo_executable` from `roadie.build`, and run `gh` through `Command`
   instead of passing a step to `_gh_json`. Its `ContractFuzz` calls
