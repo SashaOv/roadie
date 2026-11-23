@@ -726,6 +726,171 @@ No clause needs the author.
   `ubuntu-latest` and `macos-latest`, which discharges the last acceptance
   clause.
 
+### CQ5: Release plans before it changes anything
+
+Status: planned, awaiting author checkpoint
+
+**Improvement.** `Release` checks some failures only when it reaches the
+manifest they concern, after it has written earlier ones, although its
+docstring says they come before any change. A directory source skips a
+manifest it cannot parse as if it had no version (8). A failure after the
+first change leaves state its message does not name. Roadie's own `git`,
+`cargo`, `uv`, `node` and `rustc` queries repeat `subprocess.run` and the
+exit check in four modules, and two of them end in a traceback. After this
+build:
+
+- a release computes and checks every change before it makes the first;
+- a manifest that cannot be read or parsed fails the release, wherever it
+  is found;
+- a failure after the first change names what it left and the commands
+  that undo or finish the release;
+- the manifest formats are separate from the release workflow (H7);
+- one helper runs Roadie's own queries.
+
+**Facts for this build** (2026-11-23, at `672443a`, whose `src` is
+`769d7ce`'s):
+
+- In a repository with upstream, tag `v0.1.0` on an earlier commit, and
+  `build.py` holding `Release(".", "web/package.json")`, where git tracks
+  `web/package-lock.json`, `roadie release` fails with `cannot release:
+  <path>/web/package.json has a package-lock.json, which Roadie does not
+  update`, and `git status --short` prints ` M pyproject.toml`, its version
+  now `0.1.1`.
+- `uv version --dry-run 1.2.3` (uv 0.12.23) prints `p 0.1.0 => 1.2.3`,
+  exits 0 and changes neither `pyproject.toml` nor a tracked `uv.lock`.
+  With a dynamic version it exits 2 with `error: We cannot get or set
+  dynamic project versions in: pyproject.toml`.
+- After a version edit in `Cargo.toml`, `cargo update --workspace --offline
+  --dry-run` (cargo 1.99.0) prints `Updating c v0.1.0 (<path>) -> v0.2.0`
+  and `warning: not updating lockfile due to dry run`, exits 0 and leaves
+  `Cargo.lock`. Without `--dry-run` it writes the new version there.
+- `cargo_rust_packages` on an invalid `Cargo.toml` raises
+  `subprocess.CalledProcessError: Command '('cargo', 'metadata', ...)'
+  returned non-zero exit status 101`, without cargo's message.
+  `_load_snapshot` runs `rustc --version` with the same `check=True`.
+  `generated.py`'s two git queries catch no `OSError`.
+- `subprocess.run` calls in `src/roadie`: `release.py` 6, `files.py` 3,
+  `generated.py` 2, `rust.py` 2, `node.py` 1, `root.py` 1, `enforce.py` 1,
+  `system` 3.
+- Niva calls no `Release`, so no Niva change is paired. Roadie's own
+  `build.py` releases `.`.
+- `src/roadie` has 6,588 lines.
+
+**Decisions.** Proposed for the checkpoint.
+
+1. **One helper runs Roadie's own queries.** A function in `roadie.system`
+   runs a program found as `_cmd` finds one and returns its standard
+   output, decoded as UTF-8 with undecodable bytes kept as surrogate
+   escapes. A program that cannot start raises with `cannot run <program>:
+   <reason>`. A non-zero exit raises with the program's standard error, its
+   standard output when that is empty, or `<program> exited with status
+   <n>` when both are. Callers keep their messages around that detail. It
+   replaces the queries that must succeed: `release.py`'s `_git`,
+   `_repository`, `_cargo` and `uv version`; `generated.py`'s `_listed` and
+   `_git_hash`; `node.py`'s `_output`; `rust.py`'s `cargo_rust_packages` and
+   `_load_snapshot`. Probes that read the exit status as an answer stay:
+   `_tracks`, `_upstream`, `files.py`'s three, `root.py`'s and
+   `enforce.py`'s. Messages stay, except where a traceback or a raw
+   `OSError` shows today:
+   - `cargo metadata failed: <standard error>`, `rustc --version failed:
+     <standard error>` and `cannot run cargo: <reason>`; the spec's "Cargo
+     packages" states them as "Node environment" does;
+   - `cannot release: cannot run <program>: <reason>`;
+   - `cannot check whether <path> is tracked: cannot run git: <reason>` and
+     `cannot compare <file> with git: cannot run git: <reason>`.
+2. **Formats are separate from the workflow (H7).** `PyProject`,
+   `CargoManifest`, `PackageJson`, their text editors and the lossless text
+   I/O move to `roadie/build/manifests.py`. `release.py` keeps source
+   selection, version choice and the git workflow. A manifest's path is a
+   public `file(base_dir)`, so `_Manifest` stops calling `_file`.
+   `roadie.build` exports the same names.
+3. **Absent is not invalid (8).** Each manifest kind fails a file it cannot
+   read with `cannot read <path>: <reason>`, and one that is not valid TOML
+   or JSON with `<path> is not valid TOML` or `<path> is not valid JSON`. A
+   file without a static version fails as today. A directory source skips
+   only a manifest without a static version. Each kind's docstring states
+   it.
+4. **Plan, then change.** `Release.build` first builds a release plan: the
+   repository, upstream, starting commit, version, message, and for each
+   manifest to change, its new content or command and the lockfile that
+   joins it. These fail while planning, before any change:
+   - the git preconditions and the version choice, as today;
+   - a `package.json` beside a tracked `package-lock.json`;
+   - a `Cargo.toml` or `package.json` whose version line or string cannot be
+     replaced, since the new text is computed in memory;
+   - `uv version --dry-run <version>`, with `--frozen` when git does not
+     track `uv.lock`;
+   - `cargo locate-project --workspace` and, when git tracks `Cargo.lock`,
+     `cargo update --workspace --offline --dry-run`, on the unedited
+     manifest.
+
+   It then writes, updates lockfiles, commits, tags and pushes, in today's
+   order.
+5. **A late failure names what it left.** There is no automatic rollback
+   (8). A failure after the first change keeps its message and appends
+   `; left: <changes>; to undo: git reset --hard <start>`, followed by
+   ` && git tag -d v<X.Y.Z>` when the tag was created. `<changes>` lists,
+   in order and only when they happened, `edited <paths>` (relative to the
+   repository, POSIX form, joined with `, `), `commit <sha>` and `tag
+   v<X.Y.Z>`. `<start>` is the starting commit and `<sha>` the release
+   commit, both as `git rev-parse --short` prints them. A failed push also
+   appends `; to retry: git push --atomic <remote> HEAD:<branch>
+   v<X.Y.Z>`. The release required a clean tree, so the undo restores it
+   exactly and keeps the untracked `target/`. `Release`'s docstring states
+   it.
+6. **What stays.** The order of changes, every message not named above,
+   source selection and newline and format preservation.
+7. **Push.** The executor pushes `main` after CQ5.5 and records the CI
+   run.
+   - Grant: push `main` after CQ5.5, and `CQ5: Fix` commits for a failing
+     CI clause, up to three CI runs.
+     AUTHOR: 
+
+**Acceptance check.**
+
+- `uv run roadie checks` passes locally, and CI passes on `ubuntu-latest`
+  and `macos-latest`.
+- `git grep -c 'subprocess.run(' -- src/roadie/build/node.py
+  src/roadie/build/rust.py src/roadie/build/generated.py` prints nothing,
+  and in `src/roadie/build/release.py` and `manifests.py` it counts two
+  (`_tracks`, `_upstream`).
+- Every test a patch adds fails before that patch and passes after.
+- The record states the line count of `src/roadie`. The estimate is about
+  −10: decision 1 removes about 60 lines, and decisions 4 and 5 add about
+  50. The count is reported, not gated.
+
+**Author actions at completion.** None: the executor pushes and records the
+CI run (decision 7).
+
+#### Patches
+
+- [ ] **CQ5.1: Run Roadie's own queries through one helper.** Decision 1.
+  Tests: the helper with a missing program, a non-zero exit with standard
+  error, with only standard output and with neither, and a success;
+  `cargo_rust_packages` on an invalid `Cargo.toml`; `rustc` and `git` that
+  cannot start (a `PATH` without them).
+- [ ] **CQ5.2: Keep manifest formats apart from the release workflow.**
+  Decision 2. No behavior change; the suite covers it, with its imports
+  moved.
+- [ ] **CQ5.3: Fail a manifest that cannot be read or parsed.** Decision 3.
+  Tests, for each kind: unreadable, invalid and versionless, as a named file
+  and in a directory beside a valid manifest.
+- [ ] **CQ5.4: Plan a release before changing anything.** Decision 4.
+  Tests, each asserting that `git status --porcelain` prints nothing and no
+  new tag exists after the failure: the Facts reproduction; a `Cargo.toml`
+  whose version is the dotted key `package.version`, released after a valid
+  manifest; `uv version --dry-run` failing; and `cargo update --offline
+  --dry-run` failing on a dependency missing from the local registry.
+- [ ] **CQ5.5: Name what a failed release left.** Decision 5. Tests with
+  real git: a lockfile update failing after the manifests were written, a
+  `pre-commit` hook refusing the commit, and a `pre-receive` hook on the
+  remote refusing the push. Each asserts the exact message, and that its
+  undo command leaves `git status --porcelain` empty at the starting
+  commit with no new tag. After the push refusal, removing the hook and
+  running the retry command releases.
+
+**Builder log.** `logs/CQ5.build.log`
+
 ## Backlog
 
 - One environment per run (author, 2026-11-17). Today a step's environment-file
@@ -764,9 +929,6 @@ No clause needs the author.
   terminal and the report render that outcome, and the run computes a
   composite step's reuse once, instead of `_reports_reused` and printing in
   `Group.build` and `_Included.build`.
-- One helper for Roadie's own `git`, `cargo` and `uv` queries, which repeat
-  `subprocess.run`, the exit check and a message with git's error in five
-  modules.
 - Bound a single output line that has no newline, without splitting a
   parallel run's prefix into it.
 
