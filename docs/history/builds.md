@@ -2,7 +2,7 @@
 
 Builds that change Roadie's [spec](../spec.md), one record per build: executed
 builds, then the one planned build. Unplanned work is in
-[backlog.md](backlog.md).
+[backlog.md](../todo/backlog.md).
 
 ## Facts
 
