@@ -1,6 +1,6 @@
 from roadie.build import *
 
-sources = Files("src", "tests", "pyproject.toml", "build.py")
+sources = Files("src", "tests", "pyproject.toml", "build.py", ".gitignore")
 environment = PythonEnv()
 
 ruff = Check("uv", "run", "ruff", "check", inputs=(sources, environment))

@@ -2052,7 +2052,7 @@ records both CI runs (decision 10), which discharges the CI clause.
 - [x] **R18.5: Run the enforcement scenario through the CLI.** The R18.5
   scenario from the acceptance check, as a `tracing_only` test that runs
   `roadie` as a subprocess.
-- [ ] **R18.6: Enforce Roadie's own inputs on CI.** Decision 8: the Linux
+- [x] **R18.6: Enforce Roadie's own inputs on CI.** Decision 8: the Linux
   job runs `uv run roadie --enforce checks`, and `build.py` declares
   `.gitignore`. R18.1's probe step goes. The executor pushes and records
   the final CI run (decision 10).
