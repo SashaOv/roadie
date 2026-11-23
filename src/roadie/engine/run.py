@@ -13,6 +13,12 @@ from typing import Any, cast
 from dotenv import dotenv_values
 
 from roadie.engine.display import announce, format_elapsed, format_step, report_built
+from roadie.engine.enforce import (
+    built_files,
+    declared_files,
+    listed_project_files,
+    undeclared_reads,
+)
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.fingerprint import fingerprint
 from roadie.engine.inputs import run_scope
@@ -25,6 +31,8 @@ from roadie.engine.parameters import (
 )
 from roadie.engine.prefix import parallel_output, reset_prefix, set_prefix, unprefixed
 from roadie.engine.process import (
+    TraceCollector,
+    collect_traces,
     command_context,
     interrupt_on_terminate,
     interrupt_requested,
@@ -41,6 +49,7 @@ from roadie.engine.records import (
 from roadie.engine.report import Report
 from roadie.engine.root import project_root, use_project_root
 from roadie.engine.step import Step
+from roadie.system import tracing_error
 
 _records = threading.Lock()
 
@@ -210,9 +219,16 @@ def execute(
     parameters: ParameterValues | None = None,
     leading: int = 0,
     report: Path | None = None,
+    enforce: bool = False,
 ) -> object:
     if jobs < 1:
         raise RoadieError("--jobs must be at least 1")
+    if enforce and dry:
+        raise RoadieError("--enforce does not apply to --dry")
+    if enforce:
+        refusal = tracing_error()
+        if refusal is not None:
+            raise RoadieError(refusal)
     _one_requested(targets if targets is not None else steps[-1:])
     with use_project_root(root):
         writer = Report(report) if report is not None else None
@@ -230,7 +246,7 @@ def execute(
                     steps, requested=requested, leading=leading, jobs=jobs, dry=dry
                 )
                 live = _Live(run, plan.blockers)
-                scheduler = _Scheduler(plan, run, live, run_lock=held, report=writer)
+                scheduler = _Scheduler(plan, run, live, run_lock=held, report=writer, enforce=enforce)
                 return _run_steps(scheduler, parameters, names)
             finally:
                 held.release()
@@ -273,6 +289,16 @@ def _run_steps(
                 if scheduler.failures:
                     outcome = "failed"
                     raise scheduler.failures[0]
+                if scheduler.undeclared:
+                    outcome = "failed"
+                    names = [
+                        step._label()
+                        for step in steps
+                        if id(step) in scheduler.undeclared
+                    ]
+                    raise RoadieError(
+                        f"undeclared reads in {len(names)} steps: {', '.join(names)}"
+                    )
                 if dry:
                     for step in steps:
                         print(f"{format_step(step)}  # {scheduler.marks[id(step)]}", flush=True)
@@ -333,10 +359,15 @@ class _Scheduler:
         *,
         run_lock: HeldLock | None,
         report: Report | None,
+        enforce: bool = False,
     ) -> None:
         self.plan = plan
         self.run = run
         self.live = live
+        self.enforce = enforce
+        self.traces: dict[int, TraceCollector] = {}
+        self.undeclared: dict[int, list[str]] = {}
+        self._listed: set[Path] | None = None
         self.run_lock = run_lock
         self.condition = threading.Condition(threading.RLock())
         self.finished: set[int] = set()
@@ -368,6 +399,37 @@ class _Scheduler:
             return
         began = self._report_began.pop(id(step))
         self.report.step_end(step._label(), outcome, time.monotonic() - began)
+
+    def _listed_files(self) -> set[Path]:
+        if self._listed is None:
+            self._listed = listed_project_files(project_root())
+        return self._listed
+
+    def _check(self, step: Step[Any]) -> list[str]:
+        """Undeclared reads of `step`, or none when enforcement is off."""
+        if not self.enforce:
+            return []
+        collector = self.traces.get(id(step))
+        if collector is None or not collector.reads:
+            return []
+        with self.condition:
+            values = dict(self.run._values)
+        return undeclared_reads(
+            reads=collector.reads,
+            written=collector.written,
+            declared=declared_files(step),
+            built=built_files(values, step),
+            listed=self._listed_files(),
+            root=project_root(),
+        )
+
+    def _record_undeclared(self, step: Step[Any], missing: list[str]) -> None:
+        print(
+            f"{step._label()} reads files it does not declare: {', '.join(missing)}",
+            flush=True,
+        )
+        with self.condition:
+            self.undeclared[id(step)] = missing
 
     def _report_run(self) -> None:
         if self.finish_reported:
@@ -538,6 +600,9 @@ class _Scheduler:
         if type(step).recorded:
             self._report_start(step)
         began = time.monotonic() if type(step).recorded else None
+        collector = TraceCollector() if self.enforce else None
+        if collector is not None:
+            self.traces[id(step)] = collector
         try:
             with (
                 current_step(step),
@@ -545,6 +610,7 @@ class _Scheduler:
                     inherit=_inherits_stdin(step, self.plan.requested),
                     environment=self.run.environment(step),
                 ),
+                collect_traces(collector) if collector is not None else nullcontext(),
             ):
                 value = step.build(self.run)
         except BaseException as error:
@@ -566,7 +632,7 @@ class _Scheduler:
                 if self.plan.dry:
                     self.marks[id(step)] = "not started"
             return
-        record = _matching(step, step_fingerprint)
+        record = None if self.enforce else _matching(step, step_fingerprint)
         if record is not None and self.plan.dry:
             with self.condition:
                 self.run.reused.add(id(step))
@@ -619,11 +685,16 @@ class _Scheduler:
             with self.condition:
                 self.live.replace(step, value)
         step.report(value)
+        missing = self._check(step) if built else []
         output = _output_fingerprint(step, value, step_fingerprint)
-        _remember(step, step_fingerprint, output, value, run=self.run, built=built)
+        if not missing:
+            _remember(step, step_fingerprint, output, value, run=self.run, built=built)
         if elapsed is not None:
             report_built(step, elapsed)
-        if not built or step._reports_reused(self.run.reused):
+        if missing:
+            self._record_undeclared(step, missing)
+            self._report_end(step, "failed")
+        elif not built or step._reports_reused(self.run.reused):
             self._report_end(step, "reused")
         elif elapsed is not None:
             self._report_end(step, "built")
@@ -658,12 +729,17 @@ class _Scheduler:
             if id(dependency) in self.started:
                 return
             value, elapsed = self._invoke(dependency)
-            if elapsed is not None:
-                report_built(dependency, elapsed)
-            self._report_end(dependency, "built")
             with self.condition:
                 self.live.add(dependency, value)
                 self.started.add(id(dependency))
+            if elapsed is not None:
+                report_built(dependency, elapsed)
+            missing = self._check(dependency)
+            if missing:
+                self._record_undeclared(dependency, missing)
+                self._report_end(dependency, "failed")
+            else:
+                self._report_end(dependency, "built")
 
 
 def _blockers(steps: Sequence[Step[Any]], requested: set[int]) -> dict[int, set[int]]:

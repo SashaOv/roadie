@@ -32,6 +32,7 @@ packages = ["src/roadie"]
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
+markers = ["tracing_only: needs strace on Linux (see docs/todo/builds.md R18)"]
 pythonpath = ["tests"]
 testpaths = ["tests"]
 # pytest's default skips directories named `build`, which tests/build mirrors.

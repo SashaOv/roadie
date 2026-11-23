@@ -42,6 +42,8 @@ needs_symlinks = pytest.mark.skipif(
     not _can_symlink(), reason="symlinks need Windows Developer Mode or admin rights"
 )
 
+tracing_only = pytest.mark.tracing_only
+
 
 def open_pty() -> tuple[int, int]:
     import pty

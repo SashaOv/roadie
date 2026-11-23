@@ -5,6 +5,18 @@ from collections.abc import Iterator
 
 import pytest
 
+from roadie.system import tracing_error
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    reason = tracing_error()
+    if reason is None:
+        return
+    skip = pytest.mark.skip(reason=reason)
+    for item in items:
+        if item.get_closest_marker("tracing_only") is not None:
+            item.add_marker(skip)
+
 
 @pytest.fixture(scope="session", autouse=True)
 def git_without_machine_config(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:

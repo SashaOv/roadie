@@ -192,6 +192,7 @@ class Step[T](ABC):
         return [], named
 
     # (spec) Step helpers
+    # (spec) Enforcing declared inputs
     def _cmd(
         self,
         *args: str,
@@ -200,6 +201,7 @@ class Step[T](ABC):
         environment: Mapping[str, str] | None = None,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
+        """Run a program; in an enforcement run it runs under the trace."""
         return self._command(args, environment).run(
             capture_output=capture_output, show_output=show_output, check=check
         )

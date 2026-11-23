@@ -6,6 +6,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -13,7 +14,7 @@ import urllib.request
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any, TextIO
 
@@ -23,11 +24,13 @@ from roadie.engine.prefix import current_prefix, current_sink, read_lines
 from roadie.system import (
     cannot_run_message,
     interrupt_process,
+    parse_trace,
     prepare_command,
     process_group_session,
     signal_process_tree,
     spawn_in_own_group,
     stop_process_tree,
+    traced_command,
 )
 
 _inherit_stdin: ContextVar[bool] = ContextVar("roadie_inherit_stdin", default=True)
@@ -41,6 +44,41 @@ _before_stop: Callable[[], None] | None = None
 
 _COMMAND_NAME_WORDS = 3
 OUTPUT_TAIL = 2000
+
+
+@dataclass
+class TraceCollector:
+    """The files one step's traced programs read and wrote."""
+
+    reads: set[Path] = field(default_factory=set)
+    written: set[Path] = field(default_factory=set)
+
+
+_trace_collector: ContextVar[TraceCollector | None] = ContextVar(
+    "roadie_trace_collector", default=None
+)
+
+
+@contextmanager
+def collect_traces(collector: TraceCollector) -> Generator[None]:
+    """Collect the traces of `_cmd` programs run in this scope for one step."""
+    token = _trace_collector.set(collector)
+    try:
+        yield
+    finally:
+        _trace_collector.reset(token)
+
+
+def _absorb_trace(collector: TraceCollector, log: Path) -> None:
+    try:
+        if log.is_file():
+            read, written = parse_trace(log.read_text(errors="surrogateescape"))
+            collector.reads.update(read)
+            collector.written.update(written)
+    except OSError:
+        pass
+    finally:
+        log.unlink(missing_ok=True)
 
 
 # (spec) Step helpers
@@ -107,17 +145,28 @@ class Command:
         exited with status <n>: <last 2000 characters of standard error>`. It
         keeps captured standard output in full, the last 2000 characters of
         standard error, and nothing of standard output it does not capture.
-        See docs/spec.md, "Step helpers", for command resolution and startup
-        errors.
+        In an enforcement run the program runs under the strace trace of
+        docs/spec.md, "Enforcing declared inputs"; `_start_cmd` programs
+        are not traced. See docs/spec.md, "Step helpers", for command
+        resolution and startup errors.
         """
         print("+", shlex.join(self.args), flush=True)
         prefix = current_prefix()
         sink = current_sink()
         out, err = (sink.stdout, sink.stderr) if sink is not None else (sys.stdout, sys.stderr)
         env = self._environment()
+        collector = _trace_collector.get()
+        trace_log: Path | None = None
+        argv: list[str] | str = prepare_command(self.args, env)
+        if collector is not None:
+            handle, name = tempfile.mkstemp(prefix="roadie-trace-", suffix=".log")
+            os.close(handle)
+            trace_log = Path(name)
+            base = argv if isinstance(argv, list) else [argv]
+            argv = traced_command(base, trace_log)
         try:
             process = subprocess.Popen(
-                prepare_command(self.args, env),
+                argv,
                 cwd=self.cwd,
                 env=env,
                 stdout=subprocess.PIPE if capture_output or prefix else None,
@@ -125,6 +174,8 @@ class Command:
                 text=True,
             )
         except OSError as error:
+            if collector is not None and trace_log is not None:
+                _absorb_trace(collector, trace_log)
             raise StepFailed(self.label, cannot_run_message(self.args[0], error)) from error
         track_process(process, session=False)
         readers: list[threading.Thread] = []
@@ -159,6 +210,8 @@ class Command:
             for reader in readers:
                 reader.join()
             untrack_process(process)
+            if collector is not None and trace_log is not None:
+                _absorb_trace(collector, trace_log)
         if interrupt_requested():
             raise KeyboardInterrupt
         completed = subprocess.CompletedProcess(

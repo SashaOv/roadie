@@ -2038,7 +2038,7 @@ records both CI runs (decision 10), which discharges the CI clause.
   each input, the files equal those its fingerprint reads. `Files` mixes
   files, directories and a missing path. `CargoPackage` and `PnpmPackage`
   each include a dependency package. A default `Input` declares nothing.
-- [ ] **R18.4: Add the --enforce option.** Decisions 1–3 and 5–7. The spec's
+- [x] **R18.4: Add the --enforce option.** Decisions 1–3 and 5–7. The spec's
   Command line lists `--enforce`. A new Enforcing declared inputs section
   follows Reusing a step. The `_cmd` docstring states the trace. Tests
   (`tracing_only`, real strace): an undeclared read, an ignored file, a file

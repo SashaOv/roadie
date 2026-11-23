@@ -15,6 +15,7 @@ from roadie.engine.report import render_summary
 from roadie.engine.root import find_project_root
 from roadie.engine.run import execute
 from roadie.engine.step import Step
+from roadie.system import tracing_error
 
 app = App(help=__doc__, version_flags=())
 
@@ -66,6 +67,10 @@ def run(
         Path | None,
         Parameter(name="--summary", help="Print the last run in this report as Markdown"),
     ] = None,
+    enforce: Annotated[
+        bool,
+        Parameter(name="--enforce", negative=False, help="Build every step and fail on undeclared file reads"),
+    ] = False,
 ) -> None:
     """Run the named results of a build file, by default its default result."""
     try:
@@ -79,6 +84,7 @@ def run(
             or clean
             or jobs is not None
             or report is not None
+            or enforce
         ):
             raise RoadieError("--summary takes only a report path")
         if summary is not None:
@@ -88,6 +94,14 @@ def run(
             raise RoadieError("--report does not apply to --dry")
         if report is not None and clean:
             raise RoadieError("--report does not apply to --clean")
+        if enforce and dry_run:
+            raise RoadieError("--enforce does not apply to --dry")
+        if enforce and clean:
+            raise RoadieError("--enforce does not apply to --clean")
+        if enforce:
+            refusal = tracing_error()
+            if refusal is not None:
+                raise RoadieError(refusal)
         if jobs is None:
             jobs = os.process_cpu_count() or 1
         if jobs < 1:
@@ -120,6 +134,7 @@ def run(
             parameters=ParameterValues(run_wide, own),
             leading=leading,
             report=report,
+            enforce=enforce,
         )
     except RoadieError as error:
         raise SystemExit(str(error)) from error

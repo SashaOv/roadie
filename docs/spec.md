@@ -69,7 +69,7 @@ started, the run fails with `cannot run git to find the project root:
 ## Command line
 
 ```
-roadie [--dry-run | --dry] [--locked] [--clean] [--jobs N] [--report PATH] [--summary PATH] [--base-dir DIR] [--env FILE]... [-f PATH] [name=value]... [result [name=value]...]...
+roadie [--dry-run | --dry] [--locked] [--clean] [--enforce] [--jobs N] [--report PATH] [--summary PATH] [--base-dir DIR] [--env FILE]... [-f PATH] [name=value]... [result [name=value]...]...
 ```
 
 `-f PATH`, `--file PATH` names the root build file. A file is that build
@@ -147,6 +147,15 @@ can each be requested only once per run; request one of them`.
   without loading a build file. Combined with a result, a parameter, or
   another option it fails with `--summary takes only a report path`. See
   [Run report](#run-report).
+- `--enforce`: build every step, reusing none, tracing each program a
+  step runs through `_cmd`, and fail on files a step reads but does not
+  declare. See [Enforcing declared inputs](#enforcing-declared-inputs).
+  With `--dry` it fails with `--enforce does not apply to --dry`, and
+  with `--clean` it fails with `--enforce does not apply to --clean`,
+  before anything runs. Before the lock is taken it fails with
+  `--enforce needs Linux` on another platform, and with `--enforce
+  needs strace: cannot run strace: <reason>` when `strace -V` cannot
+  start or exits non-zero.
 - `--dry-run`, `--dry`: walk the plan through the same scheduler as a run:
   environment files, fingerprints, record matching, and deferred steps. It
   marks each step the way that run reports it: `# reuse` where the run
@@ -579,6 +588,41 @@ no build line. A reused step, a step that keeps no record, and a failed step
 print no `built` line. A run that succeeds prints `finished in <m:ss>`,
 unprefixed, as its last line, or before it serves the requested result. A
 failed run and a dry run print none.
+
+### Enforcing declared inputs
+
+`roadie --enforce [result]` on Linux builds the whole plan, reusing
+nothing: a reusable step builds and records as usual. Each program a
+step runs through `_cmd` runs as `strace -f -qq -xx -y --seccomp-bpf
+--kill-on-exit -e trace=open,openat,openat2 -e status=successful -o
+<log> <program> <arguments>`. The log is a temporary file, deleted
+once it is read, also when the step fails or is interrupted. Services
+(`_start_cmd`) and reads by Roadie's own process are not traced.
+
+The program reads a file when the log has an open of it without
+`O_WRONLY`, and the file is a regular file inside the project root
+that the `Files` listing lists (tracked, or untracked and not
+ignored). The trace prints resolved paths, so the project root and
+the listed paths are compared resolved. A path the same trace also
+opens for writing is the program's own output, and is not checked.
+Ignored files, files outside the project root, directory listings,
+`stat`, and files executed but never opened are not checked.
+
+A step declares a file when an input covers it or a dependency built
+it. An input covers the files `Input.declared_files(base_dir)`
+returns. A dependency built a file when its value is a `Path`, or a
+tuple of them: a file stands for itself, and a directory for every
+file under it.
+
+A step with undeclared reads prints `<name> reads files it does not
+declare: <paths>` once it has built. `<paths>` are relative to the
+project root, in POSIX form, sorted, and joined with `, `. The step
+records nothing, and its report `step-end` outcome is `failed`. Its
+value stays live, so the steps that take it still build. Other steps
+keep starting. After the last step, the run fails with `undeclared
+reads in <n> steps: <names>`, in plan order, and exits 1. Any other
+failure keeps the Failures rules, and a step that fails that way is
+not checked.
 
 ## Customization
 
