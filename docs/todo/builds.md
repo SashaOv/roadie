@@ -2032,7 +2032,7 @@ records both CI runs (decision 10), which discharges the CI clause.
   `O_WRONLY`; lines from two processes; and a line that is not an open.
   Patched `subprocess.run` covers a missing strace and a non-zero
   `strace -V`, and a non-Linux platform.
-- [ ] **R18.3: Name the files each input covers.** Decision 6's
+- [x] **R18.3: Name the files each input covers.** Decision 6's
   `declared_files` on `Input`, `Files`, `CargoPackage`, `NodeEnv` and
   `PnpmPackage`. The spec's Input fingerprints section states it. Tests: for
   each input, the files equal those its fingerprint reads. `Files` mixes

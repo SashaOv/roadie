@@ -127,6 +127,17 @@ def _file_digests(root: Path, relatives: list[str]) -> dict[str, str]:
     }
 
 
+def _node_declared(snapshot: NodeSnapshot) -> set[Path]:
+    declared = {
+        snapshot.root / project.root / "package.json" for project in snapshot.projects
+    }
+    for relative in _ROOT_FILES:
+        candidate = snapshot.root / relative
+        if candidate.is_file():
+            declared.add(candidate)
+    return declared
+
+
 def _node_environment(snapshot: NodeSnapshot) -> dict[str, object]:
     manifests = [
         (project.root / "package.json").as_posix() for project in snapshot.projects
@@ -150,6 +161,9 @@ class NodeEnv(Input):
     def __repr__(self) -> str:
         return "NodeEnv()"
 
+    def declared_files(self, base_dir: Path) -> set[Path]:
+        return _node_declared(_snapshot(base_dir))
+
     def fingerprint(self, base_dir: Path) -> str:
         return digest(_node_environment(_snapshot(base_dir)))
 
@@ -168,10 +182,20 @@ def _closure(projects: tuple[NodeProject, ...], name: str) -> tuple[NodeProject,
     return tuple(by_name[selected_name] for selected_name in sorted(selected))
 
 
+def _pnpm_declared(snapshot: NodeSnapshot, name: str) -> set[Path]:
+    declared = _node_declared(snapshot)
+    for project in _closure(snapshot.projects, name):
+        declared.update(listed_files(snapshot.root / project.root))
+    return declared
+
+
 # (spec) Pnpm packages
 @dataclass(frozen=True)
 class PnpmPackage(Input):
     name: str
+
+    def declared_files(self, base_dir: Path) -> set[Path]:
+        return _pnpm_declared(_snapshot(base_dir), self.name)
 
     def fingerprint(self, base_dir: Path) -> str:
         snapshot = _snapshot(base_dir)

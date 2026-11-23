@@ -157,20 +157,26 @@ class Files(Input):
         )
         return f"Files({shown})"
 
+    def declared_files(self, base_dir: Path) -> set[Path]:
+        declared: set[Path] = set()
+        for raw in self.paths:
+            path = _resolve(base_dir, raw)
+            if path.is_symlink():
+                declared.add(path)
+            elif path.is_dir():
+                _refuse_ignored_directory(raw, path)
+                declared.update(listed_files(path))
+            else:
+                declared.add(path)
+        return declared
+
     def fingerprint(self, base_dir: Path) -> str:
         try:
             root = project_root().resolve()
         except RoadieError:
             root = None
-        entries: dict[str, str] = {}
-        for raw in self.paths:
-            path = _resolve(base_dir, raw)
-            if path.is_symlink():
-                entries[_entry_key(path, root)] = _file_mark(path)
-            elif path.is_dir():
-                _refuse_ignored_directory(raw, path)
-                for child in listed_files(path):
-                    entries[_entry_key(child, root)] = _file_mark(child)
-            else:
-                entries[_entry_key(path, root)] = _file_mark(path)
+        entries = {
+            _entry_key(path, root): _file_mark(path)
+            for path in self.declared_files(base_dir)
+        }
         return digest(entries)

@@ -162,23 +162,33 @@ def _content(root: Path, relative: str) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _cargo_declared(snapshot: CargoSnapshot, name: str) -> set[Path]:
+    root = snapshot.workspace.root
+    declared: set[Path] = set()
+    for package in _closure(snapshot.workspace.packages, name):
+        declared.update(listed_files(root / package.root))
+    for filename in _ROOT_FILES:
+        if (root / filename).exists():
+            declared.add(root / filename)
+    return declared
+
+
 # (spec) Cargo packages
 @dataclass(frozen=True)
 class CargoPackage(Input):
     name: str
 
+    def declared_files(self, base_dir: Path) -> set[Path]:
+        return _cargo_declared(_snapshot(base_dir), self.name)
+
     def fingerprint(self, base_dir: Path) -> str:
         snapshot = _snapshot(base_dir)
         root = snapshot.workspace.root
-        packages = _closure(snapshot.workspace.packages, self.name)
-        listed: set[str] = set()
         workspace = root.resolve()
-        for package in packages:
-            for path in listed_files(root / package.root):
-                listed.add(path.relative_to(workspace).as_posix())
-        for name in _ROOT_FILES:
-            if (root / name).exists():
-                listed.add(name)
+        listed = {
+            path.relative_to(workspace).as_posix()
+            for path in _cargo_declared(snapshot, self.name)
+        }
         return digest(
             {
                 "package": self.name,

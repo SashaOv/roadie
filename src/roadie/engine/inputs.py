@@ -27,6 +27,14 @@ class Input(ABC):
     def fingerprint(self, base_dir: Path) -> str:
         """Hash of this input as seen from a step's base directory."""
 
+    def declared_files(self, base_dir: Path) -> set[Path]:
+        """Files this input's fingerprint reads, as seen from `base_dir`.
+
+        Empty by default: an input whose fingerprint reads no project
+        file declares none.
+        """
+        return set()
+
 
 # (spec) Input fingerprints
 @contextmanager

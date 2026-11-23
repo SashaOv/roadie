@@ -678,6 +678,15 @@ implements `fingerprint(base_dir) -> str`: a digest of what it names, seen
 from the step's base directory. `run_state` keeps an input's
 state for the length of a run; its docstring specifies it.
 
+`Input.declared_files(base_dir)` returns the files its fingerprint
+reads, as paths seen from the step's base directory. It is empty by
+default. `Files`, `CargoPackage`, `NodeEnv` and `PnpmPackage` return
+the files their listings name: for `Files` the named files and the
+files under its directories, for `CargoPackage` and `PnpmPackage`
+also the files of the workspace packages they depend on, and for
+`NodeEnv` and `PnpmPackage` the workspace manifests and lockfiles
+their fingerprints cover.
+
 ## Implementation
 
 ### Packages
