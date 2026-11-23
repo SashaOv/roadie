@@ -16,6 +16,9 @@ bullet, except the input-enforcement design, which is moved whole.
   60-second sleep (7.5 minutes for the suite). A session fixture installs
   `signal.default_int_handler` and restores the previous handler; child
   sleeps match the watchers' 10-second limit.
+- `test_a_server_that_prints_five_megabytes_keeps_under_one` fails in the
+  full suite on `bbox` (`assert 2180174 < 1000000`, two runs of two) and
+  passes alone; the cause is unconfirmed (builds.md Facts, 2026-11-22).
 - A build file names modules; every manifest with its own version in a
   module's tree, down to any nested module, follows the module's version or
   has none; vendored manifests can be left out.

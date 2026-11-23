@@ -178,6 +178,18 @@ builds, then the one planned build. Unplanned work is in
   ruff. `uv run` reads `uv.lock`, which Roadie's `.gitignore` ignores. The
   suite took 3.4 s plain and 6.2 s traced. 33 tests failed both times
   because the container has no cargo, node or pnpm.
+- 2026-11-22: the author's build box `bbox` (ssh host) runs NixOS, Linux
+  6.18.29 x86_64, strace 7.0, uv 0.11.13, git 2.53.0 and Python 3.13.12,
+  with `kernel.yama.ptrace_scope` 1. Decision 4's strace command line
+  traces a child `python3` there. `-y` prints the resolved path, so
+  `/etc/hostname` shows as `/nix/store/…-etc-hostname`.
+- 2026-11-22: on `bbox`, a uv-downloaded Python cannot start (NixOS has no
+  generic dynamic loader). With `UV_PYTHON_DOWNLOADS=never`,
+  `UV_PYTHON=$(command -v python3)` and `UV_PROJECT_ENVIRONMENT` outside the
+  copied tree, `uv run pytest -q` at `d1e3afd9` gives 475 passed, 1 failed, 2
+  skipped. The failure, twice in two runs, is
+  `test_a_server_that_prints_five_megabytes_keeps_under_one` (`assert
+  2180174 < 1000000`). Run alone it passes three of three.
 
 --- Implemented / Next ---
 
@@ -1891,7 +1903,7 @@ Command `uv run roadie checks`. Verdict: pass.
 
 ## R18: An enforcement run names the files a step reads but does not declare
 
-Status: planned, awaiting author checkpoint
+Status: planned, approved 2026-11-22
 
 **Improvement.** `roadie --enforce [result]` on Linux builds the whole plan,
 reusing nothing, and traces every program a step runs. A step that reads a
@@ -1925,7 +1937,9 @@ itself: ruff reads `.gitignore`, which `sources` leaves out (Facts,
    when the step fails or is interrupted.
 5. The program reads a file when the log has an open of it without
    `O_WRONLY`, and the file is a regular file inside the project root that
-   the `Files` listing lists (tracked, or untracked and not ignored). A path
+   the `Files` listing lists (tracked, or untracked and not ignored). The
+   trace prints resolved paths (Facts, 2026-11-22), so the project root and
+   the listed paths are compared resolved. A path
    the same trace also opens for writing is the program's own output, and is
    not checked. Not checked: ignored files (`target/`, `.venv`,
    `node_modules`), files outside the project root, directory listings,
@@ -1953,11 +1967,24 @@ itself: ruff reads `.gitignore`, which `sources` leaves out (Facts,
 9. Tests that need the trace carry a `tracing_only` marker, which skips
    where decision 2 would refuse. On CI's Linux job they must run, not skip.
    The log parser is tested on every platform, from the lines in Facts
-   (2026-11-11).
+   (2026-11-11). The executor works on macOS, where they skip, so it runs
+   them on `bbox`: it copies the files `git ls-files --cached --others
+   --exclude-standard` lists into a fresh directory there, commits them to a
+   scratch git repository, and runs `uv run pytest -q -rs -m tracing_only`
+   with the Facts' (2026-11-22) uv settings. A patch's verification is the
+   full suite on macOS plus that run on `bbox` with no `tracing_only` test
+   skipped; a new trace test fails there before its patch and passes after.
+   The full suite does not gate on `bbox`, because of the failure in Facts.
 10. The executor pushes `main` after R18.1 and watches that CI run, then
     pushes after R18.6 and watches the final run. A hosted runner's ptrace
-    permission can be observed nowhere else. Proposed for authorization at
-    the checkpoint, as R17's decision 8 was.
+    permission can be observed nowhere else.
+    - Grant: the executor pushes `main` after R18.1 and after R18.6, and
+      pushes `R18: Fix` commits for a failing CI clause, up to three CI runs
+      per push point.
+      AUTHOR:granted 
+    - Grant: the executor writes to `~/roadie-r18` and
+      `~/.cache/roadie-r18-venv` on `bbox` and runs tests there (decision 9).
+      AUTHOR:granted 
 
 Not in this build: when an enforcement run happens (nightly, or on a change
 to Roadie or a step's code); `Files(code=..., data=...)`; the restricted tree
@@ -1967,9 +1994,9 @@ which is Niva's change. R18.4 rewrites the backlog's design to these items.
 
 **Acceptance check.**
 
-- `uv run roadie checks` passes. CI passes on `ubuntu-latest`, `macos-latest`
-  and `windows-latest`, and the Linux job runs `roadie --enforce checks` with
-  the `tracing_only` tests not skipped. This is the live clause: a hosted
+- `uv run roadie checks` passes. CI passes on `ubuntu-latest` and
+  `macos-latest` (Windows is suspended, `code-quality.md`), and the Linux job
+  runs `roadie --enforce checks` with the `tracing_only` tests not skipped. This is the live clause: a hosted
   runner traces Roadie's own checks and finds no undeclared read.
 - The scenario in R18.5 runs the real `roadie --enforce` as a subprocess in
   a temporary git project. Step `a` takes `Files("declared.txt")`. Its program
@@ -2029,6 +2056,8 @@ records both CI runs (decision 10), which discharges the CI clause.
   job runs `uv run roadie --enforce checks`, and `build.py` declares
   `.gitignore`. R18.1's probe step goes. The executor pushes and records
   the final CI run (decision 10).
+
+**Builder log.** `logs/R18.build.log`
 
 ## Backlog
 
