@@ -2049,7 +2049,7 @@ records both CI runs (decision 10), which discharges the CI clause.
   Tests on every platform: the `--dry` and `--clean` refusals, and the
   refusal on a non-Linux platform (patched capability). The backlog's
   enforcement design keeps only what this build leaves out.
-- [ ] **R18.5: Run the enforcement scenario through the CLI.** The R18.5
+- [x] **R18.5: Run the enforcement scenario through the CLI.** The R18.5
   scenario from the acceptance check, as a `tracing_only` test that runs
   `roadie` as a subprocess.
 - [ ] **R18.6: Enforce Roadie's own inputs on CI.** Decision 8: the Linux
