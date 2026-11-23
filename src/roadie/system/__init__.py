@@ -14,6 +14,7 @@ from roadie.system.process import (
     spawn_in_own_group,
     stop_process_tree,
 )
+from roadie.system.trace import parse_trace, traced_command, tracing_error
 
 __all__ = [
     "CannotRun",
@@ -21,10 +22,13 @@ __all__ = [
     "executable_suffix",
     "interrupt_process",
     "lock",
+    "parse_trace",
     "prepare_command",
     "process_group_session",
     "signal_process_tree",
     "spawn_in_own_group",
     "stop_process_tree",
+    "traced_command",
+    "tracing_error",
     "unlock",
 ]

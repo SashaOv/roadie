@@ -2024,7 +2024,7 @@ records both CI runs (decision 10), which discharges the CI clause.
   Python and fails unless a descriptor path ends in `/pyproject.toml`. This
   shows that a hosted runner can trace a child. The executor pushes and records the run here (decision
   10).
-- [ ] **R18.2: Parse a trace into the files a program read and wrote.**
+- [x] **R18.2: Parse a trace into the files a program read and wrote.**
   Decisions 2, 4 and 5's log reading, in `roadie.system`: the capability
   check, the traced command line, and a parser that returns the paths read
   and the paths written. Tests on every platform use the Facts lines: hex
