@@ -2016,7 +2016,7 @@ records both CI runs (decision 10), which discharges the CI clause.
 
 ### Patches
 
-- [ ] **R18.1: Install strace on the Linux CI runner.** Decision 8's
+- [x] **R18.1: Install strace on the Linux CI runner.** Decision 8's
   install step, on `ubuntu-latest` only, before `uv sync`. A step runs
   `strace -f -qq -xx -y --seccomp-bpf --kill-on-exit -e
   trace=open,openat,openat2 -e status=successful -o trace.log python3 -c

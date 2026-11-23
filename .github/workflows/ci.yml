@@ -28,6 +28,22 @@ jobs:
 
       - run: pnpm --version
 
+      - if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get install -y strace
+
+      - if: matrix.os == 'ubuntu-latest'
+        run: strace -f -qq -xx -y --seccomp-bpf --kill-on-exit -e trace=open,openat,openat2 -e status=successful -o trace.log python3 -c "open('pyproject.toml').read()"
+
+      - if: matrix.os == 'ubuntu-latest'
+        run: |
+          python3 - << 'PY'
+          import pathlib, re, sys
+          text = pathlib.Path("trace.log").read_text(errors="surrogateescape")
+          decoded = re.sub(r"\\x([0-9a-fA-F]{2})", lambda m: chr(int(m.group(1), 16)), text)
+          candidates = re.findall(r"= \d+<([^>]+)>", decoded)
+          sys.exit(0 if any(c.endswith("/pyproject.toml") for c in candidates) else 1)
+          PY
+
       # The hosted images' preinstalled rustup and stable toolchain serve the
       # Cargo tests.
       - run: uv sync
