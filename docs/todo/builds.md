@@ -1903,7 +1903,7 @@ Command `uv run roadie checks`. Verdict: pass.
 
 ## R18: An enforcement run names the files a step reads but does not declare
 
-Status: planned, approved 2026-11-22
+Status: implemented 2026-11-23 (commits R18.*)
 
 **Improvement.** `roadie --enforce [result]` on Linux builds the whole plan,
 reusing nothing, and traces every program a step runs. A step that reads a
@@ -2058,6 +2058,36 @@ records both CI runs (decision 10), which discharges the CI clause.
   the final CI run (decision 10).
 
 **Builder log.** `logs/R18.build.log`
+
+**Review (2026-11-23).** Executed by muse; reviewed at `769d7ce`, tree
+`1a32f805`.
+
+- The six commits carry their planned names. `769d7ce R18: Fix nested
+  tracing under enforcement` followed CI run 45136553746, where 10 tracing
+  tests failed inside `roadie --enforce checks`: a program the outer strace
+  already traces cannot be traced again. Those tests now skip as already
+  traced, and a separate Linux CI step runs them plain first. Two of the
+  three runs the grant allowed for that push point were used.
+- Acceptance passes. CI run 45137081307 on `769d7ce` passed on
+  `ubuntu-latest` (`pytest -m tracing_only`, then `roadie --enforce
+  checks`) and `macos-latest` (`roadie checks`): the live clause. Here,
+  `uv run roadie checks` gives 491 passed and 14 skipped, `roadie --enforce
+  checks` prints `--enforce needs Linux` and exits 1, and with `--dry` it
+  prints `--enforce does not apply to --dry`. The R18.5 scenario passed on
+  `bbox` (12 `tracing_only` passed, none skipped).
+- Log drift: the Builder log's acceptance line names `uv run roadie
+  --enforce checks` with 491 passed, a command that refuses on macOS. Its
+  evidence file shows a local run of 457 passed and 34 failed (no cargo or
+  pnpm in the Builder's terminal), so each patch's full suite was green
+  only on CI.
+- `bbox` cannot run `uv run ruff`: the venv's PyPI ruff fails on NixOS, and
+  the author left it so (2026-11-23). On `bbox` only the `tracing_only`
+  tests are expected to run.
+- Not fixed here, for the author: a trace log that cannot be read counts
+  as no reads (`_absorb_trace` passes on `OSError`), so a step can pass
+  unchecked. `listed_project_files` repeats the `Files` listing with its
+  own `git ls-files`, and on a git failure lists every file instead of
+  failing. `src/roadie` grew by 517 lines.
 
 ## Backlog
 
