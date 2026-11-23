@@ -35,6 +35,8 @@ jobs:
       # Cargo tests.
       - run: uv sync
       - if: matrix.os == 'ubuntu-latest'
+        run: uv run pytest -q -rs -m tracing_only
+      - if: matrix.os == 'ubuntu-latest'
         run: uv run roadie --enforce checks
       - if: matrix.os != 'ubuntu-latest'
         run: uv run roadie checks

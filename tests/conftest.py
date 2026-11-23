@@ -2,14 +2,33 @@
 
 import os
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
 from roadie.system import tracing_error
 
 
+def _already_traced() -> bool:
+    """True when an outer strace already traces this process.
+
+    A traced process cannot be traced again, so a tracing test inside
+    an enforcement run cannot start its own strace.
+    """
+    try:
+        status = Path("/proc/self/status").read_text(encoding="utf-8")
+    except OSError:
+        return False
+    for line in status.splitlines():
+        if line.startswith("TracerPid:"):
+            return line.split(":", 1)[1].strip() not in ("", "0")
+    return False
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     reason = tracing_error()
+    if reason is None and _already_traced():
+        reason = "already traced by an outer strace"
     if reason is None:
         return
     skip = pytest.mark.skip(reason=reason)
