@@ -701,6 +701,41 @@ def test_a_failing_lockfile_update_names_what_it_left(tmp_path: Path) -> None:
 
 
 # (spec) Step kinds
+def test_an_unwritable_manifest_names_what_it_left(tmp_path: Path) -> None:
+    repo, bare = _repository(tmp_path, "0.1.0")
+    web = repo / "web"
+    web.mkdir()
+    package = web / "package.json"
+    package.write_text('{"name": "web", "version": "0.1.0"}\n')
+    _git(repo, "add", "web")
+    _git(repo, "commit", "-q", "-m", "web")
+    _git(repo, "push", "-q", "origin", "HEAD")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    _git(repo, "push", "-q", "origin", "HEAD")
+    package.chmod(0o444)
+    start = _short_head(repo)
+    step = Release("pyproject.toml", "web/package.json")
+    step.base_dir = repo
+    step.name = "release"
+    try:
+        with pytest.raises(StepFailed) as caught:
+            execute([step], root=repo)
+        message = str(caught.value)
+        assert f"cannot release: cannot write {package.resolve()}: " in message
+        assert message.endswith(
+            f"; left: edited pyproject.toml; to undo: git reset --hard {start}"
+        )
+        assert package.read_text() == '{"name": "web", "version": "0.1.0"}\n'
+        _undo(repo, message)
+        assert _porcelain(repo) == ""
+        assert _local_tags(repo) == {"v0.1.0"}
+        assert _tags(bare) == set()
+    finally:
+        package.chmod(0o644)
+
+
+# (spec) Step kinds
 def test_a_refused_commit_names_what_it_left(tmp_path: Path) -> None:
     repo, bare = _repository(tmp_path, "0.1.0")
     _git(repo, "tag", "v0.1.0")

@@ -258,7 +258,9 @@ class Release(Step[str]):
     stored as a tuple. A value of the wrong kind fails with `Release requires
     takes steps: got <type>`.
 
-    A failure after the first change keeps its message and appends
+    A manifest that cannot be written fails with `cannot release: cannot
+    write <path>: <reason>`. A failure after the first change keeps its
+    message and appends
     `; left: <changes>; to undo: git reset --hard <start>`, followed by
     ` && git tag -d v<X.Y.Z>` when the tag was created. `<changes>` lists, in
     order and only when they happened, `edited <paths>` (relative to the

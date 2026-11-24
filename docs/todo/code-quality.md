@@ -909,6 +909,33 @@ CI run (decision 7).
   Facts. The estimate was about −10; the count is reported, not gated, and
   no code was packed to meet it.
 
+### Review
+
+2026-11-23, at `d214228`, by the planning agent.
+
+- The five commits carry their planned names. `d214228` changes only this
+  spec, so the acceptance at `38f37b6` holds. Run here directly, `uv run
+  pytest -q` has 517 passed and 14 skipped.
+- The Facts reproduction, rerun on CQ5's code, fails with the same
+  package-lock message, and `pyproject.toml` stays at `0.1.0`.
+- Drift: the Builder pushed `d214228` as CI attempt 2 of 3. The grant
+  covered the push after CQ5.5 and `CQ5: Fix` commits, not a record commit.
+  The run passed and the commit changes only the spec.
+- Plan defect: the line estimate. `release.py` went from 618 to 425 lines,
+  but `manifests.py` is 327 and the helper adds 32, so `src/roadie` grew by
+  158. Planning in-memory changes and naming what was left cost more than
+  the estimate allowed.
+- Behavior gap, against decision 5: a manifest that cannot be written
+  raised a bare `OSError`. `release failed: [Errno 13] Permission denied:
+  '<path>'` did not name the edits made before it. It now fails with
+  `cannot release: cannot write <path>: <reason>`, and the message names
+  what was left. The new `test_an_unwritable_manifest_names_what_it_left`
+  fails without the fix and passes with it. With the fix, `uv run roadie
+  checks` passes with 518 tests and 14 skipped.
+- Checked against the reviewer's uv case: when `uv version` 0.12.23 cannot
+  write `uv.lock` it exits 2 and leaves `pyproject.toml` unchanged, so a
+  failing uv leaves nothing unnamed there.
+
 ## Backlog
 
 - One environment per run (author, 2026-11-17). Today a step's environment-file
@@ -967,6 +994,13 @@ CI run (decision 7).
   them (G6).
 - Look for line savings in `tests/`, which is 1.5 times the source and was
   not examined.
+- Release internals (CQ5 review):
+  - `release.py` imports `manifests.py`'s private `_PlannedVersion` and
+    `_Versionless`.
+  - `apply_version` both returns its changes and fills an out-parameter.
+  - `run_query` raises `OSError` for a program that ran and exited non-zero.
+  - The `cannot release:` wrapping is repeated in five places.
+  - `Release.build` formats its left message inline.
 - Niva, in its own change spec: declare helper-code and Node inputs (3);
   compose Jammer's process and storage owners (9); one workspace-version
   reader (10); distinct mypy cache directories from one helper (H5).

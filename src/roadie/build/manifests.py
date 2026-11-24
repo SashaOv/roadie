@@ -66,9 +66,14 @@ def _json_data(file: Path) -> object:
         raise RoadieError(f"{file} is not valid JSON") from error
 
 
-def _write_text(path: Path, text: str) -> None:
-    with path.open("w", newline="") as handle:
-        handle.write(text)
+def _write_text(path: Path, text: str, changed: list[Path]) -> None:
+    """Write `text`, adding `path` to `changed` once opening it has truncated it."""
+    try:
+        with path.open("w", newline="") as handle:
+            changed.append(path)
+            handle.write(text)
+    except OSError as error:
+        raise RoadieError(f"cannot release: cannot write {path}: {error}") from error
 
 
 @dataclass(frozen=True)
@@ -117,8 +122,7 @@ class _ManifestSource(Input):
             if planned.lockfile is not None:
                 changed.append(planned.lockfile)
         if planned.text is not None:
-            _write_text(planned.file, planned.text)
-            changed.append(planned.file)
+            _write_text(planned.file, planned.text, changed)
             if planned.cargo_root is not None and planned.lockfile is not None:
                 _cargo(planned.cargo_root, "update", "--workspace", "--offline")
                 changed.append(planned.lockfile)
