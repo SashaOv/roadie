@@ -104,22 +104,30 @@ class _ManifestSource(Input):
     def plan_version(self, base_dir: Path, version: str) -> _PlannedVersion:
         raise NotImplementedError
 
-    def apply_version(self, planned: _PlannedVersion) -> tuple[Path, ...]:
+    def apply_version(
+        self, planned: _PlannedVersion, edited: list[Path] | None = None
+    ) -> tuple[Path, ...]:
+        changed: list[Path] = edited if edited is not None else []
         if planned.command is not None:
             try:
                 run_query(planned.file.parent, *planned.command)
             except OSError as error:
                 raise RoadieError(f"cannot release: {error}") from error
+            changed.append(planned.file)
+            if planned.lockfile is not None:
+                changed.append(planned.lockfile)
         if planned.text is not None:
             _write_text(planned.file, planned.text)
+            changed.append(planned.file)
             if planned.cargo_root is not None and planned.lockfile is not None:
                 _cargo(planned.cargo_root, "update", "--workspace", "--offline")
-        if planned.lockfile is not None:
-            return (planned.file, planned.lockfile)
-        return (planned.file,)
+                changed.append(planned.lockfile)
+        return tuple(changed if edited is None else ())
 
     def write_version(self, base_dir: Path, version: str) -> tuple[Path, ...]:
-        return self.apply_version(self.plan_version(base_dir, version))
+        changed: list[Path] = []
+        self.apply_version(self.plan_version(base_dir, version), changed)
+        return tuple(changed)
 
 
 # (spec) Step kinds

@@ -648,6 +648,134 @@ def test_a_tracked_lockfile_joins_the_release_commit(tmp_path: Path) -> None:
     assert "v0.1.1" in _tags(bare)
 
 
+def _short_head(repo: Path) -> str:
+    return _git(repo, "rev-parse", "--short", "HEAD").stdout.strip()
+
+
+def _undo(repo: Path, message: str) -> None:
+    undo = message.split("; to undo: ", 1)[1].split("; to retry: ", 1)[0]
+    subprocess.run(undo, shell=True, cwd=repo, check=True, capture_output=True, text=True)
+
+
+# (spec) Step kinds
+def test_a_failing_lockfile_update_names_what_it_left(tmp_path: Path) -> None:
+    repo, bare = _repository(tmp_path, "0.1.0")
+    app = repo / "app"
+    (app / "src").mkdir(parents=True)
+    (app / "src" / "lib.rs").write_text("pub fn demo() {}\n")
+    (app / "Cargo.toml").write_text(
+        '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n\n'
+        '[lib]\npath = "src/lib.rs"\n'
+    )
+    subprocess.run(
+        ["cargo", "generate-lockfile"], cwd=app, check=True, capture_output=True
+    )
+    _git(repo, "add", "app")
+    _git(repo, "commit", "-q", "-m", "cargo")
+    _git(repo, "push", "-q", "origin", "HEAD")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    _git(repo, "push", "-q", "origin", "HEAD")
+    (app / "Cargo.lock").chmod(0o444)
+    start = _short_head(repo)
+    step = Release("pyproject.toml", "app/Cargo.toml")
+    step.base_dir = repo
+    step.name = "release"
+    try:
+        with pytest.raises(StepFailed) as caught:
+            execute([step], root=repo)
+        message = str(caught.value)
+        assert message.endswith(
+            f"; left: edited pyproject.toml, app/Cargo.toml; "
+            f"to undo: git reset --hard {start}"
+        )
+        _undo(repo, message)
+        assert _porcelain(repo) == ""
+        assert _short_head(repo) == start
+        assert _local_tags(repo) == {"v0.1.0"}
+        assert _tags(bare) == set()
+    finally:
+        lock = app / "Cargo.lock"
+        if lock.exists():
+            lock.chmod(0o644)
+
+
+# (spec) Step kinds
+def test_a_refused_commit_names_what_it_left(tmp_path: Path) -> None:
+    repo, bare = _repository(tmp_path, "0.1.0")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    _git(repo, "push", "-q", "origin", "HEAD")
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    start = _short_head(repo)
+    step = Release("pyproject.toml")
+    step.base_dir = repo
+    step.name = "release"
+    with pytest.raises(StepFailed) as caught:
+        execute([step], root=repo)
+    message = str(caught.value)
+    assert message == (
+        f"release failed: cannot release: git exited with status 1; "
+        f"left: edited pyproject.toml; to undo: git reset --hard {start}"
+    )
+    _undo(repo, message)
+    assert _porcelain(repo) == ""
+    assert _short_head(repo) == start
+    assert _local_tags(repo) == {"v0.1.0"}
+    assert _tags(bare) == set()
+
+
+def _push_refused_repo(tmp_path: Path) -> tuple[Path, Path, Path]:
+    repo, bare = _repository(tmp_path, "0.1.0")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    _git(repo, "push", "-q", "origin", "HEAD")
+    hook = bare / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    return repo, bare, hook
+
+
+# (spec) Step kinds
+def test_a_refused_push_names_what_it_left_and_can_be_retried(
+    tmp_path: Path,
+) -> None:
+    repo, bare, _hook = _push_refused_repo(tmp_path / "undo")
+    start = _short_head(repo)
+    step = Release("pyproject.toml")
+    step.base_dir = repo
+    step.name = "release"
+    with pytest.raises(StepFailed) as caught:
+        execute([step], root=repo)
+    message = str(caught.value)
+    commit = _short_head(repo)
+    assert message.endswith(
+        f"; left: edited pyproject.toml, commit {commit}, tag v0.1.1; "
+        f"to undo: git reset --hard {start} && git tag -d v0.1.1; "
+        f"to retry: git push --atomic origin HEAD:main v0.1.1"
+    )
+    _undo(repo, message)
+    assert _porcelain(repo) == ""
+    assert _short_head(repo) == start
+    assert _local_tags(repo) == {"v0.1.0"}
+    assert _tags(bare) == set()
+
+    retry_repo, retry_bare, retry_hook = _push_refused_repo(tmp_path / "retry")
+    retry_step = Release("pyproject.toml")
+    retry_step.base_dir = retry_repo
+    retry_step.name = "release"
+    with pytest.raises(StepFailed) as caught_retry:
+        execute([retry_step], root=retry_repo)
+    retry = str(caught_retry.value).split("; to retry: ", 1)[1]
+    retry_hook.unlink()
+    subprocess.run(
+        retry, shell=True, cwd=retry_repo, check=True, capture_output=True, text=True
+    )
+    assert _tags(retry_bare) == {"v0.1.1"}
+
+
 # (spec) Step kinds
 def test_release_requires_run_before_it_and_a_failure_publishes_nothing(tmp_path: Path) -> None:
     repo, bare = _repository(tmp_path, "0.1.0")

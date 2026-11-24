@@ -257,6 +257,15 @@ class Release(Step[str]):
     `released v<X.Y.Z>`. `requires` is one step or any iterable of them,
     stored as a tuple. A value of the wrong kind fails with `Release requires
     takes steps: got <type>`.
+
+    A failure after the first change keeps its message and appends
+    `; left: <changes>; to undo: git reset --hard <start>`, followed by
+    ` && git tag -d v<X.Y.Z>` when the tag was created. `<changes>` lists, in
+    order and only when they happened, `edited <paths>` (relative to the
+    repository, POSIX form, joined with `, `), `commit <sha>` and
+    `tag v<X.Y.Z>`. `<start>` is the starting commit and `<sha>` the release
+    commit, both as `git rev-parse --short` prints them. A failed push also
+    appends `; to retry: git push --atomic <remote> HEAD:<branch> v<X.Y.Z>`.
     """
 
     reusable: ClassVar[bool] = False
@@ -328,23 +337,62 @@ class Release(Step[str]):
 
     def build(self, run: "Run") -> str:
         plan = self._plan()
-        paths: list[Path] = []
-        for item, planned in plan.changes:
-            paths.extend(item.source.apply_version(planned))
-        if paths:
-            _commit(plan.repository, paths, plan.version, plan.message)
-        if plan.message:
-            _git(plan.repository, "tag", "-a", "-m", plan.message, f"v{plan.version}")
-        else:
-            _git(plan.repository, "tag", f"v{plan.version}")
-        _git(
-            plan.repository,
-            "push",
-            "--atomic",
-            plan.remote,
-            f"HEAD:{plan.branch}",
-            f"v{plan.version}",
-        )
+        edited: list[Path] = []
+        commit: str | None = None
+        tagged = False
+        phase = "apply"
+        try:
+            for item, planned in plan.changes:
+                item.source.apply_version(planned, edited)
+            phase = "commit"
+            if edited:
+                _commit(plan.repository, edited, plan.version, plan.message)
+                head = _git(plan.repository, "rev-parse", "--short", "HEAD").strip()
+                if head != plan.start:
+                    commit = head
+            phase = "tag"
+            if plan.message:
+                _git(plan.repository, "tag", "-a", "-m", plan.message, f"v{plan.version}")
+            else:
+                _git(plan.repository, "tag", f"v{plan.version}")
+            tagged = True
+            phase = "push"
+            _git(
+                plan.repository,
+                "push",
+                "--atomic",
+                plan.remote,
+                f"HEAD:{plan.branch}",
+                f"v{plan.version}",
+            )
+        except RoadieError as error:
+            if not edited and commit is None and not tagged:
+                raise
+            left: list[str] = []
+            if edited:
+                shown = ", ".join(
+                    path.relative_to(plan.repository).as_posix()
+                    if path.is_relative_to(plan.repository)
+                    else path.as_posix()
+                    for path in edited
+                )
+                left.append(f"edited {shown}")
+            if commit is not None:
+                left.append(f"commit {commit}")
+            if tagged:
+                left.append(f"tag v{plan.version}")
+            message = (
+                f"{error}; left: {', '.join(left)}; "
+                f"to undo: git reset --hard {plan.start}"
+            )
+            if tagged:
+                message += f" && git tag -d v{plan.version}"
+            if phase == "push":
+                message += (
+                    f"; to retry: git push --atomic {plan.remote} "
+                    f"HEAD:{plan.branch} v{plan.version}"
+                )
+            raise RoadieError(message) from error
         print(f"released v{plan.version}", flush=True)
         return plan.version
 

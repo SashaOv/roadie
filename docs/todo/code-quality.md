@@ -881,7 +881,7 @@ CI run (decision 7).
   whose version is the dotted key `package.version`, released after a valid
   manifest; `uv version --dry-run` failing; and `cargo update --offline
   --dry-run` failing on a dependency missing from the local registry.
-- [ ] **CQ5.5: Name what a failed release left.** Decision 5. Tests with
+- [x] **CQ5.5: Name what a failed release left.** Decision 5. Tests with
   real git: a lockfile update failing after the manifests were written, a
   `pre-commit` hook refusing the commit, and a `pre-receive` hook on the
   remote refusing the push. Each asserts the exact message, and that its
