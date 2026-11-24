@@ -728,7 +728,7 @@ No clause needs the author.
 
 ### CQ5: Release plans before it changes anything
 
-Status: planned, approved 2026-11-23
+Status: implemented 2026-11-23 (commits CQ5.*)
 
 **Improvement.** `Release` checks some failures only when it reaches the
 manifest they concern, after it has written earlier ones, although its
@@ -890,6 +890,24 @@ CI run (decision 7).
   running the retry command releases.
 
 **Builder log.** `logs/CQ5.build.log`
+
+### Execution and acceptance
+
+2026-11-23:
+
+- Commits `f95b377`, `120751b`, `bceabf4`, `9c79246` and `38f37b6` carry
+  the five patch names exactly.
+- Head `38f37b6`, tree `6ac95603`. `uv run roadie checks` on macOS:
+  Ruff and mypy pass, pytest 517 passed and 14 skipped. Evidence:
+  `/tmp/onespec-cq5/accept.txt`.
+- The `subprocess.run` greps print nothing for `node.py`, `rust.py` and
+  `generated.py`, and count one each in `release.py` and `manifests.py`.
+- Every test a patch adds fails before that patch and passes after.
+- CI [run 45330096171](https://github.com/SashaOv/roadie/actions/runs/45330096171)
+  on `38f37b6` passed on `ubuntu-latest` and `macos-latest`.
+- `src/roadie`: 6,746 lines in 46 files, 158 more than the 6,588 at the
+  Facts. The estimate was about −10; the count is reported, not gated, and
+  no code was packed to meet it.
 
 ## Backlog
 
