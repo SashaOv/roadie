@@ -487,7 +487,7 @@ def test_a_shared_deferred_step_around_a_consumer_hook_failure(
                 raise RuntimeError("publish broke")
             return value
 
-        def report(self, value: str) -> None:
+        def report(self, run: Run, value: str) -> None:
             if hook == "report":
                 raise RuntimeError("report broke")
 
@@ -783,8 +783,8 @@ def test_a_kind_that_only_calls_super_serve_keeps_the_lock_until_teardown(
         def build(self, run: Run) -> str:
             return "up"
 
-        def serve(self, value: str) -> None:
-            super().serve(value)
+        def serve(self, run: Run, value: str) -> None:
+            super().serve(run, value)
 
         def teardown(self, value: str) -> None:
             seen.append(lock_free())
@@ -808,9 +808,9 @@ def test_a_kind_that_only_calls_super_serve_prints_the_total_after_serving(
         def build(self, run: Run) -> str:
             return "up"
 
-        def serve(self, value: str) -> None:
+        def serve(self, run: Run, value: str) -> None:
             print("almost served", flush=True)
-            super().serve(value)
+            super().serve(run, value)
 
     execute([_named(Almost(), "almost")], root=tmp_path)
     output = capsys.readouterr().out
@@ -832,8 +832,8 @@ def test_an_interrupt_does_not_name_a_kind_that_only_calls_super_serve(
         def build(self, run: Run) -> str:
             return "up"
 
-        def serve(self, value: str) -> None:
-            super().serve(value)
+        def serve(self, run: Run, value: str) -> None:
+            super().serve(run, value)
 
     @dataclass(eq=False)
     class Note(Step[None]):

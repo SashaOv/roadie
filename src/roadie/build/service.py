@@ -2,7 +2,7 @@
 
 import subprocess
 from collections.abc import Mapping
-from typing import ClassVar, Protocol
+from typing import TYPE_CHECKING, ClassVar, Protocol
 
 from roadie.engine.errors import StepFailed
 from roadie.engine.process import (
@@ -12,6 +12,9 @@ from roadie.engine.process import (
     wait_interruptibly,
 )
 from roadie.engine.step import Step
+
+if TYPE_CHECKING:
+    from roadie.engine.run import Run
 
 
 class Deployment(Protocol):
@@ -51,7 +54,7 @@ class Service(Step[Deployment]):
     def output_fingerprint(self, fingerprint: str, value: Deployment) -> str:
         return fingerprint
 
-    def serve(self, value: Deployment) -> None:
+    def serve(self, run: "Run", value: Deployment) -> None:
         name = self._label()
         print(f"{name} is up: {getattr(value, 'url', '')} (Ctrl-C to stop)", flush=True)
         process = getattr(value, "process", None)

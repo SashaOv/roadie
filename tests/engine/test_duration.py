@@ -113,7 +113,7 @@ def test_a_step_that_fails_while_reporting_prints_no_duration(
             now["t"] = 4
             return "v"
 
-        def report(self, value: str) -> None:
+        def report(self, run: Run, value: str) -> None:
             raise RuntimeError("late")
 
     with pytest.raises(StepFailed, match="note failed: late"):

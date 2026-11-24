@@ -1,9 +1,13 @@
 """Steps that run tests, and the results they build."""
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.step import Step
+
+if TYPE_CHECKING:
+    from roadie.engine.run import Run
 
 
 @dataclass(frozen=True)
@@ -29,7 +33,7 @@ class Tests(Step[TestResults]):
     step's own fingerprint.
     """
 
-    def report(self, value: TestResults) -> None:
+    def report(self, run: "Run", value: TestResults) -> None:
         if not isinstance(value, TestResults):
             raise RoadieError("A Tests step must return TestResults")
         for message in value.messages:

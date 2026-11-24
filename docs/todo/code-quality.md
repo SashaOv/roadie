@@ -1072,7 +1072,7 @@ CI run (decision 7).
     fails, an interrupt, a dry run, and a failure after the files are read
     and before any step starts;
   - a key a step deletes during the run does not fail the removal.
-- [ ] **CQ6.3: Pass run to report and serve.** Decision 5. The spec's
+- [x] **CQ6.3: Pass run to report and serve.** Decision 5. The spec's
   "Step hooks" says it. Tests: a `report` and a `serve` override each read
   `run.env` and `run[dependency]`.
 

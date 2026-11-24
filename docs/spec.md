@@ -716,8 +716,8 @@ overrides what its kind needs. Roadie calls:
 
 - `publish(run, value)` after the step builds, not when it is reused; its
   result becomes the step's value. By default it returns `value`.
-- `report(value)` after the step builds or is reused; raising fails the step.
-- `serve(value)` on the requested result, before the run tears it down.
+- `report(run, value)` after the step builds or is reused; raising fails the step.
+- `serve(run, value)` on the requested result, before the run tears it down.
 - `encode(value)` for the JSON value the record keeps, `matches(recorded)` to
   accept a recorded value for reuse, and `decode(recorded)` to restore the
   value from it. By default both use a Pydantic `TypeAdapter` for the step's

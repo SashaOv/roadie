@@ -197,7 +197,7 @@ def test_the_lock_is_released_before_the_result_is_served(
             seen.append(("build", lock.is_file()))
             return Stopped()
 
-        def serve(self, value: Stopped) -> None:
+        def serve(self, run: Run, value: Stopped) -> None:
             probe = _process(_WAITER, root)
             try:
                 seen.append(("serve", _line(probe) == "acquired"))

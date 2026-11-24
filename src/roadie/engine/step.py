@@ -155,10 +155,10 @@ class Step[T](ABC):
         """Return the value of a step that just built, after acting on it."""
         return value
 
-    def report(self, value: T) -> None:
+    def report(self, run: "Run", value: T) -> None:
         """Show a built or reused value; raise to fail the step."""
 
-    def serve(self, value: T) -> None:
+    def serve(self, run: "Run", value: T) -> None:
         """Keep the requested result in use before the run tears it down."""
 
     def encode(self, value: T) -> object:

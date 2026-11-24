@@ -683,7 +683,7 @@ class _Scheduler:
             value = step.publish(self.run, value)
             with self.condition:
                 self.live.replace(step, value)
-        step.report(value)
+        step.report(self.run, value)
         missing = self._check(step) if built else []
         output = _output_fingerprint(step, value, step_fingerprint)
         if not missing:
@@ -709,7 +709,7 @@ class _Scheduler:
                 self.run_lock.release()
             if step.serves:
                 self._report_run()
-            step.serve(value)
+            step.serve(self.run, value)
         return value, output
 
     def _start_deferred(self, step: Step[Any]) -> None:

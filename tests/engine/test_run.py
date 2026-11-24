@@ -996,12 +996,12 @@ def test_programs_run_from_publish_report_and_serve_see_a_file_value(
             ).strip()
             return value
 
-        def report(self, value: str) -> None:
+        def report(self, run: Run, value: str) -> None:
             seen["report"] = (
                 self._cmd(sys.executable, "-c", program, capture_output=True).stdout or ""
             ).strip()
 
-        def serve(self, value: str) -> None:
+        def serve(self, run: Run, value: str) -> None:
             seen["serve"] = (
                 self._cmd(sys.executable, "-c", program, capture_output=True).stdout or ""
             ).strip()
@@ -1011,6 +1011,41 @@ def test_programs_run_from_publish_report_and_serve_see_a_file_value(
     execute([probe], root=root, env=(env_file,))
     assert seen == {"publish": "from-file", "report": "from-file", "serve": "from-file"}
     assert "MODE" not in os.environ
+
+
+# (spec) Step hooks
+# (spec) Step values
+def test_report_and_serve_receive_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    monkeypatch.delenv("MODE", raising=False)
+    env_file = root / "dev.env"
+    env_file.write_text("MODE=from-file\n")
+    seen: dict[str, tuple[str, str]] = {}
+
+    @dataclass(eq=False)
+    class Consumer(Step[str]):
+        source: Step[str]
+
+        def build(self, run: Run) -> str:
+            return run[self.source]
+
+        def report(self, run: Run, value: str) -> None:
+            seen["report"] = (run.env["MODE"], run[self.source])
+
+        def serve(self, run: Run, value: str) -> None:
+            seen["serve"] = (run.env["MODE"], run[self.source])
+
+    source = Value("dependency")
+    consumer = Consumer(source)
+    execute([source, consumer], root=root, env=(env_file,))
+    assert seen == {
+        "report": ("from-file", "dependency"),
+        "serve": ("from-file", "dependency"),
+    }
 
 
 # (spec) Environment files
