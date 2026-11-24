@@ -818,7 +818,7 @@ def test_config_env_applies_before_cli_env(tmp_path: Path, monkeypatch: pytest.M
     cli_env = tmp_path / "cli.env"
     cli_env.write_text("MODE=cli\n")
     graph = load(tmp_path)
-    execute(graph.plan(), env=(*graph.env_files, cli_env))
+    execute(graph.plan(), env=(*graph.env_paths, cli_env))
     assert (tmp_path / "seen.txt").read_text() == "cli from-config"
 
 
@@ -862,7 +862,7 @@ def test_root_env_reaches_a_step_of_an_included_file(
     )
     write_build(root, 'config(env=["root.env"])\nlib = include("module")\nresult = lib.item\n')
     graph = load(root)
-    assert execute(graph.plan("result"), root=root, env=graph.env_files) == "root"
+    assert execute(graph.plan("result"), root=root, env=graph.env_paths) == "root"
 
 
 # (spec) Settings
@@ -881,7 +881,7 @@ def test_a_second_root_config_env_replaces_the_first(
         "second = Check('true')\n",
     )
     graph = load(root)
-    assert graph.env_files == ((root / "b.env").resolve(),)
+    assert graph.env_paths == ((root / "b.env").resolve(),)
 
 
 # (spec) Environment files
@@ -933,12 +933,12 @@ def test_a_changed_root_env_value_reruns_an_included_step(
     )
     write_build(root, 'config(env=["root.env"])\nlib = include("module")\nresult = lib.item\n')
     graph = load(root)
-    assert execute(graph.plan("result"), root=root, env=graph.env_files) == "one"
+    assert execute(graph.plan("result"), root=root, env=graph.env_paths) == "one"
     graph = load(root)
-    assert execute(graph.plan("result"), root=root, env=graph.env_files) == "one"
+    assert execute(graph.plan("result"), root=root, env=graph.env_paths) == "one"
     (root / "root.env").write_text("MODE=two\n")
     graph = load(root)
-    assert execute(graph.plan("result"), root=root, env=graph.env_files) == "two"
+    assert execute(graph.plan("result"), root=root, env=graph.env_paths) == "two"
 
 
 # (spec) Environment files

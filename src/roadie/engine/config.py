@@ -17,7 +17,7 @@ _base_directory: ContextVar[Path | None] = ContextVar(
 )
 _build_file: ContextVar[Path | None] = ContextVar("roadie_build_file", default=None)
 _root_file: ContextVar[Path | None] = ContextVar("roadie_root_file", default=None)
-_env_files: ContextVar[tuple[Path, ...]] = ContextVar("roadie_env_files", default=())
+_root_env: ContextVar[tuple[Path, ...]] = ContextVar("roadie_root_env", default=())
 
 
 def base_directory() -> Path:
@@ -29,9 +29,9 @@ def loading_directory() -> Path | None:
     return _file_directory.get()
 
 
-def root_env_files() -> tuple[Path, ...]:
+def root_env() -> tuple[Path, ...]:
     """Environment files the root build file named with ``config(env=...)``."""
-    return _env_files.get()
+    return _root_env.get()
 
 
 # (spec) Settings
@@ -62,7 +62,7 @@ def config(**settings: object) -> None:
             raise RoadieError(
                 f"config env works only in the root build file: {build_file}"
             )
-        _env_files.set(tuple((directory / os.fspath(item)).resolve() for item in paths))
+        _root_env.set(tuple((directory / os.fspath(item)).resolve() for item in paths))
 
 
 @contextmanager
@@ -77,12 +77,12 @@ def file_settings(
     base_token = _base_directory.set(override or directory)
     build_token = _build_file.set(build_file)
     root_token = _root_file.set(root_file)
-    env_token = _env_files.set(()) if build_file == root_file else None
+    env_token = _root_env.set(()) if build_file == root_file else None
     try:
         yield
     finally:
         if env_token is not None:
-            _env_files.reset(env_token)
+            _root_env.reset(env_token)
         _root_file.reset(root_token)
         _build_file.reset(build_token)
         _base_directory.reset(base_token)

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from roadie.engine.config import file_settings, root_env_files
+from roadie.engine.config import file_settings, root_env
 from roadie.engine.errors import RoadieError
 from roadie.engine.root import find_project_root, use_project_root
 from roadie.engine.step import Step, is_reserved
@@ -28,7 +28,7 @@ class Graph:
     root: Path
     default: Step[Any] | None = None
     setup_step: Step[Any] | None = None
-    env_files: tuple[Path, ...] = ()
+    env_paths: tuple[Path, ...] = ()
 
     # (spec) Command line
     def result(self, name: str | None = None) -> Step[Any]:
@@ -202,7 +202,7 @@ def _load(session: _Session, build_file: Path) -> Graph:
         ),
     ):
         namespace = runpy.run_path(str(build_file), run_name=f"roadie:{build_file}")
-        collected_env = root_env_files()
+        collected_env = root_env()
     results = {
         name: value for name, value in namespace.items() if isinstance(value, Step)
     }
@@ -219,7 +219,7 @@ def _load(session: _Session, build_file: Path) -> Graph:
         root=session.project,
         default=default,
         setup_step=marked_setup,
-        env_files=collected_env if build_file == session.root_file else (),
+        env_paths=collected_env if build_file == session.root_file else (),
     )
     session.graphs[build_file] = graph
     return graph

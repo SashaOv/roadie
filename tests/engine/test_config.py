@@ -63,9 +63,9 @@ def test_config_env_belongs_to_the_root_file_and_is_released(tmp_path: Path, mon
         'after = RustBinary(CargoPackage("after"))\n',
     )
     graph = load(tmp_path / "project")
-    assert graph.env_files == ((tmp_path / "project/root.env").resolve(),)
+    assert graph.env_paths == ((tmp_path / "project/root.env").resolve(),)
     assert not hasattr(graph.results["before"], "env_files")
-    assert load(tmp_path / "project").env_files == ((tmp_path / "project/root.env").resolve(),)
+    assert load(tmp_path / "project").env_paths == ((tmp_path / "project/root.env").resolve(),)
 
 
 # (spec) Settings

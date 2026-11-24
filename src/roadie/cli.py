@@ -127,7 +127,7 @@ def run(
             steps,
             root=graph.root,
             locked=locked,
-            env=(*graph.env_files, *(env or ())),
+            env=(*graph.env_paths, *(env or ())),
             dry=dry_run,
             jobs=jobs,
             targets=targets,
