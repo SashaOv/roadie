@@ -995,7 +995,13 @@ This settles the CQ4 question about `publish`, `report` and `serve`.
    `config(env=...)` call in it replaces an earlier one, whatever steps
    come between. `config(env=...)` in any other build file fails, while
    that file loads, with `config env works only in the root build file:
-   <path>`. `Step.env_files` and `configured_env` go away, and `load`
+   <path>`. The reason: the values live in `os.environ` (decision 3), which
+   every step and program in the process shares, so a file's environment
+   cannot stay with that file's steps. Merging the files of several build
+   files would make one file's values depend on which other files a run
+   loads. A use case for that merge would reopen this (author,
+   2026-11-22). The spec's "Settings" states this reason with the rule.
+   `Step.env_files` and `configured_env` go away, and `load`
    returns the root file's env files beside the graph. Every named file
    must exist, as today, and a dry run checks them too.
 2. **`run.env`.** It is a read-only mapping of the values the run added to
@@ -1029,7 +1035,7 @@ This settles the CQ4 question about `publish`, `report` and `serve`.
    run.
    - Grant: push `main` after CQ6.3, then the record commit and `CQ6: Fix`
      commits for a failing CI clause, up to three CI runs.
-     AUTHOR: 
+     AUTHOR:granted
 
 **Acceptance check.**
 
