@@ -938,7 +938,7 @@ CI run (decision 7).
 
 ### CQ6: One environment per run
 
-Status: planned, awaiting author checkpoint
+Status: planned, approved 2026-11-23
 
 **Improvement.** Today each step has its own environment-file values: its
 build file's `config(env=...)` files, then the `--env` files. They reach
