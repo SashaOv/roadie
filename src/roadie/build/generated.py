@@ -1,9 +1,9 @@
 """Compare a generated file with the blob git would store."""
 
-import subprocess
 from pathlib import Path
 
 from roadie.engine.errors import RoadieError
+from roadie.system import run_query
 
 
 def repository(path: Path) -> Path | None:
@@ -26,20 +26,23 @@ def tracked_files(directory: Path) -> list[Path]:
 
 
 def _listed(repository_path: Path, path: Path) -> list[Path]:
-    completed = subprocess.run(
-        (
-            "git", "--literal-pathspecs", "-C", str(repository_path),
-            "ls-files", "-z", "--", path.relative_to(repository_path).as_posix(),
-        ),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise RoadieError(
-            f"cannot check whether {path} is tracked: {completed.stderr.strip()}"
+    try:
+        output = run_query(
+            repository_path,
+            "git",
+            "--literal-pathspecs",
+            "-C",
+            str(repository_path),
+            "ls-files",
+            "-z",
+            "--",
+            path.relative_to(repository_path).as_posix(),
         )
-    return [repository_path / name for name in completed.stdout.split("\0") if name]
+    except OSError as error:
+        raise RoadieError(
+            f"cannot check whether {path} is tracked: {error}"
+        ) from error
+    return [repository_path / name for name in output.split("\0") if name]
 
 
 def same_as_git_stores(destination: Path, built: Path) -> bool:
@@ -54,8 +57,9 @@ def same_as_git_stores(destination: Path, built: Path) -> bool:
 
 
 def _git_hash(repository_path: Path, file: Path, path: str) -> str:
-    completed = subprocess.run(
-        (
+    try:
+        output = run_query(
+            repository_path,
             "git",
             "-C",
             str(repository_path),
@@ -63,14 +67,10 @@ def _git_hash(repository_path: Path, file: Path, path: str) -> str:
             f"--path={path}",
             "--",
             str(file),
-        ),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise RoadieError(f"cannot compare {file} with git: {completed.stderr.strip()}")
-    hashed = completed.stdout.strip()
+        )
+    except OSError as error:
+        raise RoadieError(f"cannot compare {file} with git: {error}") from error
+    hashed = output.strip()
     if not hashed:
         raise RoadieError(f"cannot compare {file} with git: git printed no hash")
     return hashed

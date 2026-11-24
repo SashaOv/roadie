@@ -5,14 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from roadie.build.files import listed_files
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import Input, digest, run_state
-from roadie.system import cannot_run_message, prepare_command
+from roadie.system import CannotRun, run_query
 
 _NODE_ENV = ("NODE_ENV", "NODE_OPTIONS")
 _ROOT_FILES = (
@@ -55,19 +54,11 @@ def _workspace_root(base_dir: Path) -> Path:
 
 def _output(root: Path, label: str, *args: str) -> str:
     try:
-        completed = subprocess.run(
-            prepare_command(args),
-            cwd=root,
-            check=False,
-            capture_output=True,
-            encoding="utf-8",
-            errors="replace",
-        )
+        return run_query(root, *args)
+    except CannotRun as error:
+        raise RoadieError(str(error)) from error
     except OSError as error:
-        raise RoadieError(cannot_run_message(args[0], error)) from error
-    if completed.returncode != 0:
-        raise RoadieError(f"{label} failed: {completed.stderr.strip()}")
-    return completed.stdout
+        raise RoadieError(f"{label} failed: {error}") from error
 
 
 def _project_roots(root: Path) -> tuple[Path, ...]:

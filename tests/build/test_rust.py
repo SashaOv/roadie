@@ -43,7 +43,7 @@ def test_cargo_package_discovery_is_module_neutral(
             stdout=json.dumps({"workspace_root": str(root), "packages": packages}),
         )
 
-    monkeypatch.setattr(cargo.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     assert cargo.cargo_rust_packages(root) == cargo.CargoWorkspace(
         root,
@@ -53,6 +53,40 @@ def test_cargo_package_discovery_is_module_neutral(
             cargo.RustPackage("desktop", Path("desktop"), ("lang",)),
         ),
     )
+
+
+# (spec) Cargo packages
+def test_cargo_rust_packages_on_an_invalid_manifest(tmp_path: Path) -> None:
+    (tmp_path / "Cargo.toml").write_text("not [valid\n")
+    with pytest.raises(RoadieError) as caught:
+        cargo.cargo_rust_packages(tmp_path)
+    assert str(caught.value).startswith("cargo metadata failed: ")
+
+
+# (spec) Cargo packages
+def test_cargo_that_cannot_start_fails_with_cannot_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    with pytest.raises(RoadieError) as caught:
+        cargo.cargo_rust_packages(tmp_path)
+    assert str(caught.value).startswith("cannot run cargo: ")
+
+
+# (spec) Cargo packages
+def test_rustc_that_cannot_start_fails_with_cannot_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    _cargo_workspace(root)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    with pytest.raises(RoadieError) as caught:
+        cargo.CargoPackage("core").fingerprint(root)
+    assert str(caught.value).startswith("cannot run rustc: ")
 
 
 # (spec) Cargo workspace queries
@@ -233,7 +267,7 @@ def test_cargo_metadata_and_rustc_run_once_per_run(
             calls.append(str(command[0]))
         return real_run(*args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(cargo.subprocess, "run", spy)
+    monkeypatch.setattr(subprocess, "run", spy)
     package = cargo.CargoPackage("core")
     with run_scope():
         package.fingerprint(root / "app")

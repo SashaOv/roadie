@@ -864,7 +864,7 @@ CI run (decision 7).
 
 #### Patches
 
-- [ ] **CQ5.1: Run Roadie's own queries through one helper.** Decision 1.
+- [x] **CQ5.1: Run Roadie's own queries through one helper.** Decision 1.
   Tests: the helper with a missing program, a non-zero exit with standard
   error, with only standard output and with neither, and a success;
   `cargo_rust_packages` on an invalid `Cargo.toml`; `rustc` and `git` that

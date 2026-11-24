@@ -4,6 +4,7 @@ from roadie.system.command import (
     CannotRun,
     cannot_run_message,
     prepare_command,
+    run_query,
 )
 from roadie.system.lock import lock, unlock
 from roadie.system.path import executable_suffix
@@ -25,6 +26,7 @@ __all__ = [
     "parse_trace",
     "prepare_command",
     "process_group_session",
+    "run_query",
     "signal_process_tree",
     "spawn_in_own_group",
     "stop_process_tree",

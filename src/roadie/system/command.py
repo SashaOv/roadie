@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import sys
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 _REFUSED = frozenset('"\r\n%')
 
@@ -38,6 +40,36 @@ def prepare_command(
     if not found.lower().endswith((".cmd", ".bat")):
         return [found, *command[1:]]
     return _batch_command_line(command[0], found, command[1:], comspec=_comspec(env))
+
+
+def run_query(cwd: Path, *args: str) -> str:
+    """Run a program and return its standard output.
+
+    Find the program as `prepare_command` finds it, run it in `cwd`, and
+    decode its output as UTF-8 with undecodable bytes kept as surrogate
+    escapes. A program that cannot start raises `CannotRun` with
+    `cannot run <program>: <reason>`. A non-zero exit raises `OSError`
+    with the program's standard error, its standard output when that is
+    empty, or `<program> exited with status <n>` when both are empty.
+    """
+    try:
+        completed = subprocess.run(
+            prepare_command(args),
+            cwd=cwd,
+            capture_output=True,
+            encoding="utf-8",
+            errors="surrogateescape",
+            check=False,
+        )
+    except CannotRun:
+        raise
+    except OSError as error:
+        raise CannotRun(cannot_run_message(args[0], error)) from error
+    if completed.returncode != 0:
+        detail = (completed.stderr or "").strip() or (completed.stdout or "").strip()
+        reason = detail or f"{args[0]} exited with status {completed.returncode}"
+        raise OSError(reason)
+    return completed.stdout or ""
 
 
 def cannot_run_message(program: str, error: OSError) -> str:

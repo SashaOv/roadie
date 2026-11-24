@@ -283,7 +283,10 @@ step's base directory with `cargo metadata`. Its fingerprint covers:
 Changes to unrelated packages, and to `CARGO_TARGET_DIR`, do not change it.
 A package the workspace does not contain fails with `cargo package '<name>'
 is not in the workspace`. Within one run, `cargo metadata` and
-`rustc --version` run once per workspace.
+`rustc --version` run once per workspace. One that cannot start fails
+with `cannot run <program>: <reason>`; one that exits non-zero fails with
+`<command> failed: <standard error>`, such as `cargo metadata failed: ...`
+or `rustc --version failed: ...`.
 
 ### Python environment
 

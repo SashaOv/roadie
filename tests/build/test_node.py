@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from support import git_init
 
-from roadie.build import NodeEnv, PnpmPackage, node
+from roadie.build import NodeEnv, PnpmPackage
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import run_scope
 from roadie.system import prepare_command
@@ -58,7 +58,7 @@ def _patch_run(
         commands.append(text)
         return replace(text, _REAL_RUN(args, **kwargs))  # type: ignore[call-overload]
 
-    monkeypatch.setattr(node.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     return commands
 
 
@@ -166,7 +166,7 @@ def test_a_program_that_cannot_start_fails_with_the_cmd_wording(
     def missing(args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         raise FileNotFoundError(2, "No such file or directory", "node")
 
-    monkeypatch.setattr(node.subprocess, "run", missing)
+    monkeypatch.setattr(subprocess, "run", missing)
     with pytest.raises(RoadieError) as caught:
         _fingerprint(root)
     assert str(caught.value) == "cannot run node: [Errno 2] No such file or directory"

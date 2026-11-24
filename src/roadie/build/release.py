@@ -15,6 +15,7 @@ from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import Input
 from roadie.engine.many import one_or_many
 from roadie.engine.step import Step
+from roadie.system import run_query
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -23,36 +24,19 @@ _VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 _TAG = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
 
 
-def _git(repository: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _git(repository: Path, *args: str) -> str:
     try:
-        completed = subprocess.run(
-            ["git", *args],
-            cwd=repository,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        return run_query(repository, "git", *args)
     except OSError as error:
         raise RoadieError(f"cannot release: {error}") from error
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout).strip()
-        reason = detail or f"git exited with status {completed.returncode}"
-        raise RoadieError(f"cannot release: {reason}")
-    return completed
 
 
 def _repository(base_dir: Path) -> Path:
-    completed = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        cwd=base_dir,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        detail = completed.stderr.strip() or "not a git repository"
-        raise RoadieError(f"cannot release: {detail}")
-    return Path(completed.stdout.strip()).resolve()
+    try:
+        output = run_query(base_dir, "git", "rev-parse", "--show-toplevel")
+    except OSError as error:
+        raise RoadieError(f"cannot release: {error}") from error
+    return Path(output.strip()).resolve()
 
 
 def _status_path(line: str) -> str:
@@ -64,7 +48,7 @@ def _status_path(line: str) -> str:
 
 def _require_clean(repository: Path) -> None:
     """Fail when the work tree has changes other than this run's `target/`."""
-    status = _git(repository, "status", "--porcelain").stdout
+    status = _git(repository, "status", "--porcelain")
     for line in status.splitlines():
         path = _status_path(line)
         if line.startswith("??") and (path == "target" or path.startswith("target/")):
@@ -90,13 +74,13 @@ def _upstream(repository: Path) -> tuple[str, str]:
 
 def _require_current(repository: Path, remote: str, branch: str) -> None:
     _git(repository, "fetch", remote)
-    count = _git(repository, "rev-list", "--count", f"HEAD..{remote}/{branch}").stdout
+    count = _git(repository, "rev-list", "--count", f"HEAD..{remote}/{branch}")
     if int(count.strip() or "0") > 0:
         raise RoadieError("cannot release: behind its upstream")
 
 
 def _latest_tag(repository: Path) -> tuple[tuple[int, int, int], str] | None:
-    listed = _git(repository, "tag", "--list", "v*", "--sort=-v:refname").stdout
+    listed = _git(repository, "tag", "--list", "v*", "--sort=-v:refname")
     for line in listed.splitlines():
         match = _TAG.fullmatch(line.strip())
         if match is None:
@@ -118,8 +102,8 @@ def _chosen_version(repository: Path, current: str) -> str:
     if latest is None:
         return current
     number, tag = latest
-    head = _git(repository, "rev-parse", "HEAD").stdout.strip()
-    tagged = _git(repository, "rev-parse", f"{tag}^{{commit}}").stdout.strip()
+    head = _git(repository, "rev-parse", "HEAD").strip()
+    tagged = _git(repository, "rev-parse", f"{tag}^{{commit}}").strip()
     if head == tagged:
         raise RoadieError("cannot release: nothing to release")
     parsed = _parse_version(current)
@@ -135,7 +119,7 @@ def _chosen_version(repository: Path, current: str) -> str:
 
 def _commit(repository: Path, paths: list[Path], version: str, message: str | None) -> None:
     _git(repository, "add", "--", *[os.fspath(path) for path in paths])
-    if not _git(repository, "diff", "--cached", "--name-only").stdout.strip():
+    if not _git(repository, "diff", "--cached", "--name-only").strip():
         return
     subject = f"v{version} release"
     if message:
@@ -202,23 +186,13 @@ class PyProject(_ManifestSource):
         file = self._file(base_dir)
         directory = file.parent
         tracked = _tracks(directory, "uv.lock")
-        command = ["uv", "version", version]
+        command: tuple[str, ...] = ("uv", "version", version)
         if not tracked:
-            command = ["uv", "version", "--frozen", version]
+            command = ("uv", "version", "--frozen", version)
         try:
-            completed = subprocess.run(
-                command,
-                cwd=directory,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            run_query(directory, *command)
         except OSError as error:
             raise RoadieError(f"cannot release: {error}") from error
-        if completed.returncode != 0:
-            detail = (completed.stderr or completed.stdout).strip()
-            reason = detail or f"uv exited with status {completed.returncode}"
-            raise RoadieError(f"cannot release: {reason}")
         if tracked:
             return (file, directory / "uv.lock")
         return (file,)
@@ -259,22 +233,11 @@ def _replace_version(text: str, table: str, old: str, new: str) -> str:
     raise RoadieError(f"cannot release: {table} version line is missing")
 
 
-def _cargo(directory: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _cargo(directory: Path, *args: str) -> str:
     try:
-        completed = subprocess.run(
-            ["cargo", *args],
-            cwd=directory,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        return run_query(directory, "cargo", *args)
     except OSError as error:
         raise RoadieError(f"cannot release: {error}") from error
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout).strip()
-        reason = detail or f"cargo exited with status {completed.returncode}"
-        raise RoadieError(f"cannot release: {reason}")
-    return completed
 
 
 # (spec) Step kinds
@@ -319,7 +282,7 @@ class CargoManifest(_ManifestSource):
         located = _cargo(
             file.parent, "locate-project", "--workspace", "--message-format", "plain"
         )
-        root = Path(located.stdout.strip()).parent
+        root = Path(located.strip()).parent
         if not _tracks(root, "Cargo.lock"):
             return (file,)
         _cargo(root, "update", "--workspace", "--offline")

@@ -14,7 +14,8 @@ from support import (
 )
 
 from roadie.build import Directory, File, Step
-from roadie.engine.errors import StepFailed
+from roadie.build.generated import same_as_git_stores, tracked
+from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.graph import load
 from roadie.engine.root import use_project_root
 from roadie.engine.run import Run
@@ -205,6 +206,29 @@ def test_output_is_an_unknown_argument() -> None:
         TextFile("new\n", output="out.txt")
     with pytest.raises(TypeError, match="output"):
         Site(output="dist")
+
+
+def test_git_that_cannot_start_fails_with_cannot_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    tracked_file = tmp_path / "output.txt"
+    tracked_file.write_text("old\n")
+    subprocess.run(["git", "add", "output.txt"], cwd=tmp_path, check=True)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    with pytest.raises(RoadieError) as caught:
+        tracked(tracked_file)
+    assert str(caught.value).startswith(
+        f"cannot check whether {tracked_file} is tracked: cannot run git: "
+    )
+    built = tmp_path / "built.txt"
+    built.write_text("new\n")
+    with pytest.raises(RoadieError) as caught_compare:
+        same_as_git_stores(tracked_file, built)
+    assert str(caught_compare.value).startswith("cannot compare ")
+    assert "cannot run git: " in str(caught_compare.value)
 
 
 # (spec) Generated files

@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,7 +15,7 @@ from roadie.build.binary import Binary
 from roadie.build.files import Files, listed_files
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import Input, digest, run_state
-from roadie.system import executable_suffix
+from roadie.system import CannotRun, executable_suffix, run_query
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -41,14 +40,15 @@ class CargoWorkspace:
 
 # (spec) Cargo workspace queries
 def cargo_rust_packages(directory: Path) -> CargoWorkspace:
-    result = subprocess.run(
-        ("cargo", "metadata", "--no-deps", "--format-version", "1"),
-        cwd=directory,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    metadata = json.loads(result.stdout)
+    try:
+        output = run_query(
+            directory, "cargo", "metadata", "--no-deps", "--format-version", "1"
+        )
+    except CannotRun as error:
+        raise RoadieError(str(error)) from error
+    except OSError as error:
+        raise RoadieError(f"cargo metadata failed: {error}") from error
+    metadata = json.loads(output)
     root = Path(metadata["workspace_root"]).resolve()
     workspace_names = {package["name"] for package in metadata["packages"]}
     packages = []
@@ -103,14 +103,13 @@ class CargoSnapshot:
 
 
 def _load_snapshot(directory: Path) -> CargoSnapshot:
-    version = subprocess.run(
-        ("rustc", "--version"),
-        cwd=directory,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return CargoSnapshot(cargo_rust_packages(directory), version.stdout.strip())
+    try:
+        output = run_query(directory, "rustc", "--version")
+    except CannotRun as error:
+        raise RoadieError(str(error)) from error
+    except OSError as error:
+        raise RoadieError(f"rustc --version failed: {error}") from error
+    return CargoSnapshot(cargo_rust_packages(directory), output.strip())
 
 
 def _snapshot(directory: Path) -> CargoSnapshot:
