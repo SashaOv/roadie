@@ -8,7 +8,9 @@ bullet, except the input-enforcement design, which is moved whole.
 - The rest of input enforcement (the design below).
 - An unreadable trace log fails the step instead of counting as no reads,
   and enforcement takes the `Files` listing rather than its own `git
-  ls-files`, failing when git fails (R18 review).
+  ls-files`, failing when git fails; the `--enforce` refusals live only in
+  the engine, not also in `cli.py`; tests cover each of these failures
+  (R18 review).
 - A project-root override (`config(root=...)`) for a project whose root is not
   its git top level.
 - A cargo-nextest test step that reads the runner's JUnit report into
