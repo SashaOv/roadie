@@ -253,6 +253,15 @@ win. A relative `--env` path is relative to the working directory.
 `run.env` holds the values the run reads from those files, and every step's
 fingerprint hashes `run.env`.
 
+After the files are read and before planning, the run puts those values
+into `os.environ` for its lifetime: it sets each file key that
+`os.environ` lacks, so the process environment wins, and `build`,
+`publish`, `report` and `serve`, a step's Python code and the programs
+they run all see the same values. When the run ends it removes exactly
+the keys it added — on success, on failure, on interrupt, after a dry
+run, and after a failure before any step starts. It does not restore a
+value a step changed or deleted; it only removes the keys it added.
+
 A file that does not exist fails the run with `environment file does not
 exist: <path>` before any step builds, also under `--dry`.
 
@@ -674,8 +683,8 @@ unique to the step and the suffix, and creates its parent directory.
 
 ### Step helpers
 
-`Step` provides helpers that run a program in the step's base directory with
-its environment files: `_cmd` runs it to completion, and `_start_cmd` starts
+`Step` provides helpers that run a program in the step's base directory:
+`_cmd` runs it to completion, and `_start_cmd` starts
 a server and returns a `RunningProcess` once it is ready. Their docstrings
 specify them. A command that cannot start fails with `<step> failed: cannot
 run <program>: <reason>`, where `<reason>` is the error's text without its

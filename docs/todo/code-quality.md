@@ -1061,7 +1061,7 @@ CI run (decision 7).
   - a second `config(env=...)` call replaces the first;
   - `run.env` holds the file values for every step;
   - a changed file value reruns a step of an included build file.
-- [ ] **CQ6.2: Put the run's values in os.environ for its lifetime.**
+- [x] **CQ6.2: Put the run's values in os.environ for its lifetime.**
   Decisions 3 and 4. The spec's "Environment files", "Step helpers" and
   `Command.run`'s docstring say it. Tests:
   - the process environment wins over a file, and that key is not in

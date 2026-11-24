@@ -5,8 +5,8 @@ import os
 import sys
 import threading
 import time
-from collections.abc import Mapping, Sequence
-from contextlib import nullcontext
+from collections.abc import Generator, Mapping, Sequence
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -233,19 +233,21 @@ def execute(
         try:
             held = acquire_run_lock(root)
             try:
-                run = Run(locked=locked, env=_run_env(env))
-                if targets is None:
-                    requested = {id(steps[-1])} if steps else set()
-                    names = [steps[-1]._label()] if steps else []
-                else:
-                    requested = {id(step) for step in targets}
-                    names = [step._label() for step in targets]
-                plan = _Plan.build(
-                    steps, requested=requested, leading=leading, jobs=jobs, dry=dry
-                )
-                live = _Live(run, plan.blockers)
-                scheduler = _Scheduler(plan, run, live, run_lock=held, report=writer, enforce=enforce)
-                return _run_steps(scheduler, parameters, names)
+                values = _run_env(env)
+                run = Run(locked=locked, env=values)
+                with _run_environ(values):
+                    if targets is None:
+                        requested = {id(steps[-1])} if steps else set()
+                        names = [steps[-1]._label()] if steps else []
+                    else:
+                        requested = {id(step) for step in targets}
+                        names = [step._label() for step in targets]
+                    plan = _Plan.build(
+                        steps, requested=requested, leading=leading, jobs=jobs, dry=dry
+                    )
+                    live = _Live(run, plan.blockers)
+                    scheduler = _Scheduler(plan, run, live, run_lock=held, report=writer, enforce=enforce)
+                    return _run_steps(scheduler, parameters, names)
             finally:
                 held.release()
         finally:
@@ -606,7 +608,6 @@ class _Scheduler:
                 current_step(step),
                 command_context(
                     inherit=_inherits_stdin(step, self.plan.requested),
-                    environment=self.run.env,
                 ),
                 collect_traces(collector) if collector is not None else nullcontext(),
             ):
@@ -802,6 +803,26 @@ def _run_env(paths: Sequence[Path]) -> dict[str, str]:
             {key: value for key, value in loaded.items() if value is not None}
         )
     return {key: value for key, value in merged.items() if key not in os.environ}
+
+
+# (spec) Environment files
+@contextmanager
+def _run_environ(values: Mapping[str, str]) -> Generator[None]:
+    """Hold the run's added values in `os.environ` for the run's lifetime.
+
+    Remove exactly the keys the run added, however the run ends. A value a
+    step changed or deleted is not restored.
+    """
+    added: list[str] = []
+    for key, value in values.items():
+        if key not in os.environ:
+            os.environ[key] = value
+            added.append(key)
+    try:
+        yield
+    finally:
+        for key in added:
+            os.environ.pop(key, None)
 
 
 def _resolve_env_path(path: Path) -> Path:

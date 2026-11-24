@@ -34,9 +34,6 @@ from roadie.system import (
 )
 
 _inherit_stdin: ContextVar[bool] = ContextVar("roadie_inherit_stdin", default=True)
-_command_environment: ContextVar[Mapping[str, str] | None] = ContextVar(
-    "roadie_command_environment", default=None
-)
 _tracked: dict[int, tuple[subprocess.Popen[Any], bool]] = {}
 _tracked_lock = threading.Lock()
 _interrupt = threading.Event()
@@ -133,8 +130,8 @@ class Command:
     ) -> subprocess.CompletedProcess[str]:
         """Print `+ <command>` and run the command in `cwd`.
 
-        Its environment is the process environment, then `environment`, then
-        the environment values of the step in whose build it runs, when any,
+        Its environment is the process environment, which holds the run's
+        environment-file values for the run's lifetime, then `environment`,
         then `ROADIE_RUN_PID` set to this process's PID. It inherits standard
         input. Standard error is shown as it arrives, each line prefixed with
         `[<label>] ` when the run uses more than one job. Standard output is
@@ -298,7 +295,6 @@ class Command:
         merged = {
             **os.environ,
             **(self.environment or {}),
-            **(_command_environment.get() or {}),
         }
         merged[RUN_PID_VARIABLE] = str(os.getpid())
         return merged
@@ -383,17 +379,13 @@ def _print_server_lines(pipe: IO[bytes], stream: TextIO, prefix: str) -> threadi
 
 
 @contextmanager
-def command_context(
-    *, inherit: bool, environment: Mapping[str, str]
-) -> Generator[None]:
-    """Give commands in this scope a stdin choice and environment values."""
+def command_context(*, inherit: bool) -> Generator[None]:
+    """Give commands in this scope a stdin choice."""
     stdin_token = _inherit_stdin.set(inherit)
-    env_token = _command_environment.set(environment)
     try:
         yield
     finally:
         _inherit_stdin.reset(stdin_token)
-        _command_environment.reset(env_token)
 
 
 signal_server = signal_process_tree

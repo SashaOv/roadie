@@ -560,7 +560,7 @@ def test_service_starts_only_when_a_consumer_must_run(
 
 # (spec) Environment files
 # (spec) Step values
-def test_commands_see_file_values_only_for_keys_the_process_lacks(
+def test_a_commands_own_environment_wins_over_file_values(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -617,7 +617,7 @@ def test_commands_see_file_values_only_for_keys_the_process_lacks(
     server = Server()
     execute([server, After(server)], env=(first, second))
     assert [item["PORT"] for item in seen] == ["step", "step"]
-    assert [item["NAME"] for item in seen] == ["from-a", "from-a"]
+    assert [item["NAME"] for item in seen] == ["step", "step"]
     assert [item["ONLY"] for item in seen] == ["step", "step"]
     assert [item["EXTRA"] for item in seen] == ["process", "process"]
 
@@ -939,6 +939,143 @@ def test_a_changed_root_env_value_reruns_an_included_step(
     (root / "root.env").write_text("MODE=two\n")
     graph = load(root)
     assert execute(graph.plan("result"), root=root, env=graph.env_files) == "two"
+
+
+# (spec) Environment files
+# (spec) Step values
+def test_the_process_environment_wins_over_a_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    monkeypatch.setenv("MODE", "process")
+    monkeypatch.delenv("TOKEN", raising=False)
+    env_file = root / "dev.env"
+    env_file.write_text("MODE=file\nTOKEN=file\n")
+    seen: dict[str, object] = {}
+
+    class Probe(Step[None]):
+        def build(self, run: Run) -> None:
+            seen["in_run_env"] = "MODE" in run.env
+            seen["python"] = os.environ.get("MODE")
+            seen["token"] = os.environ.get("TOKEN")
+            seen["run_token"] = run.env.get("TOKEN")
+
+    execute([Probe()], root=root, env=(env_file,))
+    assert seen == {
+        "in_run_env": False,
+        "python": "process",
+        "token": "file",
+        "run_token": "file",
+    }
+    assert "TOKEN" not in os.environ
+
+
+# (spec) Environment files
+# (spec) Step helpers
+def test_programs_run_from_publish_report_and_serve_see_a_file_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    monkeypatch.delenv("MODE", raising=False)
+    env_file = root / "dev.env"
+    env_file.write_text("MODE=from-file\n")
+    seen: dict[str, str] = {}
+    program = "import os; print(os.environ.get('MODE', 'missing'))"
+
+    class Probe(Step[str]):
+        def build(self, run: Run) -> str:
+            return "value"
+
+        def publish(self, run: Run, value: str) -> str:
+            seen["publish"] = (
+                self._cmd(sys.executable, "-c", program, capture_output=True).stdout or ""
+            ).strip()
+            return value
+
+        def report(self, value: str) -> None:
+            seen["report"] = (
+                self._cmd(sys.executable, "-c", program, capture_output=True).stdout or ""
+            ).strip()
+
+        def serve(self, value: str) -> None:
+            seen["serve"] = (
+                self._cmd(sys.executable, "-c", program, capture_output=True).stdout or ""
+            ).strip()
+
+    probe = Probe()
+    probe.name = "probe"
+    execute([probe], root=root, env=(env_file,))
+    assert seen == {"publish": "from-file", "report": "from-file", "serve": "from-file"}
+    assert "MODE" not in os.environ
+
+
+# (spec) Environment files
+@pytest.mark.parametrize("ending", ["success", "failure", "interrupt", "dry", "early"])
+def test_os_environ_is_restored_however_a_run_ends(
+    ending: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    monkeypatch.delenv("MODE", raising=False)
+    env_file = root / "dev.env"
+    env_file.write_text("MODE=from-file\n")
+    before = dict(os.environ)
+
+    class Probe(Step[None]):
+        def build(self, run: Run) -> None:
+            assert os.environ["MODE"] == "from-file"
+            if ending == "failure":
+                raise RuntimeError("broke")
+            if ending == "interrupt":
+                raise KeyboardInterrupt
+
+    class Bad(Step[None]):
+        def __init__(self) -> None:
+            self.marker: object = object()
+
+        def build(self, run: Run) -> None:
+            raise AssertionError("fingerprinted, not built")
+
+    if ending == "early":
+        with pytest.raises(Exception, match="plain value"):
+            execute([Bad()], root=root, env=(env_file,))
+    elif ending == "failure":
+        with pytest.raises(StepFailed, match="broke"):
+            execute([Probe()], root=root, env=(env_file,))
+    elif ending == "interrupt":
+        with pytest.raises(KeyboardInterrupt):
+            execute([Probe()], root=root, env=(env_file,))
+    elif ending == "dry":
+        execute([Probe()], root=root, env=(env_file,), dry=True)
+    else:
+        execute([Probe()], root=root, env=(env_file,))
+    assert dict(os.environ) == before
+
+
+# (spec) Environment files
+def test_a_key_a_step_deletes_does_not_fail_the_removal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    monkeypatch.delenv("MODE", raising=False)
+    env_file = root / "dev.env"
+    env_file.write_text("MODE=from-file\n")
+    before = dict(os.environ)
+
+    class Probe(Step[str]):
+        def build(self, run: Run) -> str:
+            del os.environ["MODE"]
+            return "done"
+
+    assert execute([Probe()], root=root, env=(env_file,)) == "done"
+    assert dict(os.environ) == before
 
 
 # (spec) Command line
