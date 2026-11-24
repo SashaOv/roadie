@@ -938,7 +938,7 @@ CI run (decision 7).
 
 ### CQ6: One environment per run
 
-Status: planned, approved 2026-11-23
+Status: implemented 2026-11-23 (commits CQ6.*)
 
 **Improvement.** Today each step has its own environment-file values: its
 build file's `config(env=...)` files, then the `--env` files. They reach
@@ -1077,6 +1077,26 @@ CI run (decision 7).
   `run.env` and `run[dependency]`.
 
 **Builder log.** `logs/CQ6.build.log`
+
+### Execution and acceptance
+
+2026-11-23:
+
+- Commits `5e0a0c7`, `fda8677` and `7e57f51` carry the three patch names
+  exactly. `131d255` ("CQ6: Fix name the run's env files without
+  env_files") renames `Graph.env_files` to `env_paths` and
+  `root_env_files` to `root_env`, which the acceptance grep requires.
+- Head `131d2550`, tree `898bf528`. `uv run roadie checks` on macOS:
+  Ruff and mypy pass, pytest 532 passed and 14 skipped. Evidence:
+  `/tmp/onespec-cq6/accept.txt`.
+- The `env_files|configured_env|_command_environment` grep prints
+  nothing (exit 1).
+- Every test a patch adds fails before that patch and passes after.
+- CI [run 45369892685](https://github.com/SashaOv/roadie/actions/runs/45369892685)
+  on `131d255` passed on `ubuntu-latest` and `macos-latest`.
+- `src/roadie`: 6,792 lines in 46 files, 40 more than the 6,752 at the
+  Facts. The estimate was about 0; the count is reported, not gated, and
+  no code was packed to meet it.
 
 ## Backlog
 - Niva, when it upgrades Roadie past CQ3: import the process helpers and
