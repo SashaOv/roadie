@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from support import execute, failing_check, passing_check, write_build
+from support import execute, failing_check, passing_check, posix_only, write_build
 
 from roadie.build import Release
 from roadie.build.manifests import CargoManifest, PackageJson, PyProject
@@ -97,8 +97,9 @@ def test_pyproject_requires_a_static_version_and_fingerprints_its_content(tmp_pa
     source = PyProject("pyproject.toml")
     missing = (tmp_path / "pyproject.toml").resolve()
     message = re.escape(f"{missing} has no static [project] version")
-    with pytest.raises(RoadieError, match=message):
+    with pytest.raises(RoadieError) as caught:
         source.read_version(tmp_path)
+    assert str(caught.value).startswith(f"cannot read {missing}: ")
     missing.write_text('[project]\nname = "demo"\ndynamic = ["version"]\n')
     with pytest.raises(RoadieError, match=message):
         source.read_version(tmp_path)
@@ -111,6 +112,128 @@ def test_pyproject_requires_a_static_version_and_fingerprints_its_content(tmp_pa
     original = source.fingerprint(tmp_path)
     missing.write_text('[project]\nname = "demo"\nversion = "0.1.1"\n')
     assert source.fingerprint(tmp_path) != original
+
+
+_MANIFEST_CASES = [
+    (
+        PyProject,
+        "pyproject.toml",
+        '[project]\nname = "demo"\nversion = "0.1.0"\n',
+        "not [valid\n",
+        '[project]\nname = "demo"\n',
+        "has no static [project] version",
+        "is not valid TOML",
+    ),
+    (
+        CargoManifest,
+        "Cargo.toml",
+        '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n',
+        "not [valid\n",
+        '[package]\nname = "demo"\nedition = "2021"\n',
+        "has no static Cargo version",
+        "is not valid TOML",
+    ),
+    (
+        PackageJson,
+        "package.json",
+        '{"name": "demo", "version": "0.1.0"}\n',
+        '{"name": \n',
+        '{"name": "demo"}\n',
+        "has no version",
+        "is not valid JSON",
+    ),
+]
+
+
+# (spec) Step kinds
+@pytest.mark.parametrize(
+    "kind,filename,valid,invalid,versionless,versionless_message,invalid_message",
+    _MANIFEST_CASES,
+)
+def test_a_manifest_fails_when_it_cannot_be_read_or_parsed(
+    kind: type, filename: str, valid: str, invalid: str, versionless: str,
+    versionless_message: str, invalid_message: str, tmp_path: Path,
+) -> None:
+    source = kind(filename)  # type: ignore[operator]
+    file = (tmp_path / filename).resolve()
+    with pytest.raises(RoadieError) as caught:
+        source.read_version(tmp_path)
+    assert str(caught.value).startswith(f"cannot read {file}: ")
+    (tmp_path / filename).write_text(invalid)
+    with pytest.raises(RoadieError) as caught_invalid:
+        source.read_version(tmp_path)
+    assert str(caught_invalid.value) == f"{file} {invalid_message}"
+    (tmp_path / filename).write_text(versionless)
+    with pytest.raises(RoadieError) as caught_versionless:
+        source.read_version(tmp_path)
+    assert str(caught_versionless.value) == f"{file} {versionless_message}"
+    (tmp_path / filename).write_text(valid)
+    assert source.read_version(tmp_path) == "0.1.0"
+
+
+# (spec) Step kinds
+@pytest.mark.parametrize(
+    "kind,filename,valid,invalid,versionless,versionless_message,invalid_message",
+    _MANIFEST_CASES,
+)
+def test_a_directory_skips_only_a_versionless_manifest(
+    kind: type, filename: str, valid: str, invalid: str, versionless: str,
+    versionless_message: str, invalid_message: str, tmp_path: Path,
+) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    companion = bundle / "pyproject.toml"
+    companion_text = '[project]\nname = "demo"\nversion = "0.1.0"\n'
+    if filename == "pyproject.toml":
+        companion = bundle / "Cargo.toml"
+        companion_text = '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n'
+    companion.write_text(companion_text)
+    target = bundle / filename
+    if target != companion:
+        target.write_text(versionless)
+    else:
+        target.write_text(versionless)
+    step = Release("bundle")
+    step.base_dir = tmp_path
+    groups = step._manifests()
+    assert [item.name for _, found in groups for item in found] == [companion.name]
+
+    target.write_text(invalid)
+    with pytest.raises(RoadieError) as caught:
+        step._manifests()
+    file = target.resolve()
+    assert str(caught.value) == f"{file} {invalid_message}"
+
+
+# (spec) Step kinds
+@posix_only
+@pytest.mark.parametrize(
+    "kind,filename,valid,invalid,versionless,versionless_message,invalid_message",
+    _MANIFEST_CASES,
+)
+def test_a_directory_fails_on_an_unreadable_manifest(
+    kind: type, filename: str, valid: str, invalid: str, versionless: str,
+    versionless_message: str, invalid_message: str, tmp_path: Path,
+) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    companion = bundle / "pyproject.toml"
+    companion_text = '[project]\nname = "demo"\nversion = "0.1.0"\n'
+    if filename == "pyproject.toml":
+        companion = bundle / "Cargo.toml"
+        companion_text = '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n'
+    companion.write_text(companion_text)
+    target = bundle / filename
+    target.write_text(valid)
+    target.chmod(0)
+    try:
+        step = Release("bundle")
+        step.base_dir = tmp_path
+        with pytest.raises(RoadieError) as caught:
+            step._manifests()
+        assert str(caught.value).startswith(f"cannot read {target.resolve()}: ")
+    finally:
+        target.chmod(0o644)
 
 
 # (spec) Step kinds

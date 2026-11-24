@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from roadie.build.manifests import CargoManifest, PackageJson, PyProject
+from roadie.build.manifests import CargoManifest, PackageJson, PyProject, _Versionless
 from roadie.build.param import Param
 from roadie.engine.errors import RoadieError
 from roadie.engine.many import one_or_many
@@ -152,7 +152,7 @@ class _Manifest:
 def _version_or_none(kind: type[_ManifestKind], file: Path, base_dir: Path) -> str | None:
     try:
         return kind(file).read_version(base_dir)
-    except RoadieError:
+    except _Versionless:
         return None
 
 

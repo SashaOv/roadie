@@ -30,9 +30,39 @@ def _cargo(directory: Path, *args: str) -> str:
         raise RoadieError(f"cannot release: {error}") from error
 
 
+class _Versionless(RoadieError):
+    """A manifest without a static version, which a directory skips."""
+
+
 def _read_text(path: Path) -> str:
-    with path.open(newline="") as handle:
-        return handle.read()
+    try:
+        with path.open(newline="") as handle:
+            return handle.read()
+    except OSError as error:
+        raise RoadieError(f"cannot read {path}: {error}") from error
+
+
+def _toml_data(file: Path) -> dict[str, object]:
+    try:
+        text = _read_text(file)
+    except UnicodeDecodeError as error:
+        raise RoadieError(f"{file} is not valid TOML") from error
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise RoadieError(f"{file} is not valid TOML") from error
+    return data if isinstance(data, dict) else {}
+
+
+def _json_data(file: Path) -> object:
+    try:
+        text = _read_text(file)
+    except UnicodeDecodeError as error:
+        raise RoadieError(f"{file} is not valid JSON") from error
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as error:
+        raise RoadieError(f"{file} is not valid JSON") from error
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -63,7 +93,9 @@ class _ManifestSource(Input):
 class PyProject(_ManifestSource):
     """A version source read from `[project] version`.
 
-    The fingerprint is the file's content. A missing or dynamic version fails
+    The fingerprint is the file's content. A file that cannot be read fails
+    with `cannot read <path>: <reason>`; one that is not valid TOML fails
+    with `<path> is not valid TOML`. A missing or dynamic version fails
     with `<path> has no static [project] version`. Writing runs
     `uv version --frozen <version>`, or `uv version <version>` when git tracks
     a `uv.lock` beside the file; that lockfile then joins the release commit,
@@ -72,16 +104,13 @@ class PyProject(_ManifestSource):
 
     def read_version(self, base_dir: Path) -> str:
         file = self.file(base_dir)
-        try:
-            data = tomllib.loads(file.read_text())
-        except (OSError, tomllib.TOMLDecodeError) as error:
-            raise RoadieError(f"{file} has no static [project] version") from error
+        data = _toml_data(file)
         project = data.get("project") if isinstance(data, dict) else None
         dynamic = project.get("dynamic", []) if isinstance(project, dict) else []
         version = project.get("version") if isinstance(project, dict) else None
         listed = dynamic if isinstance(dynamic, list) else []
         if not isinstance(version, str) or "version" in listed:
-            raise RoadieError(f"{file} has no static [project] version")
+            raise _Versionless(f"{file} has no static [project] version")
         return version
 
     def write_version(self, base_dir: Path, version: str) -> tuple[Path, ...]:
@@ -140,7 +169,9 @@ class CargoManifest(_ManifestSource):
     """A version source read from a `Cargo.toml`.
 
     The version is `[workspace.package] version`, or, without that table,
-    `[package] version`. A manifest with neither as a string fails with
+    `[package] version`. A file that cannot be read fails with
+    `cannot read <path>: <reason>`; one that is not valid TOML fails with
+    `<path> is not valid TOML`. A manifest with neither as a string fails with
     `<path> has no static Cargo version`. The fingerprint is the file's
     content. Writing replaces the version string on that table's `version`
     line and leaves the rest of the file. When git tracks the workspace
@@ -150,21 +181,18 @@ class CargoManifest(_ManifestSource):
     """
 
     def _located(self, file: Path) -> tuple[str, str]:
-        try:
-            data = tomllib.loads(file.read_text())
-        except (OSError, tomllib.TOMLDecodeError) as error:
-            raise RoadieError(f"{file} has no static Cargo version") from error
+        data = _toml_data(file)
         workspace = data.get("workspace") if isinstance(data, dict) else None
         package_table = workspace.get("package") if isinstance(workspace, dict) else None
         if isinstance(workspace, dict) and "package" in workspace:
             version = package_table.get("version") if isinstance(package_table, dict) else None
             if isinstance(version, str):
                 return "workspace.package", version
-            raise RoadieError(f"{file} has no static Cargo version")
+            raise _Versionless(f"{file} has no static Cargo version")
         package = data.get("package") if isinstance(data, dict) else None
         version = package.get("version") if isinstance(package, dict) else None
         if not isinstance(version, str):
-            raise RoadieError(f"{file} has no static Cargo version")
+            raise _Versionless(f"{file} has no static Cargo version")
         return "package", version
 
     def read_version(self, base_dir: Path) -> str:
@@ -224,7 +252,9 @@ def _replace_json_version(text: str, old: str, new: str) -> str:
 class PackageJson(_ManifestSource):
     """A version source read from a `package.json`.
 
-    The version is the top-level `version` string. A file without one fails
+    The version is the top-level `version` string. A file that cannot be
+    read fails with `cannot read <path>: <reason>`; one that is not valid
+    JSON fails with `<path> is not valid JSON`. A file without one fails
     with `<path> has no version`. The fingerprint is the file's content.
     Writing replaces that string and leaves the rest of the file. A pnpm
     lockfile is left untouched. When git tracks a `package-lock.json` beside
@@ -234,13 +264,10 @@ class PackageJson(_ManifestSource):
 
     def read_version(self, base_dir: Path) -> str:
         file = self.file(base_dir)
-        try:
-            data = json.loads(file.read_text())
-        except (OSError, json.JSONDecodeError) as error:
-            raise RoadieError(f"{file} has no version") from error
+        data = _json_data(file)
         version = data.get("version") if isinstance(data, dict) else None
         if not isinstance(version, str):
-            raise RoadieError(f"{file} has no version")
+            raise _Versionless(f"{file} has no version")
         return version
 
     def write_version(self, base_dir: Path, version: str) -> tuple[Path, ...]:
