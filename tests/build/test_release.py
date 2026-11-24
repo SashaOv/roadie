@@ -6,7 +6,7 @@ import pytest
 from support import execute, failing_check, passing_check, write_build
 
 from roadie.build import Release
-from roadie.build.release import CargoManifest, PackageJson, PyProject
+from roadie.build.manifests import CargoManifest, PackageJson, PyProject
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.graph import load
 from roadie.engine.parameters import ParameterValues

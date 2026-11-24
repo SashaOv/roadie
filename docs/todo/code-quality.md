@@ -869,7 +869,7 @@ CI run (decision 7).
   error, with only standard output and with neither, and a success;
   `cargo_rust_packages` on an invalid `Cargo.toml`; `rustc` and `git` that
   cannot start (a `PATH` without them).
-- [ ] **CQ5.2: Keep manifest formats apart from the release workflow.**
+- [x] **CQ5.2: Keep manifest formats apart from the release workflow.**
   Decision 2. No behavior change; the suite covers it, with its imports
   moved.
 - [ ] **CQ5.3: Fail a manifest that cannot be read or parsed.** Decision 3.
