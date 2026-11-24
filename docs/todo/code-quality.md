@@ -936,34 +936,143 @@ CI run (decision 7).
   write `uv.lock` it exits 2 and leaves `pyproject.toml` unchanged, so a
   failing uv leaves nothing unnamed there.
 
+### CQ6: One environment per run
+
+Status: planned, awaiting author checkpoint
+
+**Improvement.** Today each step has its own environment-file values: its
+build file's `config(env=...)` files, then the `--env` files. They reach
+only the programs a step runs from `build` (CQ4 review). They never reach
+the step's Python code, or programs run from `publish`, `report` or
+`serve`, and they override the process environment. Niva reads the same
+files itself in three places to make up for this. After this build:
+
+- one set of environment-file values belongs to the run, and `run.env`
+  names it;
+- the run puts those values into `os.environ` for its lifetime, under the
+  process environment, and removes them when it ends, however it ends;
+- every hook that can run a program receives `run`.
+
+This settles the CQ4 question about `publish`, `report` and `serve`.
+
+**Facts for this build** (2026-11-23, Roadie at `948ec18`, Niva at
+`9282790`):
+
+- `Command._environment` merges `os.environ`, then the command's own
+  `environment`, then the step's file values from a context variable that
+  only `_invoke` sets around `build`. So file values override the process
+  environment, and `publish`, `report` and `serve` get none.
+- Values are per step. `_environments` merges `step.env_files`, captured
+  from `config(env=...)` when the step is constructed, then the `--env`
+  paths. `run.environment(step)` returns them, and the step fingerprint
+  hashes them.
+- `--dry` reads the files through the same `execute` path, so a missing
+  file fails a dry run too.
+- Roadie's `build.py` calls no `config`. Its only hook overrides are
+  `Tests.report` (`src/roadie/build/tests.py:32`) and `Service.serve`
+  (`src/roadie/build/service.py:54`). Tests override `report` or `serve` in
+  `test_duration.py`, `test_jobs.py` and `test_lock.py`.
+- Niva's `pyproject.toml` takes Roadie from branch `main`, but `uv.lock`
+  pins `4ee2b6a` (R17), an ancestor of `main`. This build cannot break
+  Niva until Niva upgrades.
+- Niva calls `config` only with `base_dir`, never with `env`. No Niva step
+  overrides `report`, `serve` or `publish`, and none calls
+  `run.environment`. It passes a command's own `environment=` in
+  `forge/niva/package.py:197` and `:208`, and in
+  `jammer/ops/jammer_build/steps.py:192` and `:239`.
+- Niva's readers: `forge/forge/build_box.py` (`repository_environment`,
+  `.env` and `.env.local`), `forge/forge/environment.py`
+  (`environment_from_files`) and `jammer/ops/pulumi_util.py`
+  (`.env.local`'s passphrase). Both `forge` readers let the process
+  environment win.
+- `src/roadie` has 6,752 lines.
+
+**Decisions.** Proposed for the checkpoint.
+
+1. **Environment files belong to the run.** The run's files are the root
+   build file's `config(env=...)` files, then the `--env` files, and later
+   files win. The root build file is the one Roadie loads first. A later
+   `config(env=...)` call in it replaces an earlier one, whatever steps
+   come between. `config(env=...)` in any other build file fails, while
+   that file loads, with `config env works only in the root build file:
+   <path>`. `Step.env_files` and `configured_env` go away, and `load`
+   returns the root file's env files beside the graph. Every named file
+   must exist, as today, and a dry run checks them too.
+2. **`run.env`.** It is a read-only mapping of the values the run added to
+   `os.environ` (decision 3), and it replaces `run.environment(step)`.
+   Every step's fingerprint hashes `run.env`. A key the process
+   environment already holds is not in `run.env` and is not hashed. A step
+   that must rerun when such a variable changes takes an `Env` input, as
+   the user manual says.
+3. **`os.environ` for the run's lifetime.** After the files are read and
+   before planning, the run sets each file key that `os.environ` lacks, so
+   the process environment wins. When the run ends, it removes exactly
+   those keys: on success, on failure, on interrupt, after a dry run, and
+   after a failure before any step starts. It does not restore a value a
+   step changed or deleted; it only removes the keys it added. The spec
+   states it under "Environment files".
+4. **Programs inherit it.** The `_command_environment` context variable
+   and `command_context`'s `environment` go away. A command's environment
+   is `os.environ`, then its own `environment`, then `ROADIE_RUN_PID`, so
+   `build`, `publish`, `report`, `serve` and a step's Python code all see
+   the same values. `_cmd(environment=...)` and `_start_cmd(environment=...)`
+   stay, because Niva passes them.
+5. **Hooks receive `run`.** `report(run, value)` and `serve(run, value)`,
+   beside `publish(run, value)` and `build(run)`. `teardown`, `encode`,
+   `matches` and `decode` stay as they are: they run no program the run
+   provides values for. `Tests.report`, `Service.serve` and the tests'
+   overrides change with them.
+6. **Niva.** No Niva change is paired, because Niva is pinned (Facts). The
+   Niva backlog line gains this build's adoption: drop the three readers,
+   and change any `report` or `serve` override when it upgrades.
+7. **Push.** The executor pushes `main` after CQ6.3 and records the CI
+   run.
+   - Grant: push `main` after CQ6.3, then the record commit and `CQ6: Fix`
+     commits for a failing CI clause, up to three CI runs.
+     AUTHOR: 
+
+**Acceptance check.**
+
+- `uv run roadie checks` passes locally, and CI passes on `ubuntu-latest`
+  and `macos-latest`.
+- `git grep -n -E 'env_files|configured_env|_command_environment|def
+  environment\(' -- src` prints nothing.
+- Every test a patch adds fails before that patch and passes after.
+- The record states the line count of `src/roadie`. The estimate is about
+  0: decision 1 removes the per-step merge, and decision 3 adds the
+  lifetime. The count is reported, not gated.
+
+**Author actions at completion.** None: the executor pushes and records the
+CI run (decision 7).
+
+#### Patches
+
+- [ ] **CQ6.1: Give each run one set of environment-file values.**
+  Decisions 1 and 2. The spec's "Settings", "Environment files", "Step
+  values" and the fingerprint list say it. Tests:
+  - `config(env=...)` in an included build file fails with the message,
+    and in the root file it reaches a step of the included file;
+  - a second `config(env=...)` call replaces the first;
+  - `run.env` holds the file values for every step;
+  - a changed file value reruns a step of an included build file.
+- [ ] **CQ6.2: Put the run's values in os.environ for its lifetime.**
+  Decisions 3 and 4. The spec's "Environment files", "Step helpers" and
+  `Command.run`'s docstring say it. Tests:
+  - the process environment wins over a file, and that key is not in
+    `run.env`;
+  - a step's Python code reads a file value from `os.environ`;
+  - programs run from `publish`, `report` and `serve` see a file value;
+  - `os.environ` is equal before and after a run that succeeds, a step that
+    fails, an interrupt, a dry run, and a failure after the files are read
+    and before any step starts;
+  - a key a step deletes during the run does not fail the removal.
+- [ ] **CQ6.3: Pass run to report and serve.** Decision 5. The spec's
+  "Step hooks" says it. Tests: a `report` and a `serve` override each read
+  `run.env` and `run[dependency]`.
+
+**Builder log.** `logs/CQ6.build.log`
+
 ## Backlog
-
-- One environment per run (author, 2026-11-17). Today a step's environment-file
-  values reach only commands run from `build` (CQ4 review), never Python code,
-  a missing file is an error, and file values override the process environment.
-  Proposed (author, 2026-11-22): `os.environ` is the one mechanism, and `Run`
-  owns its lifetime.
-  - At run start, `Run` loads the env files and sets only the keys the
-    process environment lacks, so the process environment wins. It records
-    which values came from files; fingerprints hash those values and no
-    inherited ones.
-  - At run end, on success, failure or interrupt, it removes exactly the keys
-    it added. A test compares `os.environ` before and after a run for each
-    ending, including a failure before any step starts.
-  - `Command` takes no environment parameter: subprocesses inherit
-    `os.environ`, so `build`, `publish`, `report` and `serve` see the same
-    values. Every hook receives `run` (`report(run, value)`,
-    `serve(run, value)`), and `run.env` names the file-derived values. The
-    signature change needs a paired Niva change.
-  - Every named env file must exist, as today (author, 2026-11-22).
-  - Only the root build file may call `config(env=...)`; another build file
-    that does fails with a message naming it, so the environment is one per
-    run (author, 2026-11-22, until a use case for merging appears). No Niva
-    build file calls `config(env=...)`; Niva passes `--env` only.
-  - Niva then drops its three readers (`forge/build_box.py`,
-    `forge/environment.py`, `jammer/ops/pulumi_util.py`).
-
-  This replaces the CQ4 question about `publish`, `report` and `serve`.
 - Niva, when it upgrades Roadie past CQ3: import the process helpers and
   `cargo_executable` from `roadie.build`, and run `gh` through `Command`
   instead of passing a step to `_gh_json`. Its `ContractFuzz` calls
@@ -1001,6 +1110,10 @@ CI run (decision 7).
   - `run_query` raises `OSError` for a program that ran and exited non-zero.
   - The `cannot release:` wrapping is repeated in five places.
   - `Release.build` formats its left message inline.
+- Niva, when it upgrades Roadie past CQ6: drop its three environment-file
+  readers (`forge/forge/build_box.py`, `forge/forge/environment.py`,
+  `jammer/ops/pulumi_util.py`), since steps then read the run's values from
+  `os.environ`, and change any `report` or `serve` override to take `run`.
 - Niva, in its own change spec: declare helper-code and Node inputs (3);
   compose Jammer's process and storage owners (9); one workspace-version
   reader (10); distinct mypy cache directories from one helper (H5).
