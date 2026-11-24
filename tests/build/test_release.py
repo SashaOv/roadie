@@ -37,7 +37,7 @@ def _repository(tmp_path: Path, version: str = "0.1.0") -> tuple[Path, Path]:
     subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
     _git(repo, "config", "user.email", "release@example.com")
     _git(repo, "config", "user.name", "Release")
-    (repo / ".gitignore").write_text(".venv/\n")
+    (repo / ".gitignore").write_text(".venv/\ntarget/\n")
     _project(repo, version)
     _git(repo, "add", "pyproject.toml", ".gitignore")
     _git(repo, "commit", "-q", "-m", "init")
@@ -56,6 +56,14 @@ def _advance(repo: Path) -> None:
 def _tags(bare: Path) -> set[str]:
     listed = _git(bare, "tag", "--list")
     return set(listed.stdout.split())
+
+
+def _local_tags(repo: Path) -> set[str]:
+    return set(_git(repo, "tag", "--list").stdout.split())
+
+
+def _porcelain(repo: Path) -> str:
+    return _git(repo, "status", "--porcelain").stdout
 
 
 def _release(repo: Path, *secondary: str) -> str:
@@ -507,6 +515,116 @@ def test_release_fails_before_changing_anything(
     with pytest.raises(StepFailed, match="cannot release: behind its upstream"):
         _release(behind)
     assert 'version = "0.1.0"' in (behind / "pyproject.toml").read_text()
+    assert _tags(bare) == set()
+
+
+# (spec) Step kinds
+def test_a_package_lock_beside_a_later_manifest_leaves_the_tree_clean(
+    tmp_path: Path,
+) -> None:
+    repo, bare = _repository(tmp_path, "0.1.0")
+    web = repo / "web"
+    web.mkdir()
+    (web / "package.json").write_text('{"name": "web", "version": "0.1.0"}\n')
+    (web / "package-lock.json").write_text("{}\n")
+    _git(repo, "add", "web/package.json", "web/package-lock.json")
+    _git(repo, "commit", "-q", "-m", "web")
+    _git(repo, "push", "-q", "origin", "HEAD")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    _git(repo, "push", "-q", "origin", "HEAD")
+    step = Release(".", "web/package.json")
+    step.base_dir = repo
+    step.name = "release"
+    with pytest.raises(StepFailed, match="package-lock.json"):
+        execute([step], root=repo)
+    assert _porcelain(repo) == ""
+    assert _local_tags(repo) == {"v0.1.0"}
+    assert _tags(bare) == set()
+
+
+# (spec) Step kinds
+def test_a_cargo_dotted_version_after_a_valid_manifest_leaves_the_tree_clean(
+    tmp_path: Path,
+) -> None:
+    repo, bare = _repository(tmp_path, "0.1.0")
+    app = repo / "app"
+    (app / "src").mkdir(parents=True)
+    (app / "src" / "lib.rs").write_text("pub fn demo() {}\n")
+    (app / "Cargo.toml").write_text(
+        'package.name = "demo"\npackage.version = "0.1.0"\npackage.edition = "2021"\n'
+    )
+    _git(repo, "add", "app")
+    _git(repo, "commit", "-q", "-m", "cargo")
+    _git(repo, "push", "-q", "origin", "HEAD")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    _git(repo, "push", "-q", "origin", "HEAD")
+    step = Release("pyproject.toml", "app/Cargo.toml")
+    step.base_dir = repo
+    step.name = "release"
+    with pytest.raises(StepFailed, match="version line is missing"):
+        execute([step], root=repo)
+    assert _porcelain(repo) == ""
+    assert _local_tags(repo) == {"v0.1.0"}
+    assert _tags(bare) == set()
+
+
+# (spec) Step kinds
+def test_a_failing_uv_dry_run_leaves_the_tree_clean(tmp_path: Path) -> None:
+    repo, bare = _repository(tmp_path, "0.1.0")
+    app = repo / "app"
+    app.mkdir()
+    (app / "pyproject.toml").write_text('[project]\nversion = "0.1.0"\n')
+    _git(repo, "add", "app/pyproject.toml")
+    _git(repo, "commit", "-q", "-m", "app")
+    _git(repo, "push", "-q", "origin", "HEAD")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    _git(repo, "push", "-q", "origin", "HEAD")
+    step = Release("pyproject.toml", "app/pyproject.toml")
+    step.base_dir = repo
+    step.name = "release"
+    with pytest.raises(StepFailed, match="cannot release:"):
+        execute([step], root=repo)
+    assert _porcelain(repo) == ""
+    assert _local_tags(repo) == {"v0.1.0"}
+    assert _tags(bare) == set()
+
+
+# (spec) Step kinds
+def test_a_failing_cargo_update_dry_run_leaves_the_tree_clean(
+    tmp_path: Path,
+) -> None:
+    repo, bare = _repository(tmp_path, "0.1.0")
+    app = repo / "app"
+    (app / "src").mkdir(parents=True)
+    (app / "src" / "lib.rs").write_text("pub fn demo() {}\n")
+    (app / "Cargo.toml").write_text(
+        '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n\n'
+        '[lib]\npath = "src/lib.rs"\n'
+    )
+    subprocess.run(
+        ["cargo", "generate-lockfile"], cwd=app, check=True, capture_output=True
+    )
+    (app / "Cargo.toml").write_text(
+        '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n\n'
+        '[lib]\npath = "src/lib.rs"\n\n'
+        '[dependencies]\nmissing = { path = "missing" }\n'
+    )
+    _git(repo, "add", "app")
+    _git(repo, "commit", "-q", "-m", "cargo")
+    _git(repo, "push", "-q", "origin", "HEAD")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    _git(repo, "push", "-q", "origin", "HEAD")
+    step = Release("pyproject.toml", "app/Cargo.toml")
+    step.base_dir = repo
+    step.name = "release"
+    with pytest.raises(StepFailed, match="cannot release:"):
+        execute([step], root=repo)
+    assert _porcelain(repo) == ""
+    assert _local_tags(repo) == {"v0.1.0"}
     assert _tags(bare) == set()
 
 

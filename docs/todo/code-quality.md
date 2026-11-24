@@ -875,7 +875,7 @@ CI run (decision 7).
 - [x] **CQ5.3: Fail a manifest that cannot be read or parsed.** Decision 3.
   Tests, for each kind: unreadable, invalid and versionless, as a named file
   and in a directory beside a valid manifest.
-- [ ] **CQ5.4: Plan a release before changing anything.** Decision 4.
+- [x] **CQ5.4: Plan a release before changing anything.** Decision 4.
   Tests, each asserting that `git status --porcelain` prints nothing and no
   new tag exists after the failure: the Facts reproduction; a `Cargo.toml`
   whose version is the dotted key `package.version`, released after a valid

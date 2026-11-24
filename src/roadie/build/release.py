@@ -4,10 +4,17 @@ import os
 import re
 import subprocess
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from roadie.build.manifests import CargoManifest, PackageJson, PyProject, _Versionless
+from roadie.build.manifests import (
+    CargoManifest,
+    PackageJson,
+    PyProject,
+    _PlannedVersion,
+    _Versionless,
+)
 from roadie.build.param import Param
 from roadie.engine.errors import RoadieError
 from roadie.engine.many import one_or_many
@@ -188,6 +195,17 @@ def _one_source(base_dir: Path, source: str) -> list[_Manifest]:
     )
 
 
+@dataclass
+class _ReleasePlan:
+    repository: Path
+    remote: str
+    branch: str
+    start: str
+    version: str
+    message: str | None
+    changes: list[tuple[_Manifest, _PlannedVersion]] = field(default_factory=list)
+
+
 # (spec) Step kinds
 class Release(Step[str]):
     """Release the primary version; the value is that version.
@@ -309,13 +327,36 @@ class Release(Step[str]):
         return message
 
     def build(self, run: "Run") -> str:
+        plan = self._plan()
+        paths: list[Path] = []
+        for item, planned in plan.changes:
+            paths.extend(item.source.apply_version(planned))
+        if paths:
+            _commit(plan.repository, paths, plan.version, plan.message)
+        if plan.message:
+            _git(plan.repository, "tag", "-a", "-m", plan.message, f"v{plan.version}")
+        else:
+            _git(plan.repository, "tag", f"v{plan.version}")
+        _git(
+            plan.repository,
+            "push",
+            "--atomic",
+            plan.remote,
+            f"HEAD:{plan.branch}",
+            f"v{plan.version}",
+        )
+        print(f"released v{plan.version}", flush=True)
+        return plan.version
+
+    def _plan(self) -> "_ReleasePlan":
         groups = self._manifests()
         repository = _repository(self.base_dir)
         _require_clean(repository)
         remote, branch = _upstream(repository)
         _require_current(repository, remote, branch)
+        start = _git(repository, "rev-parse", "--short", "HEAD").strip()
         version = _chosen_version(repository, self._primary_version(groups))
-        paths: list[Path] = []
+        changes: list[tuple[_Manifest, _PlannedVersion]] = []
         seen: set[Path] = set()
         for _, found in groups:
             for item in found:
@@ -324,14 +365,13 @@ class Release(Step[str]):
                     continue
                 seen.add(file)
                 if item.read(self.base_dir) != version:
-                    paths.extend(item.source.write_version(self.base_dir, version))
-        message = self._release_message()
-        if paths:
-            _commit(repository, paths, version, message)
-        if message:
-            _git(repository, "tag", "-a", "-m", message, f"v{version}")
-        else:
-            _git(repository, "tag", f"v{version}")
-        _git(repository, "push", "--atomic", remote, f"HEAD:{branch}", f"v{version}")
-        print(f"released v{version}", flush=True)
-        return version
+                    changes.append((item, item.source.plan_version(self.base_dir, version)))
+        return _ReleasePlan(
+            repository=repository,
+            remote=remote,
+            branch=branch,
+            start=start,
+            version=version,
+            message=self._release_message(),
+            changes=changes,
+        )

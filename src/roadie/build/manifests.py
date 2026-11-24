@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
 from roadie.engine.errors import RoadieError
@@ -70,6 +71,15 @@ def _write_text(path: Path, text: str) -> None:
         handle.write(text)
 
 
+@dataclass(frozen=True)
+class _PlannedVersion:
+    file: Path
+    text: str | None = None
+    command: tuple[str, ...] | None = None
+    lockfile: Path | None = None
+    cargo_root: Path | None = None
+
+
 class _ManifestSource(Input):
     def __init__(self, path: str | Path) -> None:
         self.path = path
@@ -87,6 +97,29 @@ class _ManifestSource(Input):
         if not file.is_file():
             return hashlib.sha256(b"missing").hexdigest()
         return hashlib.sha256(file.read_bytes()).hexdigest()
+
+    def read_version(self, base_dir: Path) -> str:
+        raise NotImplementedError
+
+    def plan_version(self, base_dir: Path, version: str) -> _PlannedVersion:
+        raise NotImplementedError
+
+    def apply_version(self, planned: _PlannedVersion) -> tuple[Path, ...]:
+        if planned.command is not None:
+            try:
+                run_query(planned.file.parent, *planned.command)
+            except OSError as error:
+                raise RoadieError(f"cannot release: {error}") from error
+        if planned.text is not None:
+            _write_text(planned.file, planned.text)
+            if planned.cargo_root is not None and planned.lockfile is not None:
+                _cargo(planned.cargo_root, "update", "--workspace", "--offline")
+        if planned.lockfile is not None:
+            return (planned.file, planned.lockfile)
+        return (planned.file,)
+
+    def write_version(self, base_dir: Path, version: str) -> tuple[Path, ...]:
+        return self.apply_version(self.plan_version(base_dir, version))
 
 
 # (spec) Step kinds
@@ -113,20 +146,23 @@ class PyProject(_ManifestSource):
             raise _Versionless(f"{file} has no static [project] version")
         return version
 
-    def write_version(self, base_dir: Path, version: str) -> tuple[Path, ...]:
+    def plan_version(self, base_dir: Path, version: str) -> _PlannedVersion:
         file = self.file(base_dir)
         directory = file.parent
         tracked = _tracks(directory, "uv.lock")
-        command: tuple[str, ...] = ("uv", "version", version)
-        if not tracked:
+        if tracked:
+            command: tuple[str, ...] = ("uv", "version", version)
+            dry: tuple[str, ...] = ("uv", "version", "--dry-run", version)
+            lockfile: Path | None = directory / "uv.lock"
+        else:
             command = ("uv", "version", "--frozen", version)
+            dry = ("uv", "version", "--frozen", "--dry-run", version)
+            lockfile = None
         try:
-            run_query(directory, *command)
+            run_query(directory, *dry)
         except OSError as error:
             raise RoadieError(f"cannot release: {error}") from error
-        if tracked:
-            return (file, directory / "uv.lock")
-        return (file,)
+        return _PlannedVersion(file, command=command, lockfile=lockfile)
 
 
 _VERSION_LINE = re.compile(r"^(\s*version\s*=\s*)(['\"])(.*)\2(.*)$")
@@ -198,18 +234,20 @@ class CargoManifest(_ManifestSource):
     def read_version(self, base_dir: Path) -> str:
         return self._located(self.file(base_dir))[1]
 
-    def write_version(self, base_dir: Path, version: str) -> tuple[Path, ...]:
+    def plan_version(self, base_dir: Path, version: str) -> _PlannedVersion:
         file = self.file(base_dir)
         table, current = self._located(file)
-        _write_text(file, _replace_version(_read_text(file), table, current, version))
+        text = _replace_version(_read_text(file), table, current, version)
         located = _cargo(
             file.parent, "locate-project", "--workspace", "--message-format", "plain"
         )
         root = Path(located.strip()).parent
         if not _tracks(root, "Cargo.lock"):
-            return (file,)
-        _cargo(root, "update", "--workspace", "--offline")
-        return (file, root / "Cargo.lock")
+            return _PlannedVersion(file, text=text)
+        _cargo(root, "update", "--workspace", "--offline", "--dry-run")
+        return _PlannedVersion(
+            file, text=text, lockfile=root / "Cargo.lock", cargo_root=root
+        )
 
 
 def _replace_json_version(text: str, old: str, new: str) -> str:
@@ -270,12 +308,12 @@ class PackageJson(_ManifestSource):
             raise _Versionless(f"{file} has no version")
         return version
 
-    def write_version(self, base_dir: Path, version: str) -> tuple[Path, ...]:
+    def plan_version(self, base_dir: Path, version: str) -> _PlannedVersion:
         file = self.file(base_dir)
         if _tracks(file.parent, "package-lock.json"):
             raise RoadieError(
                 f"cannot release: {file} has a package-lock.json, which Roadie does not update"
             )
         current = self.read_version(base_dir)
-        _write_text(file, _replace_json_version(_read_text(file), current, version))
-        return (file,)
+        text = _replace_json_version(_read_text(file), current, version)
+        return _PlannedVersion(file, text=text)
