@@ -559,7 +559,8 @@ def test_service_starts_only_when_a_consumer_must_run(
 
 
 # (spec) Environment files
-def test_env_files_override_step_settings_and_not_the_reverse(
+# (spec) Step values
+def test_commands_see_file_values_only_for_keys_the_process_lacks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -615,13 +616,12 @@ def test_env_files_override_step_settings_and_not_the_reverse(
 
     server = Server()
     execute([server, After(server)], env=(first, second))
-    assert [item["PORT"] for item in seen] == ["b", "b"]
+    assert [item["PORT"] for item in seen] == ["step", "step"]
     assert [item["NAME"] for item in seen] == ["from-a", "from-a"]
     assert [item["ONLY"] for item in seen] == ["step", "step"]
     assert [item["EXTRA"] for item in seen] == ["process", "process"]
 
     seen.clear()
-    server.env_files = ()
     execute([server, After(server)])
     assert seen[0]["PORT"] == "step"
     assert seen[0]["EXTRA"] == "process"
@@ -642,19 +642,18 @@ def test_changed_env_file_reruns_a_step(
     @dataclass(eq=False)
     class Note(File):
         def build(self, run: Run) -> Path:
-            built.append(run.environment(self)["MODE"])
+            built.append(run.env["MODE"])
             path = run.artifact(self, ".txt")
-            path.write_text(run.environment(self)["MODE"])
+            path.write_text(run.env["MODE"])
             return path
 
     note = Note()
     note.name = note.variable = "note"
-    note.env_files = (env_file,)
-    execute([note])
-    execute([note])
+    execute([note], env=(env_file,))
+    execute([note], env=(env_file,))
     assert built == ["one"]
     env_file.write_text("MODE=two\n")
-    execute([note])
+    execute([note], env=(env_file,))
     assert built == ["one", "two"]
 
 
@@ -670,12 +669,11 @@ def test_a_run_keeps_environment_values_off_the_step(
 
     class Note(Step[str]):
         def build(self, run: Run) -> str:
-            return run.environment(self)["MODE"]
+            return run.env["MODE"]
 
     note = Note()
-    note.env_files = (env_file,)
     before = dict(vars(note))
-    assert execute([note], root=root) == "one"
+    assert execute([note], root=root, env=(env_file,)) == "one"
     assert vars(note) == before
 
 
@@ -703,7 +701,7 @@ def test_each_run_sees_its_own_environment_in_values_and_commands(
                 cwd=root,
                 label="probe",
             ).run(capture_output=True)
-            return run.environment(self)["MODE"], (completed.stdout or "").strip()
+            return run.env["MODE"], (completed.stdout or "").strip()
 
     probe = Probe()
     assert execute([probe], root=root, env=(first,)) == ("first", "first")
@@ -799,9 +797,8 @@ def test_missing_env_file_stops_before_any_step(tmp_path: Path) -> None:
             raise AssertionError("ran")
 
     note = Note()
-    note.env_files = (missing,)
     with pytest.raises(RoadieError, match="environment file does not exist:.*nope.env"):
-        execute([note])
+        execute([note], env=(missing,))
 
 
 # (spec) Environment files
@@ -813,15 +810,135 @@ def test_config_env_applies_before_cli_env(tmp_path: Path, monkeypatch: pytest.M
         "from pathlib import Path\n"
         "class Probe(Step[None]):\n"
         "    def build(self, run):\n"
-        "        Path('seen.txt').write_text(run.environment(self)['MODE'] + ' ' + run.environment(self)['TOKEN'])\n"
+        "        Path('seen.txt').write_text(run.env['MODE'] + ' ' + run.env['TOKEN'])\n"
         'config(env=["from-config.env"])\n'
         "probe = Probe()\n",
     )
     (tmp_path / "from-config.env").write_text("MODE=config\nTOKEN=from-config\n")
     cli_env = tmp_path / "cli.env"
     cli_env.write_text("MODE=cli\n")
-    execute(load(tmp_path).plan(), env=(cli_env,))
+    graph = load(tmp_path)
+    execute(graph.plan(), env=(*graph.env_files, cli_env))
     assert (tmp_path / "seen.txt").read_text() == "cli from-config"
+
+
+# (spec) Settings
+# (spec) Environment files
+def test_config_env_in_an_included_file_fails_while_it_loads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    write_build(
+        root / "module",
+        'config(env=["module.env"])\n'
+        "class Probe(Step[str]):\n"
+        "    def build(self, run):\n"
+        "        return 'x'\n"
+        "item = Probe()\n",
+    )
+    write_build(root, 'lib = include("module")\nresult = lib.item\n')
+    with pytest.raises(RoadieError, match="config env works only in the root build file:"):
+        load(root)
+
+
+# (spec) Settings
+# (spec) Environment files
+# (spec) Step values
+def test_root_env_reaches_a_step_of_an_included_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    (root / "root.env").write_text("MODE=root\n")
+    write_build(
+        root / "module",
+        "class Probe(Step[str]):\n"
+        "    def build(self, run):\n"
+        "        return run.env['MODE']\n"
+        "item = Probe()\n",
+    )
+    write_build(root, 'config(env=["root.env"])\nlib = include("module")\nresult = lib.item\n')
+    graph = load(root)
+    assert execute(graph.plan("result"), root=root, env=graph.env_files) == "root"
+
+
+# (spec) Settings
+# (spec) Environment files
+def test_a_second_root_config_env_replaces_the_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    write_build(
+        root,
+        'config(env=["a.env"])\n'
+        "first = Check('true')\n"
+        'config(env=["b.env"])\n'
+        "second = Check('true')\n",
+    )
+    graph = load(root)
+    assert graph.env_files == ((root / "b.env").resolve(),)
+
+
+# (spec) Environment files
+# (spec) Step values
+def test_run_env_holds_the_file_values_for_every_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    env_file = root / "dev.env"
+    env_file.write_text("MODE=shared\nTOKEN=kept\n")
+    seen: list[tuple[str, str]] = []
+
+    class First(Step[str]):
+        def build(self, run: Run) -> str:
+            seen.append(("first", run.env["MODE"]))
+            return run.env["MODE"]
+
+    @dataclass(eq=False)
+    class Second(Step[str]):
+        first: Step[str]
+
+        def build(self, run: Run) -> str:
+            seen.append(("second", run.env["TOKEN"]))
+            return run[self.first] + ":" + run.env["TOKEN"]
+
+    first = First()
+    second = Second(first)
+    assert execute([first, second], root=root, env=(env_file,)) == "shared:kept"
+    assert seen == [("first", "shared"), ("second", "kept")]
+
+
+# (spec) Environment files
+# (spec) Step fingerprints
+def test_a_changed_root_env_value_reruns_an_included_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    monkeypatch.chdir(root)
+    (root / "root.env").write_text("MODE=one\n")
+    write_build(
+        root / "module",
+        "class Probe(Step[str]):\n"
+        "    def build(self, run):\n"
+        "        return run.env['MODE']\n"
+        "item = Probe()\n",
+    )
+    write_build(root, 'config(env=["root.env"])\nlib = include("module")\nresult = lib.item\n')
+    graph = load(root)
+    assert execute(graph.plan("result"), root=root, env=graph.env_files) == "one"
+    graph = load(root)
+    assert execute(graph.plan("result"), root=root, env=graph.env_files) == "one"
+    (root / "root.env").write_text("MODE=two\n")
+    graph = load(root)
+    assert execute(graph.plan("result"), root=root, env=graph.env_files) == "two"
 
 
 # (spec) Command line

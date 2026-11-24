@@ -85,13 +85,15 @@ def test_config_env_takes_one_path_or_many(tmp_path: Path) -> None:
     write_build(
         tmp_path,
         'config(env="one.env")\n'
-        'one = Check("true")\n'
+        'one = Check("true")\n',
+    )
+    assert load(tmp_path).env_files == ((tmp_path / "one.env").resolve(),)
+    write_build(
+        tmp_path,
         'config(env=["two.env", "three.env"])\n'
         'many = Check("true")\n',
     )
-    graph = load(tmp_path)
-    assert graph.results["one"].env_files == ((tmp_path / "one.env").resolve(),)
-    assert graph.results["many"].env_files == (
+    assert load(tmp_path).env_files == (
         (tmp_path / "two.env").resolve(),
         (tmp_path / "three.env").resolve(),
     )

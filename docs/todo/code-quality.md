@@ -1053,7 +1053,7 @@ CI run (decision 7).
 
 #### Patches
 
-- [ ] **CQ6.1: Give each run one set of environment-file values.**
+- [x] **CQ6.1: Give each run one set of environment-file values.**
   Decisions 1 and 2. The spec's "Settings", "Environment files", "Step
   values" and the fingerprint list say it. Tests:
   - `config(env=...)` in an included build file fails with the message,

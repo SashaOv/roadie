@@ -48,11 +48,11 @@ def test_config_changes_only_subsequent_steps_and_is_released_after_load(tmp_pat
 
 # (spec) Settings
 # (spec) Environment files
-def test_config_env_is_recorded_per_file_and_released(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_config_env_belongs_to_the_root_file_and_is_released(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     write_build(
         tmp_path / "project/module",
-        'config(env=["module.env"])\nserver = RustBinary(CargoPackage("module"))\n',
+        'server = RustBinary(CargoPackage("module"))\n',
     )
     write_build(
         tmp_path / "project",
@@ -63,10 +63,9 @@ def test_config_env_is_recorded_per_file_and_released(tmp_path: Path, monkeypatc
         'after = RustBinary(CargoPackage("after"))\n',
     )
     graph = load(tmp_path / "project")
-    assert graph.results["before"].env_files == ((tmp_path / "project/root.env").resolve(),)
-    assert graph.results["included"].env_files == ((tmp_path / "project/module/module.env").resolve(),)
-    assert graph.results["after"].env_files == ((tmp_path / "project/root.env").resolve(),)
-    assert RustBinary(CargoPackage("outside")).env_files == ()
+    assert graph.env_files == ((tmp_path / "project/root.env").resolve(),)
+    assert not hasattr(graph.results["before"], "env_files")
+    assert load(tmp_path / "project").env_files == ((tmp_path / "project/root.env").resolve(),)
 
 
 # (spec) Settings

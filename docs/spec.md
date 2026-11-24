@@ -38,8 +38,9 @@ add kinds of step and input in Python.
 A **build file**, `<directory>/build.py`, is a Python file that constructs steps and
 binds them to module variables that can be accessed by name. A
 build file can include other build files. Its **settings** set the base
-directory and the **environment files**, files of environment variables for the
-programs a step runs, of the steps it constructs.
+directory of the steps it constructs; the root build file's settings also
+name the run's **environment files**, files of environment variables for the
+run.
 
 ### Fingerprints and records
 
@@ -217,29 +218,40 @@ Circular includes of build files are an error. `include` outside a build file th
 
 ### Settings
 
-`config(base_dir=..., env=[...])` sets the settings of the steps constructed
-after the call, in the build file that makes it:
+`config(base_dir=..., env=[...])` sets settings in the build file that
+makes it:
 
 - `base_dir`: the base directory, relative to the build file's directory. By
   default a step's base directory is its build file's directory, or the
   directory given to `--base-dir`; `config` overrides both for the steps
-  after the call.
+  constructed after the call in that file.
 - `env`: one environment file, or several, relative to the build file's
-  directory.
+  directory. It names the run's environment files, so it works only in the
+  root build file — the build file Roadie loads first. In any other build
+  file it fails while that file loads with `config env works only in the
+  root build file: <path>`. A later `config(env=...)` call in the root file
+  replaces an earlier one, whatever steps come between. The run puts the
+  values in `os.environ` (see Environment files), which every step and
+  program in the process shares, so a file's environment cannot stay with
+  that file's steps; merging the files of several build files would make
+  one file's values depend on which other files a run loads.
 
-Settings do not leak to other build files, and are released after the file
-loads. An unknown setting fails with `unknown config settings: <names>; known
-settings: base_dir, env`; a `base_dir` that is not a path fails with `base_dir
-must be a directory path`, and an `env` value of the wrong kind fails with
-`config env takes paths: got <type>`. `config` outside a loading build file
-fails with `config() works only in a build.py that Roadie loads`.
+`base_dir` does not leak to other build files, and both settings are
+released after the file loads. An unknown setting fails with `unknown config
+settings: <names>; known settings: base_dir, env`; a `base_dir` that is not
+a path fails with `base_dir must be a directory path`, and an `env` value
+of the wrong kind fails with `config env takes paths: got <type>`. `config`
+outside a loading build file fails with `config() works only in a build.py
+that Roadie loads`.
 
 ### Environment files
 
 An environment file holds `KEY=VALUE` lines in python-dotenv syntax; keys
-without a value are ignored. A step receives the values of its build file's
-`config` files, then the `--env` files; later files win. A relative `--env`
-path is relative to the working directory.
+without a value are ignored. One set of files belongs to the run: the root
+build file's `config(env=...)` files, then the `--env` files; later files
+win. A relative `--env` path is relative to the working directory.
+`run.env` holds the values the run reads from those files, and every step's
+fingerprint hashes `run.env`.
 
 A file that does not exist fails the run with `environment file does not
 exist: <path>` before any step builds, also under `--dry`.
@@ -633,9 +645,8 @@ not checked.
 
 A step is an instance of a `Step` subclass. `Step.build(run)` builds the step
 and returns its value; `Step.teardown(value)` tears it down and does nothing
-by default. When constructed, a step records its base directory, the
-directory of the build file loading it, and the environment files of its
-settings.
+by default. When constructed, a step records its base directory and the
+directory of the build file loading it.
 
 An attribute that is a step, or a tuple holding steps, makes those steps
 dependencies. An attribute that is an input, or a tuple holding inputs, is
@@ -653,10 +664,13 @@ still override those class attributes and hooks.
 
 `run[step]` returns the value of a dependency built or restored earlier in
 the run. A step the run has not built, or has already torn down, fails with
-`<name> is not available in this run`. `run.environment(step)` returns the
-environment-file values the run read for that step. `run.artifact(step,
-suffix)` returns a path for an artifact of the step, unique to the step and
-the suffix, and creates its parent directory.
+`<name> is not available in this run`. `run.env` is a read-only mapping of
+the values the run added to `os.environ` from its environment files (see
+Environment files). Every step's fingerprint hashes `run.env`. A key the
+process environment already holds is not in `run.env` and is not hashed; a
+step that must rerun when such a variable changes takes an `Env` input.
+`run.artifact(step, suffix)` returns a path for an artifact of the step,
+unique to the step and the suffix, and creates its parent directory.
 
 ### Step helpers
 
@@ -760,7 +774,7 @@ A step's fingerprint is a SHA-256 digest of:
   `typing`). A class defined in a build file adds that file, keyed by
   `roadie:<path relative to the project root>`;
 - its base directory, relative to the project root;
-- the values of its environment files;
+- the values of `run.env`;
 - its plain attributes; a `Path` inside the project root counts as its
   relative path in POSIX form;
 - the fingerprints of its inputs;

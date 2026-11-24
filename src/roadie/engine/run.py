@@ -1,13 +1,15 @@
 """Build a plan and tear down each step after every step that takes it."""
 
 import contextvars
+import os
 import sys
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, cast
 
 from dotenv import dotenv_values
@@ -59,19 +61,15 @@ class Run:
         self,
         *,
         locked: bool = False,
-        environments: dict[int, dict[str, str]] | None = None,
+        env: Mapping[str, str] | None = None,
     ) -> None:
         self._values: dict[int, object] = {}
-        self._environments: dict[int, dict[str, str]] = environments or {}
+        # (spec) Step values
+        self.env: Mapping[str, str] = MappingProxyType(dict(env or {}))
         self.reused: set[int] = set()
         self.locked = locked
         self._artifacts: dict[int, list[str]] = {}
         self._artifact_lock = threading.Lock()
-
-    # (spec) Step values
-    def environment(self, step: Step[Any]) -> dict[str, str]:
-        """Return the environment-file values the run read for `step`."""
-        return self._environments.get(id(step), {})
 
     # (spec) Step values
     def __getitem__[T](self, step: Step[T]) -> T:
@@ -235,7 +233,7 @@ def execute(
         try:
             held = acquire_run_lock(root)
             try:
-                run = Run(locked=locked, environments=_environments(steps, env))
+                run = Run(locked=locked, env=_run_env(env))
                 if targets is None:
                     requested = {id(steps[-1])} if steps else set()
                     names = [steps[-1]._label()] if steps else []
@@ -608,7 +606,7 @@ class _Scheduler:
                 current_step(step),
                 command_context(
                     inherit=_inherits_stdin(step, self.plan.requested),
-                    environment=self.run.environment(step),
+                    environment=self.run.env,
                 ),
                 collect_traces(collector) if collector is not None else nullcontext(),
             ):
@@ -623,7 +621,7 @@ class _Scheduler:
         return value, None if began is None else time.monotonic() - began
 
     def _run_one(self, step: Step[Any]) -> None:
-        step_fingerprint = fingerprint(step, outputs=self.outputs, env=self.run.environment(step))
+        step_fingerprint = fingerprint(step, outputs=self.outputs, env=self.run.env)
         if step.deferred and id(step) not in self.plan.requested:
             # A deferred step's output fingerprint is its step fingerprint, so a
             # consumer can be reused without it. The consumer builds it.
@@ -787,30 +785,23 @@ def _inherits_stdin(step: Step[Any], requested: frozenset[int]) -> bool:
 
 
 # (spec) Environment files
-def _environments(
-    steps: Sequence[Step[Any]], env: Sequence[Path]
-) -> dict[int, dict[str, str]]:
-    """Read env files once. ``config(env=...)`` applies first, then ``--env``."""
-    cli_paths = tuple(_resolve_env_path(path) for path in env)
-    cache: dict[Path, dict[str, str]] = {}
+# (spec) Step values
+def _run_env(paths: Sequence[Path]) -> dict[str, str]:
+    """Read the run's env files in order; later files win.
 
-    def read(path: Path) -> dict[str, str]:
-        if path not in cache:
-            if not path.is_file():
-                raise RoadieError(f"environment file does not exist: {path}")
-            loaded = dotenv_values(path)
-            cache[path] = {key: value for key, value in loaded.items() if value is not None}
-        return cache[path]
-
-    for path in cli_paths:
-        read(path)
-    environments: dict[int, dict[str, str]] = {}
-    for step in steps:
-        merged: dict[str, str] = {}
-        for path in (*step.env_files, *cli_paths):
-            merged.update(read(path))
-        environments[id(step)] = merged
-    return environments
+    Return only the values the run adds: a key the process environment
+    already holds is left to the process and is not hashed.
+    """
+    merged: dict[str, str] = {}
+    for raw in paths:
+        path = _resolve_env_path(raw)
+        if not path.is_file():
+            raise RoadieError(f"environment file does not exist: {path}")
+        loaded = dotenv_values(path)
+        merged.update(
+            {key: value for key, value in loaded.items() if value is not None}
+        )
+    return {key: value for key, value in merged.items() if key not in os.environ}
 
 
 def _resolve_env_path(path: Path) -> Path:

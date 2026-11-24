@@ -15,6 +15,8 @@ _file_directory: ContextVar[Path | None] = ContextVar(
 _base_directory: ContextVar[Path | None] = ContextVar(
     "roadie_base_directory", default=None
 )
+_build_file: ContextVar[Path | None] = ContextVar("roadie_build_file", default=None)
+_root_file: ContextVar[Path | None] = ContextVar("roadie_root_file", default=None)
 _env_files: ContextVar[tuple[Path, ...]] = ContextVar("roadie_env_files", default=())
 
 
@@ -27,8 +29,8 @@ def loading_directory() -> Path | None:
     return _file_directory.get()
 
 
-def configured_env() -> tuple[Path, ...]:
-    """Environment files from ``config(env=...)`` for the build file being loaded."""
+def root_env_files() -> tuple[Path, ...]:
+    """Environment files the root build file named with ``config(env=...)``."""
     return _env_files.get()
 
 
@@ -55,17 +57,33 @@ def config(**settings: object) -> None:
             parameter="env",
             takes="paths",
         )
+        build_file = _build_file.get()
+        if build_file is None or build_file != _root_file.get():
+            raise RoadieError(
+                f"config env works only in the root build file: {build_file}"
+            )
         _env_files.set(tuple((directory / os.fspath(item)).resolve() for item in paths))
 
 
 @contextmanager
-def file_settings(directory: Path, override: Path | None) -> Generator[None]:
+def file_settings(
+    directory: Path,
+    override: Path | None,
+    *,
+    build_file: Path,
+    root_file: Path,
+) -> Generator[None]:
     file_token = _file_directory.set(directory)
     base_token = _base_directory.set(override or directory)
-    env_token = _env_files.set(())
+    build_token = _build_file.set(build_file)
+    root_token = _root_file.set(root_file)
+    env_token = _env_files.set(()) if build_file == root_file else None
     try:
         yield
     finally:
-        _env_files.reset(env_token)
+        if env_token is not None:
+            _env_files.reset(env_token)
+        _root_file.reset(root_token)
+        _build_file.reset(build_token)
         _base_directory.reset(base_token)
         _file_directory.reset(file_token)

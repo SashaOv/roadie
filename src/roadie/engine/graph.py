@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from roadie.engine.config import file_settings
+from roadie.engine.config import file_settings, root_env_files
 from roadie.engine.errors import RoadieError
 from roadie.engine.root import find_project_root, use_project_root
 from roadie.engine.step import Step, is_reserved
@@ -28,6 +28,7 @@ class Graph:
     root: Path
     default: Step[Any] | None = None
     setup_step: Step[Any] | None = None
+    env_files: tuple[Path, ...] = ()
 
     # (spec) Command line
     def result(self, name: str | None = None) -> Step[Any]:
@@ -96,6 +97,7 @@ class Graph:
 class _Session:
     root: Path
     project: Path
+    root_file: Path
     base_dir: Path | None = None
     graphs: dict[Path, Graph] = field(default_factory=dict)
     loading: list[Path] = field(default_factory=list)
@@ -109,15 +111,17 @@ _session: ContextVar[_Session | None] = ContextVar("roadie_session", default=Non
 def load(directory: Path, *, base_dir: Path | None = None) -> Graph:
     resolved = directory.resolve()
     project = find_project_root(resolved)
+    root_file = (resolved / BUILD_FILE).resolve()
     session = _Session(
         root=resolved,
         project=project,
+        root_file=root_file,
         base_dir=base_dir.resolve() if base_dir is not None else None,
     )
     token = _session.set(session)
     try:
         with use_project_root(project):
-            return _load(session, session.root / BUILD_FILE)
+            return _load(session, root_file)
     finally:
         _session.reset(token)
 
@@ -188,8 +192,17 @@ def _load(session: _Session, build_file: Path) -> Graph:
     if not build_file.is_file():
         raise RoadieError(f"{directory} has no {BUILD_FILE}")
 
-    with _loading(session, build_file), file_settings(directory, session.base_dir):
+    with (
+        _loading(session, build_file),
+        file_settings(
+            directory,
+            session.base_dir,
+            build_file=build_file,
+            root_file=session.root_file,
+        ),
+    ):
         namespace = runpy.run_path(str(build_file), run_name=f"roadie:{build_file}")
+        collected_env = root_env_files()
     results = {
         name: value for name, value in namespace.items() if isinstance(value, Step)
     }
@@ -206,6 +219,7 @@ def _load(session: _Session, build_file: Path) -> Graph:
         root=session.project,
         default=default,
         setup_step=marked_setup,
+        env_files=collected_env if build_file == session.root_file else (),
     )
     session.graphs[build_file] = graph
     return graph

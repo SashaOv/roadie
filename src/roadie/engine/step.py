@@ -18,7 +18,7 @@ from typing import (
 
 from pydantic import TypeAdapter
 
-from roadie.engine.config import base_directory, configured_env, loading_directory
+from roadie.engine.config import base_directory, loading_directory
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import digest
 from roadie.engine.process import Command, RunningProcess
@@ -98,7 +98,6 @@ class Step[T](ABC):
     build_dir: Path | None
     variable: str | None
     build_variables: frozenset[str] | None
-    env_files: tuple[Path, ...]
     name: str | None
 
     def __new__(cls, *args: object, **kwargs: object) -> Self:
@@ -109,7 +108,6 @@ class Step[T](ABC):
         instance.build_variables = None
         instance.base_dir = base_directory()
         instance.build_dir = loading_directory()
-        instance.env_files = configured_env()
         return instance
 
     def attributes(self) -> dict[str, object]:
@@ -124,7 +122,6 @@ class Step[T](ABC):
                 "build_dir",
                 "variable",
                 "build_variables",
-                "env_files",
             }
         }
 
