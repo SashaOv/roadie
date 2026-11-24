@@ -728,7 +728,7 @@ No clause needs the author.
 
 ### CQ5: Release plans before it changes anything
 
-Status: planned, awaiting author checkpoint
+Status: planned, approved 2026-11-23
 
 **Improvement.** `Release` checks some failures only when it reaches the
 manifest they concern, after it has written earlier ones, although its
@@ -844,7 +844,7 @@ build:
    run.
    - Grant: push `main` after CQ5.5, and `CQ5: Fix` commits for a failing
      CI clause, up to three CI runs.
-     AUTHOR: 
+     AUTHOR:granted
 
 **Acceptance check.**
 
