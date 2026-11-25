@@ -1331,39 +1331,216 @@ CI run (decision 10).
   lacks cargo and pnpm, so the build ran as `codex-open`, without the
   sandbox (author, 2026-11-24).
 
+### CQ8: A step's attributes are the fields it declares
+
+Status: planned, awaiting author checkpoint
+
+**Improvement.** Today a step's attributes are whatever its instance holds
+(`vars(self)` minus eight engine names). A private cache changes the
+fingerprint, and a private step becomes a dependency. After this build:
+
+- a step's attributes are the fields its class declares `Attribute[...]`
+  (5); undeclared instance variables fail visibly, and declared, unmarked
+  fields are the step's own state;
+- a program line with no newline is printed in pieces of at most 65,536
+  characters, each with its step's prefix;
+- the CQ7 review's internals have one owner each: release refusals, a
+  reused step's bookkeeping, dry-run marks;
+- docstrings that describe only the implementation are gone, and every
+  `src` module orders imports, classes and variables, then functions (G6),
+  checked by a test;
+- repeated test steps are shared.
+
+This finishes the backlog except Niva's items, Windows and the JUnit reader.
+
+**Facts for this build** (2026-11-25, Roadie at `34deac7`, Niva at
+`9282790`):
+
+- `attributes()` is read by `dependencies()`, `graph.py:355` (derived
+  names), `fingerprint.py:38`, `parameters.py:58` and `enforce.py:25`;
+  `call_arguments()` shows it in `--dry`. Only `_Included` overrides it.
+- Step kinds in `src` with attributes: `Check` (`command`, `inputs`),
+  `Pytest` (`args`, `inputs`), `UserTask` (`instructions`, `checks`,
+  `inputs`), `UserApproval` (`question`), `Release` (`sources`, `primary`,
+  `requires`, `message`) and `Composite` (`steps`) set them in `__init__`;
+  `Directory` and `File` (`copy_to`) and `RustBinary` (`package`, `files`)
+  are dataclasses. `_Included` also holds `_path`, `_results`, `_setup`.
+- Probed on Python 3.13.13, 3.14.8 and 3.15.0rc3 and with mypy:
+  `Attribute = Annotated[T, <mark>]` works for dataclass and plain fields;
+  mypy reads `Attribute[X]` as `X`. Per-class annotations come from
+  `cls.__dict__["__annotations__"]` on 3.13 and
+  `annotationlib.get_annotations(cls, format=Format.FORWARDREF)` on 3.14+.
+  A quoted inner type (`Attribute["Decimal"]`) keeps the mark. Under
+  `from __future__ import annotations` (`node.py`, `rust.py`,
+  `engine/enforce.py`) every annotation is a string, so the mark is found
+  only by evaluating it in its module's namespace.
+- Bazel and Buck2 call the same concept a rule's attributes, declared in a
+  schema; Pants calls them fields. The spec already says "attribute", so the
+  name stays (author, 2026-11-24). The marks replace the `attributes()`
+  override chosen in the review's "Selected approach" (author, 2026-11-24).
+- `read_lines` pulls whole lines with `readline()`, and `LineSink.write`
+  keeps a thread's text in `_pending` until a newline; neither is bounded.
+  Captured standard output is kept whole by design; `_Tail` bounds standard
+  error to 2,000 characters after each line is read.
+- 13 lines in `src` write the `"cannot release:` prefix in code.
+  `Progress` tests `self._dry` in 4 places. `_execute_step` updates
+  `run.reused`, `outputs` and `progress.reused` in three branches.
+- 9 of 47 `src` modules put a class or variable after a function:
+  `directory.py`, `files.py`, `path.py`, `python_env.py`, `user.py`,
+  `inputs.py`, `process.py`, `records.py`, `report.py`.
+- `src` has 173 docstrings of 562 lines. Step-kind docstrings are spec
+  (Facts, 2026-11-15).
+- Tests have 11,983 lines; `class Note(Step[str])` is defined 35 times in 11
+  files, in variants that differ in the value returned or a file written.
+  `pythonpath = ["tests"]`, so build files loaded in-process can import
+  `support`.
+- Niva's `uv.lock` pins Roadie at `4ee2b6a`, so no Niva change is needed
+  until it upgrades.
+- `uv run roadie checks`: 551 passed, 14 skipped. `src/roadie` has 6,802
+  lines.
+
+**Decisions.** Proposed for the checkpoint.
+
+1. **The mark.** `engine/step.py` defines `Attribute = Annotated[T,
+   <mark>]`, and `roadie.build` exports it. A step's attributes are its
+   fields declared `Attribute[...]` in its class or a base class, bases first,
+   in declaration order. Each class's names are read once and kept on that
+   class, so they go when the class does (G2). `Step.attributes()` reads
+   those names only; `_Included`'s override goes, since `Composite` declares
+   `steps: Attribute[tuple[Step[Any], ...]]`.
+2. **Annotations Roadie cannot read.** A string annotation is evaluated in
+   its class's module. One that fails fails the step with `<Class>.<field>
+   annotation cannot be read: <reason>`, at the point a reserved name fails
+   today.
+3. **Undeclared state fails.** An instance variable that no class in the
+   step's hierarchy declares fails with `<step> attribute <name> is not
+   declared in its class`, at the same point. A declared, unmarked field is
+   the step's own: not fingerprinted, not a dependency, not shown by `--dry`.
+   An unmarked field without a leading `_` that holds a step or an input
+   fails with `<step> field <name> holds a step but is not an Attribute`, so
+   a forgotten mark on a dependency is visible. Reserved names fail as
+   today.
+4. **Migration.** The `src` step kinds in Facts mark their attributes and
+   declare their other fields; hand-written `__init__` bodies stay. Test
+   steps, including build-file strings, do the same. The spec's
+   "Dependencies and attributes" states decisions 1–3 and the `--dry` and
+   derived-name rules say "attribute" as before.
+5. **Long lines.** `OUTPUT_LINE_LIMIT = 65_536` in `engine/process.py`.
+   Program output, server output and `LineSink` text are taken in pieces of
+   at most that many characters; with `--jobs` above 1 each piece prints
+   as its own `[<name>] ` line. Captured output joins the pieces, so it is
+   unchanged. "Parallel steps" in the spec states it.
+6. **Release refusals.** `CannotRelease(RoadieError)` in `manifests.py`
+   takes the reason and adds the `cannot release: ` prefix; every refusal
+   and `release_errors` raise it. `release_errors` keeps converting
+   `OSError` (a program that cannot start, a file Roadie cannot read or
+   write) and `ProgramFailed`, and its docstring says so. Every message
+   stays the same.
+7. **Reuse bookkeeping.** One scheduler method records a reused step:
+   `run.reused`, its output fingerprint and `progress.reused`. The three
+   branches call it.
+8. **Dry-run marks.** `Progress` loses `dry`. A `DryProgress` with the same
+   outcome methods keeps the marks and renders the plan; `execute` hands
+   the scheduler one or the other.
+9. **Docstrings.** A docstring stays when it states something a caller
+   needs that the signature does not show: an error, a limit, a unit, an
+   order, or when a value is returned. It goes when it restates the name or
+   describes how the body works. A docstring that copies `docs/spec.md`
+   becomes a pointer to the spec section. Step-kind docstrings stay. The
+   record lists each docstring removed or shortened.
+10. **Module order.** The nine modules in Facts are reordered in a commit
+    that only moves code. A test in `tests/test_layout.py` fails for any
+    `src` module that puts a class or a module variable after a function,
+    or an import after either, naming the module and the line.
+11. **Shared test steps.** A step class defined the same way in three or
+    more test files moves to `tests/support.py`, parameterized where the
+    copies differ only in their value. Build files loaded in-process import
+    it from `support`. The record states the test line count.
+12. **Niva.** No paired change (Facts); the backlog keeps its adoption.
+13. **Push.** The executor pushes `main` after CQ8.10 and records the CI
+    run.
+    - Grant: push `main` after CQ8.10, then the record commit and `CQ8: Fix`
+      commits for a failing acceptance clause, up to three CI runs.
+      AUTHOR: 
+
+**Acceptance check.**
+
+- `uv run roadie checks` passes locally, and CI passes on `ubuntu-latest`
+  and `macos-latest`.
+- `git grep -n 'vars(self)' -- src` prints nothing (1 line at planning).
+  `git grep -n 'def attributes' -- src` prints one line, `Step`'s (2 at
+  planning).
+- `git grep -n -e '"cannot release:' -- src` prints one line, in
+  `CannotRelease` (13 at planning).
+- `git grep -n -w '_dry' -- src/roadie/engine/progress.py` prints nothing
+  (4 at planning).
+- Tests that a patch adds for a changed behavior (CQ8.3, CQ8.4, CQ8.10)
+  fail before that patch and pass after. Tests that pin behavior a patch
+  keeps (CQ8.1, CQ8.5, CQ8.6, CQ8.7) pass before and after. CQ8.2's test
+  compares the marks with today's attributes, so it has no before.
+- The record states the line counts of `src/roadie` and `tests`.
+
+**Author actions at completion.** None: the executor pushes and records the
+CI run (decision 13).
+
+#### Patches
+
+- [ ] **CQ8.1: Share repeated test steps.** Decision 11. Only moves test
+  code; the suite is the check.
+- [ ] **CQ8.2: Declare every step field.** Decisions 1 and 4, with
+  `attributes()` still reading the instance: `Attribute` exists, and `src`
+  and test steps mark and declare their fields. Test: every step kind in
+  `src`, built with each argument, has the same `attributes()` as the marks
+  name.
+- [ ] **CQ8.3: Read attributes from the marks.** Decisions 1–3. The spec
+  states it. Tests:
+  - a private field, a declared unmarked field and a cache set during
+    `build` change neither the fingerprint nor the dependencies;
+  - an inherited marked field counts, and a subclass's marks follow its
+    base's;
+  - a marked field under `from __future__ import annotations` counts, and
+    one naming an undefined type fails with its message;
+  - an undeclared instance variable, an unmarked public field holding a
+    step, and a marked reserved name each fail with their message, for a
+    dataclass step and an `__init__` step, in a run and in `--dry`.
+- [ ] **CQ8.4: Split long output lines.** Decision 5. Tests: with
+  `--jobs` 2, a program line of 65,537 characters prints as two prefixed
+  lines of 65,536 and 1, for standard output, standard error and a server;
+  a step's `print` of the same length does too, and `LineSink` keeps at
+  most 65,536 pending characters; captured output equals what the program
+  wrote; a line of exactly 65,536 prints once.
+- [ ] **CQ8.5: Give release refusals one error.** Decision 6. Test: each
+  refusal's message is unchanged and its type is `CannotRelease`.
+- [ ] **CQ8.6: Record a reused step in one place.** Decision 7. The reuse
+  tests are the check.
+- [ ] **CQ8.7: Give dry-run marks their own owner.** Decision 8. The dry-run
+  tests are the check.
+- [ ] **CQ8.8: Remove implementation-only docstrings.** Decision 9. The
+  commit body lists each docstring.
+- [ ] **CQ8.9: Order the remaining modules.** Decision 10's reorder. Only
+  moves code; the suite is the check.
+- [ ] **CQ8.10: Check module order in a test.** Decision 10's test. It
+  fails on CQ8.9's parent and passes after.
+
+**Builder log.** `logs/CQ8.build.log`
+
 ## Backlog
 - Niva, when it upgrades Roadie past CQ3: import the process helpers and
   `cargo_executable` from `roadie.build`, and run `gh` through `Command`
   instead of passing a step to `_gh_json`. Its `ContractFuzz` calls
   `self._check_cmd(completed)`, which CQ3 removed. Either Roadie gives
   `Command` a public exit check, or `ContractFuzz` raises its own failure.
-- Bound a single output line that has no newline, without splitting a
-  parallel run's prefix into it.
-
 - Resume Windows tests: fix `test_ctrl_c_stops_a_requested_service_that_outlives_it`
   on a Windows machine (CI's Python 3.15.2 worker crashed with
   `keyboard-interrupt`; `87311d1` holds the unverified start), then restore
   `windows-latest` to CI's matrix.
 
-- Attributes build: the base `Step.attributes()` returns `{}` (author,
-  2026-11-15), so steps without attributes declare nothing.
-- Docstrings (author, 2026-11-15): remove a docstring that describes only
-  the implementation and does not belong in the spec. Replace a copy of
-  spec text with a link to the spec.
 - Share one JUnit reader between `Pytest` and Niva's `ContractFuzz`, after
   the naming and aggregation differences are settled (7).
-- Reorder modules to imports, classes, functions when a build already edits
-  them (G6).
-- Look for line savings in `tests/`, which is 1.5 times the source and was
-  not examined.
-- Scheduler and release internals (CQ7 review):
-  - The `cannot release:` prefix is still written in about a dozen
-    refusals in `manifests.py` and `release.py`; one release error could
-    carry it.
-  - `release_errors` turns every `OSError` into `cannot release:` and has
-    no docstring naming what it converts.
-  - `_execute_step` repeats the reuse bookkeeping in three branches.
-  - `Progress` branches on `dry` in each method.
+- Niva, when it upgrades Roadie past CQ8: mark its steps' attributes
+  `Attribute[...]` and declare their other fields, about 29 steps
+  including `jammer/ops/jammer_build/steps.py:77`'s
+  `files: Files = field(init=False)`.
 - Niva, when it upgrades Roadie past CQ6: drop its three environment-file
   readers (`forge/forge/build_box.py`, `forge/forge/environment.py`,
   `jammer/ops/pulumi_util.py`), since steps then read the run's values from
