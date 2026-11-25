@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from support import FakeDeployment, execute, write_build
+from support import FakeDeployment, Note, execute, write_build
 
 from roadie import cli
 from roadie.build import Service, Step
@@ -225,7 +225,7 @@ def test_a_server_that_exits_shows_prefixed_output(
 
 # (spec) Command line
 def test_jobs_defaults_to_the_cpu_count(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    write_build(tmp_path, "class Note(Step[str]):\n    def build(self, run):\n        return 'v'\nitem = Note()\n")
+    write_build(tmp_path, "from support import Note\nitem = Note()\n")
     seen: dict[str, object] = {}
     monkeypatch.setattr(cli, "execute", lambda steps, **kwargs: seen.update(kwargs))
     monkeypatch.setattr(os, "process_cpu_count", lambda: 3)
@@ -238,10 +238,6 @@ def test_jobs_defaults_to_the_cpu_count(tmp_path: Path, monkeypatch: pytest.Monk
 
 # (spec) Command line
 def test_jobs_below_one_fails(tmp_path: Path) -> None:
-    class Note(Step[str]):
-        def build(self, run: Run) -> str:
-            return "v"
-
     with pytest.raises(RoadieError, match="--jobs must be at least 1"):
         execute([_named(Note(), "note")], root=tmp_path, jobs=0)
     with pytest.raises(SystemExit, match="--jobs must be at least 1"):
@@ -632,10 +628,6 @@ def test_worker_threads_share_run_state_and_see_the_project_root(tmp_path: Path)
 
 # (spec) Command line
 def test_a_dry_run_prints_marks_in_plan_order(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    class Note(Step[str]):
-        def build(self, run: Run) -> str:
-            return "v"
-
     execute(
         [_named(Note(), "a"), _named(Note(), "b"), _named(Note(), "c")],
         root=tmp_path,

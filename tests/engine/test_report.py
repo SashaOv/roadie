@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from support import FakeDeployment, execute, write_build
+from support import Boom, FakeDeployment, execute, write_build
 
 from roadie import cli
 from roadie.build import Group, Service, Step
@@ -133,9 +133,7 @@ def test_a_reused_group_is_reported_and_a_fresh_one_is_not(
     _patch_disk(monkeypatch)
     write_build(
         tmp_path,
-        "class Note(Step[str]):\n"
-        "    def build(self, run: Run) -> str:\n"
-        "        return 'v'\n"
+        "from support import Note\n"
         "note = Note()\n"
         "bundle = Group(note)\n",
     )
@@ -205,10 +203,6 @@ def test_a_failed_step_is_failed_and_the_run_stays_failed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, jobs: int
 ) -> None:
     _patch_disk(monkeypatch)
-
-    class Boom(Step[None]):
-        def build(self, run: Run) -> None:
-            raise RuntimeError("nope")
 
     boom = Boom()
     boom.name = boom.variable = "boom"
@@ -301,7 +295,7 @@ def test_a_report_appends_and_is_closed_when_the_run_ends(
         return handle
 
     monkeypatch.setattr(Path, "open", tracking_open)
-    write_build(tmp_path, "class Note(Step[str]):\n    def build(self, run: Run) -> str:\n        return 'v'\nnote = Note()\n")
+    write_build(tmp_path, "from support import Note\nnote = Note()\n")
     cli.run(file=tmp_path, jobs=1, report=report)
     cli.run(file=tmp_path, jobs=1, report=report)
     text = report.read_text()
@@ -315,7 +309,7 @@ def test_a_report_appends_and_is_closed_when_the_run_ends(
 def test_an_open_failure_warns_once_and_leaves_the_run_status(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    write_build(tmp_path, "class Note(Step[str]):\n    def build(self, run: Run) -> str:\n        return 'v'\nnote = Note()\n")
+    write_build(tmp_path, "from support import Note\nnote = Note()\n")
     report = tmp_path / "report.json"
     real_open = Path.open
 
@@ -331,10 +325,6 @@ def test_an_open_failure_warns_once_and_leaves_the_run_status(
     assert err.strip() == f"cannot write report {report}: permission denied; continuing without it"
     assert not report.exists()
 
-    class Boom(Step[None]):
-        def build(self, run: Run) -> None:
-            raise RuntimeError("nope")
-
     boom = Boom()
     boom.name = boom.variable = "boom"
     with pytest.raises(StepFailed, match="boom failed: nope"):
@@ -347,7 +337,7 @@ def test_a_write_failure_partway_warns_once_and_leaves_the_run_status(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _patch_disk(monkeypatch)
-    write_build(tmp_path, "class Note(Step[str]):\n    def build(self, run: Run) -> str:\n        return 'v'\nnote = Note()\n")
+    write_build(tmp_path, "from support import Note\nnote = Note()\n")
     report = tmp_path / "report.json"
     real_open = Path.open
 
@@ -374,10 +364,6 @@ def test_a_write_failure_partway_warns_once_and_leaves_the_run_status(
     assert f"cannot write report {report}: disk full; continuing without it" in err
     assert len(_events(report)) == 1
     assert _events(report)[0]["event"] == "run-start"
-
-    class Boom(Step[None]):
-        def build(self, run: Run) -> None:
-            raise RuntimeError("nope")
 
     boom = Boom()
     boom.name = boom.variable = "boom"

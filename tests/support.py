@@ -120,6 +120,16 @@ def git_init(directory: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=directory, check=True)
 
 
+class Note(Step[str]):
+    def build(self, run: Run) -> str:
+        return "v"
+
+
+class Boom(Step[None]):
+    def build(self, run: Run) -> None:
+        raise RuntimeError("nope")
+
+
 @dataclass(eq=False)
 class Value(Step[str]):
     value: str

@@ -433,7 +433,7 @@ def test_unreadable_record_does_not_fail_a_dry_run(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = tmp_path.resolve()
-    write_build(root, "class Note(Step[str]):\n    def build(self, run):\n        return 'v'\nitem = Note()\n")
+    write_build(root, "from support import Note\nitem = Note()\n")
     cli.run(file=root)
     record = root / "target" / "roadie" / "build.record.json"
     record.write_text("not json")

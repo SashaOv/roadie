@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from support import execute, isolate_repo
+from support import Boom, execute, isolate_repo
 
 import roadie.engine.run as run_mod
 from roadie.build import Step
@@ -107,10 +107,6 @@ def test_a_failed_run_does_not_sweep(tmp_path: Path, monkeypatch: pytest.MonkeyP
     (state / "gone.txt").write_text("old")
     written = _stamp(datetime.now(UTC) - timedelta(days=2))
     (state / "swept").write_text(written)
-
-    class Boom(Step[None]):
-        def build(self, run: Run) -> None:
-            raise RuntimeError("nope")
 
     boom = Boom()
     boom.name = "boom"

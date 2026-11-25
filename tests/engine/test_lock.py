@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from support import Stopped, execute, isolate_repo, write_build
+from support import Note, Stopped, execute, isolate_repo, write_build
 
 from roadie import cli
 from roadie.build import Service, Step
@@ -63,10 +63,6 @@ def _line(process: subprocess.Popen[str]) -> str:
 
 
 def _note() -> Step[str]:
-    class Note(Step[str]):
-        def build(self, run: Run) -> str:
-            return "v"
-
     note = Note()
     note.name = note.variable = "note"
     return note
@@ -214,7 +210,7 @@ def test_the_lock_is_released_before_the_result_is_served(
 # (spec) Command line
 def test_dry_run_takes_the_lock_like_a_run(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = tmp_path.resolve()
-    write_build(root, "class Note(Step[str]):\n    def build(self, run):\n        return 'v'\nitem = Note()\n")
+    write_build(root, "from support import Note\nitem = Note()\n")
     lock = root / "target" / "roadie" / "run.lock"
     cli.run(file=root, dry_run=True)
     assert lock.is_file()

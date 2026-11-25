@@ -289,7 +289,7 @@ def test_enforce_refuses_dry_and_clean_before_anything_runs(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "build.py").write_text(
-        "from roadie.build import *\n\nclass Note(Step[str]):\n    def build(self, run: Run) -> str:\n        return 'v'\nnote = Note()\n"
+        "from roadie.build import *\n\nfrom support import Note\nnote = Note()\n"
     )
     state = tmp_path / "target" / "roadie"
     state.mkdir(parents=True)

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from support import Stopped, execute, isolate_repo
+from support import Boom, Stopped, execute, isolate_repo
 
 from roadie.build import Group, Service, Step
 from roadie.engine.errors import StepFailed
@@ -107,10 +107,6 @@ def test_a_failed_step_was_shown_before_it_failed(
 ) -> None:
     root = tmp_path.resolve()
     isolate_repo(monkeypatch, root)
-
-    class Boom(Step[None]):
-        def build(self, run: Run) -> None:
-            raise RuntimeError("nope")
 
     boom = Boom()
     boom.name = "boom"

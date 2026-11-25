@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from support import FakeDeployment, execute, isolate_repo
+from support import Boom, FakeDeployment, Note, execute, isolate_repo
 
 import roadie.engine.run as run_module
 from roadie.build import Group, Service, Step
@@ -50,10 +50,6 @@ def test_an_unnamed_step_reports_its_class(
     isolate_repo(monkeypatch, tmp_path)
     _clock(monkeypatch)
 
-    class Note(Step[str]):
-        def build(self, run: Run) -> str:
-            return "v"
-
     execute([Note()])
     assert "built Note in 0:00" in capsys.readouterr().out.splitlines()
 
@@ -64,10 +60,6 @@ def test_a_reused_step_and_a_group_print_no_built_line(
 ) -> None:
     isolate_repo(monkeypatch, tmp_path)
     _clock(monkeypatch)
-
-    class Note(Step[str]):
-        def build(self, run: Run) -> str:
-            return "v"
 
     note = _named(Note(), "note")
     group = Group(note)
@@ -89,10 +81,6 @@ def test_a_failed_step_prints_no_duration(
 ) -> None:
     isolate_repo(monkeypatch, tmp_path)
     _clock(monkeypatch)
-
-    class Boom(Step[None]):
-        def build(self, run: Run) -> None:
-            raise RuntimeError("nope")
 
     with pytest.raises(StepFailed, match="boom failed: nope"):
         execute([_named(Boom(), "boom")])
@@ -129,10 +117,6 @@ def test_a_dry_run_prints_no_duration(
 ) -> None:
     isolate_repo(monkeypatch, tmp_path)
     _clock(monkeypatch)
-
-    class Note(Step[str]):
-        def build(self, run: Run) -> str:
-            return "v"
 
     execute([_named(Note(), "note")], dry=True)
     output = capsys.readouterr().out
