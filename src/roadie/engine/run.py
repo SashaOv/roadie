@@ -210,6 +210,7 @@ def execute(
     *,
     root: Path,
     locked: bool = False,
+    config_env: Sequence[Path] = (),
     env: Sequence[Path] = (),
     dry: bool = False,
     jobs: int = 1,
@@ -233,7 +234,7 @@ def execute(
         try:
             held = acquire_run_lock(root)
             try:
-                values = _run_env(env)
+                values = _run_env((*config_env, *env))
                 run = Run(locked=locked, env=values)
                 with _run_environ(values):
                     if targets is None:
@@ -755,11 +756,10 @@ def _run_environ(values: Mapping[str, str]) -> Generator[None]:
     step changed or deleted is not restored.
     """
     added: list[str] = []
-    for key, value in values.items():
-        if key not in os.environ:
-            os.environ[key] = value
-            added.append(key)
     try:
+        for key, value in values.items():
+            added.append(key)
+            os.environ[key] = value
         yield
     finally:
         for key in added:

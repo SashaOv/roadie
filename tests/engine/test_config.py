@@ -4,6 +4,7 @@ import pytest
 from support import write_build
 
 from roadie.build import CargoPackage, RoadieError, RustBinary, config
+from roadie.engine.config import root_env
 from roadie.engine.graph import load
 
 
@@ -62,10 +63,25 @@ def test_config_env_belongs_to_the_root_file_and_is_released(tmp_path: Path, mon
         "included = module.server\n"
         'after = RustBinary(CargoPackage("after"))\n',
     )
+    expected = ((tmp_path / "project/root.env").resolve(),)
+    observed: list[tuple[Path, ...]] = []
+
+    def observe_root_env() -> tuple[Path, ...]:
+        paths = root_env()
+        observed.append(paths)
+        return paths
+
+    monkeypatch.setattr("roadie.engine.graph.root_env", observe_root_env)
     graph = load(tmp_path / "project")
-    assert graph.env_paths == ((tmp_path / "project/root.env").resolve(),)
+    assert graph.env_paths == expected
+    assert observed == [expected]
+    assert root_env() == ()
     assert not hasattr(graph.results["before"], "env_files")
-    assert load(tmp_path / "project").env_paths == ((tmp_path / "project/root.env").resolve(),)
+
+    write_build(tmp_path / "broken", 'config(env="broken.env")\nraise RuntimeError("broken build")\n')
+    with pytest.raises(RuntimeError, match="broken build"):
+        load(tmp_path / "broken")
+    assert root_env() == ()
 
 
 # (spec) Settings

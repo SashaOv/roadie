@@ -803,6 +803,39 @@ def test_missing_env_file_stops_before_any_step(tmp_path: Path) -> None:
 
 
 # (spec) Environment files
+def test_execute_reads_config_env_before_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ROADIE_TEST_MODE", raising=False)
+    monkeypatch.delenv("ROADIE_TEST_CONFIG", raising=False)
+    config_env = tmp_path / "config.env"
+    config_env.write_text("ROADIE_TEST_MODE=config\nROADIE_TEST_CONFIG=kept\n")
+    env = tmp_path / "cli.env"
+    env.write_text("ROADIE_TEST_MODE=cli\n")
+
+    class Probe(Step[tuple[str, str]]):
+        def build(self, run: Run) -> tuple[str, str]:
+            return run.env["ROADIE_TEST_MODE"], run.env["ROADIE_TEST_CONFIG"]
+
+    assert execute([Probe()], root=tmp_path, config_env=(config_env,), env=(env,)) == ("cli", "kept")
+
+
+# (spec) Environment files
+def test_partial_environment_installation_is_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ROADIE_TEST_FIRST", raising=False)
+    monkeypatch.delenv("ROADIE_TEST_INVALID", raising=False)
+    env = tmp_path / "invalid.env"
+    env.write_text("ROADIE_TEST_FIRST=added\nROADIE_TEST_INVALID=bad\x00value\n")
+
+    with pytest.raises(ValueError, match="embedded null"):
+        execute([Value("unused")], root=tmp_path, env=(env,))
+
+    assert os.environ.get("ROADIE_TEST_FIRST") is None
+
+
+# (spec) Environment files
 def test_config_env_applies_before_cli_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     isolate_repo(monkeypatch, tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -862,7 +895,7 @@ def test_root_env_reaches_a_step_of_an_included_file(
     )
     write_build(root, 'config(env=["root.env"])\nlib = include("module")\nresult = lib.item\n')
     graph = load(root)
-    assert execute(graph.plan("result"), root=root, env=graph.env_paths) == "root"
+    assert execute(graph.plan("result"), root=root, config_env=graph.env_paths) == "root"
 
 
 # (spec) Settings
@@ -933,12 +966,12 @@ def test_a_changed_root_env_value_reruns_an_included_step(
     )
     write_build(root, 'config(env=["root.env"])\nlib = include("module")\nresult = lib.item\n')
     graph = load(root)
-    assert execute(graph.plan("result"), root=root, env=graph.env_paths) == "one"
+    assert execute(graph.plan("result"), root=root, config_env=graph.env_paths) == "one"
     graph = load(root)
-    assert execute(graph.plan("result"), root=root, env=graph.env_paths) == "one"
+    assert execute(graph.plan("result"), root=root, config_env=graph.env_paths) == "one"
     (root / "root.env").write_text("MODE=two\n")
     graph = load(root)
-    assert execute(graph.plan("result"), root=root, env=graph.env_paths) == "two"
+    assert execute(graph.plan("result"), root=root, config_env=graph.env_paths) == "two"
 
 
 # (spec) Environment files
@@ -1077,8 +1110,9 @@ def test_os_environ_is_restored_however_a_run_ends(
             raise AssertionError("fingerprinted, not built")
 
     if ending == "early":
-        with pytest.raises(Exception, match="plain value"):
+        with pytest.raises(StepFailed) as error:
             execute([Bad()], root=root, env=(env_file,))
+        assert str(error.value) == "Bad failed: Bad attribute marker must be a plain value, an input, or a step"
     elif ending == "failure":
         with pytest.raises(StepFailed, match="broke"):
             execute([Probe()], root=root, env=(env_file,))

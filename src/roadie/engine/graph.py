@@ -202,7 +202,7 @@ def _load(session: _Session, build_file: Path) -> Graph:
         ),
     ):
         namespace = runpy.run_path(str(build_file), run_name=f"roadie:{build_file}")
-        collected_env = root_env()
+        collected_env = root_env() if build_file == session.root_file else ()
     results = {
         name: value for name, value in namespace.items() if isinstance(value, Step)
     }
@@ -219,7 +219,7 @@ def _load(session: _Session, build_file: Path) -> Graph:
         root=session.project,
         default=default,
         setup_step=marked_setup,
-        env_paths=collected_env if build_file == session.root_file else (),
+        env_paths=collected_env,
     )
     session.graphs[build_file] = graph
     return graph
