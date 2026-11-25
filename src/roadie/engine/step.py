@@ -308,6 +308,7 @@ def _local_fields(cls: type, saved_globals: dict[str, Any] | None) -> _FieldName
     if cached is not None:
         return cached
 
+    hints: Mapping[str, object]
     if sys.version_info >= (3, 14):
         try:
             hints = get_annotations(cls, format=Format.FORWARDREF)
