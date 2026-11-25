@@ -886,3 +886,67 @@ def test_an_interrupt_with_nothing_running_says_interrupted(
     with pytest.raises(KeyboardInterrupt):
         execute([_named(Note(), "note")], root=tmp_path, jobs=jobs)
     assert "interrupted" in capsys.readouterr().out.splitlines()
+
+
+# (spec) Parallel steps
+@pytest.mark.parametrize("characters", [65_536, 65_537])
+@pytest.mark.parametrize("source", ["cmd", "server", "print"])
+def test_parallel_output_splits_long_lines(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], source: str, characters: int
+) -> None:
+    char = "é" if source == "server" else "z"
+    text = char * characters
+
+    class Writer(Step[None]):
+        def build(self, run: Run) -> None:
+            if source == "cmd":
+                script = (
+                    "import sys\n"
+                    f"print('z' * {characters})\n"
+                    f"sys.stderr.write('z' * {characters} + '\\n')\n"
+                )
+                result = self._cmd(sys.executable, "-c", script, capture_output=True, show_output=True)
+                assert result.stdout == text + "\n"
+                assert result.stderr == text[-1999:] + "\n"
+            elif source == "server":
+                port = available_port()
+                script = (
+                    "import socket, sys, threading\n"
+                    f"sys.stdout.buffer.write((chr(233) * {characters} + '\\n').encode())\n"
+                    "sys.stdout.buffer.flush()\n"
+                    f"with socket.create_server(('127.0.0.1', {port})):\n"
+                    "    threading.Event().wait()\n"
+                )
+                server = self._start_cmd(sys.executable, "-c", script, port=port)
+                server.stop()
+            else:
+                print(text)
+
+    execute([_named(Writer(), "writer")], root=tmp_path, jobs=2)
+    streams = capsys.readouterr()
+    expected = ["[writer] " + text[:65_536]]
+    if characters > 65_536:
+        expected.append("[writer] " + text[65_536:])
+    assert [
+        line for line in streams.out.splitlines()
+        if line.startswith(f"[writer] {char}") or line == "[writer] "
+    ] == expected
+    assert streams.err.splitlines() == (expected if source == "cmd" else [])
+
+
+# (spec) Parallel steps
+def test_parallel_print_keeps_at_most_one_piece_pending(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    class Writer(Step[None]):
+        def build(self, run: Run) -> None:
+            sink = processes.current_sink()
+            assert sink is not None
+            thread = threading.get_ident()
+            for size in (65_536, 1, 65_535, 4):
+                sys.stdout.write("z" * size)
+                assert len(sink._pending.get(thread, "")) <= 65_536
+            sys.stdout.write("\n")
+            assert not sink._pending.get(thread)
+
+    execute([_named(Writer(), "writer")], root=tmp_path, jobs=2)
+    pieces = [line for line in capsys.readouterr().out.splitlines() if line.startswith("[writer] z")]
+    assert pieces == ["[writer] " + "z" * 65_536] * 2 + ["[writer] zzzz"]

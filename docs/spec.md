@@ -462,8 +462,10 @@ CPUs Roadie may use (`os.process_cpu_count()`), or 1 when that count is
 unavailable. With `--jobs` above 1, each line a step prints, and each line of
 output from the programs its `_cmd` and `_start_cmd` run, is printed as it
 arrives, prefixed with `[<name>] `, where `<name>` is the step's name, and lines of
-different steps are not mixed. With
-`--jobs` 1, output is unprefixed.
+different steps are not mixed. A line longer than 65,536 characters is
+printed in pieces of at most that many characters, each with the same step
+prefix. Captured command output keeps the original text. With `--jobs` 1,
+output is unprefixed.
 
 ### Teardown
 

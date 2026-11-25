@@ -1503,7 +1503,7 @@ CI run (decision 13).
   - an undeclared instance variable, an unmarked public field holding a
     step, and a marked reserved name each fail with their message, for a
     dataclass step and an `__init__` step, in a run and in `--dry`.
-- [ ] **CQ8.4: Split long output lines.** Decision 5. Tests: with
+- [x] **CQ8.4: Split long output lines.** Decision 5. Tests: with
   `--jobs` 2, a program line of 65,537 characters prints as two prefixed
   lines of 65,536 and 1, for standard output, standard error and a server;
   a step's `print` of the same length does too, and `LineSink` keeps at

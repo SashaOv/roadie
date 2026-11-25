@@ -32,6 +32,7 @@ from roadie.engine.parameters import (
 )
 from roadie.engine.prefix import parallel_output, reset_prefix, set_prefix
 from roadie.engine.process import (
+    OUTPUT_LINE_LIMIT,
     TraceCollector,
     collect_traces,
     command_context,
@@ -289,7 +290,7 @@ class _Scheduler:
 
     def schedule(self) -> object:
         jobs = self.plan.jobs
-        with parallel_output() if jobs > 1 else nullcontext():
+        with parallel_output(OUTPUT_LINE_LIMIT) if jobs > 1 else nullcontext():
             if jobs == 1:
                 self._work(propagate=True)
                 return self.result[-1] if self.result else None

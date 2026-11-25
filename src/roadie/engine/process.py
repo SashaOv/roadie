@@ -15,6 +15,7 @@ from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from io import TextIOWrapper
 from pathlib import Path
 from typing import IO, Any, TextIO
 
@@ -41,6 +42,7 @@ _before_stop: Callable[[], None] | None = None
 
 _COMMAND_NAME_WORDS = 3
 OUTPUT_TAIL = 2000
+OUTPUT_LINE_LIMIT = 65_536
 
 
 @dataclass
@@ -180,14 +182,17 @@ class Command:
         stderr_parts: list[str] = _Tail()
         try:
             assert process.stderr is not None
-            readers.append(read_lines(process.stderr.readline, err, prefix, stderr_parts))
+            readers.append(
+                read_lines(process.stderr, err, prefix, stderr_parts, line_limit=OUTPUT_LINE_LIMIT)
+            )
             if process.stdout is not None:
                 readers.append(
                     read_lines(
-                        process.stdout.readline,
+                        process.stdout,
                         out,
                         prefix,
                         stdout_parts,
+                        line_limit=OUTPUT_LINE_LIMIT,
                         echo=not capture_output or show_output,
                     )
                 )
@@ -373,9 +378,8 @@ def _process_name(process: subprocess.Popen[bytes]) -> str:
 
 def _print_server_lines(pipe: IO[bytes], stream: TextIO, prefix: str) -> threading.Thread:
     """Print each line a server writes to `pipe`, keeping none."""
-    return read_lines(
-        lambda: pipe.readline().decode(errors="replace"), stream, prefix, None, daemon=True
-    )
+    text = TextIOWrapper(pipe, encoding="utf-8", errors="replace", newline="\n")
+    return read_lines(text, stream, prefix, None, line_limit=OUTPUT_LINE_LIMIT, daemon=True)
 
 
 @contextmanager

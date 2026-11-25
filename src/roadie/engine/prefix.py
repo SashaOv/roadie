@@ -2,10 +2,10 @@
 
 import sys
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
-from typing import TextIO, cast
+from typing import IO, TextIO, cast
 
 _prefix: ContextVar[str] = ContextVar("roadie_line_prefix", default="")
 _sink: ContextVar["LineSink | None"] = ContextVar("roadie_line_sink", default=None)
@@ -14,33 +14,47 @@ _sink: ContextVar["LineSink | None"] = ContextVar("roadie_line_sink", default=No
 class LineSink:
     """Write whole lines to the real standard streams, one line at a time."""
 
-    def __init__(self, stdout: TextIO, stderr: TextIO) -> None:
+    def __init__(self, stdout: TextIO, stderr: TextIO, *, line_limit: int) -> None:
         self.stdout = stdout
         self.stderr = stderr
+        self._line_limit = line_limit
         self._lock = threading.Lock()
         self._pending: dict[int, str] = {}
 
-    def emit(self, stream: TextIO, prefix: str, text: str) -> None:
-        if not text:
-            return
+    def _write_line(self, stream: TextIO, prefix: str, text: str) -> None:
         if not text.endswith("\n"):
             text += "\n"
-        with self._lock:
-            stream.write(f"{prefix}{text}" if prefix else text)
-            stream.flush()
+        stream.write(f"{prefix}{text}")
+
+    def emit(self, stream: TextIO, prefix: str, text: str) -> None:
+        if text:
+            with self._lock:
+                self._write_line(stream, prefix, text)
+                stream.flush()
 
     def write(self, text: str) -> int:
-        """Buffer `text` from the calling thread and emit its complete lines."""
+        """Keep at most one piece per thread, including at the line limit."""
         if not text:
             return 0
         thread = threading.get_ident()
         prefix = _prefix.get()
         with self._lock:
-            parts = (self._pending.pop(thread, "") + text).split("\n")
-            self._pending[thread] = parts[-1]
-            for line in parts[:-1]:
-                self.stdout.write(f"{prefix}{line}\n" if prefix else f"{line}\n")
-            if len(parts) > 1:
+            pending = self._pending.pop(thread, "")
+            start = 0
+            emitted = False
+            while start < len(text):
+                end = start + self._line_limit - len(pending)
+                newline = text.find("\n", start, end + 1)
+                if newline >= 0:
+                    end = newline + 1
+                elif end >= len(text):
+                    self._pending[thread] = pending + text[start:]
+                    break
+                self._write_line(self.stdout, prefix, pending + text[start:end])
+                emitted = True
+                pending = ""
+                start = end
+            if emitted:
                 self.stdout.flush()
         return len(text)
 
@@ -50,7 +64,7 @@ class LineSink:
         with self._lock:
             rest = self._pending.pop(thread, "")
             if rest:
-                self.stdout.write(f"{prefix}{rest}\n" if prefix else rest)
+                self._write_line(self.stdout, prefix, rest)
                 self.stdout.flush()
 
 
@@ -98,23 +112,28 @@ def reset_prefix(token: Token[str]) -> None:
 
 
 def read_lines(
-    pull: Callable[[], str],
+    pipe: IO[str],
     stream: TextIO,
     prefix: str,
     parts: list[str] | None,
     *,
+    line_limit: int,
     echo: bool = True,
     daemon: bool = False,
 ) -> threading.Thread:
-    """Append each line from `pull` to `parts` (keep nothing when it is
-    None), and print it live unless `echo` is false."""
+    """Read bounded pieces while preserving the original text in `parts`."""
     sink = current_sink()
 
     def run() -> None:
+        head = ""
         while True:
-            line = pull()
-            if line == "":
+            line = head + pipe.readline(line_limit + 1 - len(head))
+            if not line:
                 return
+            head = ""
+            # Read one character ahead so a line at the limit can keep its newline.
+            if len(line) > line_limit and not line.endswith("\n"):
+                line, head = line[:-1], line[-1]
             if parts is not None:
                 parts.append(line)
             if not echo:
@@ -131,9 +150,9 @@ def read_lines(
 
 
 @contextmanager
-def parallel_output() -> Iterator[None]:
+def parallel_output(line_limit: int) -> Iterator[None]:
     """Send standard output through a line sink for the duration of a parallel run."""
-    sink = LineSink(sys.stdout, sys.stderr)
+    sink = LineSink(sys.stdout, sys.stderr, line_limit=line_limit)
     token = _sink.set(sink)
     previous = sys.stdout
     sys.stdout = cast(TextIO, _Stdout(sink))
