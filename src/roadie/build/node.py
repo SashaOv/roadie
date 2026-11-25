@@ -11,7 +11,7 @@ from pathlib import Path
 from roadie.build.files import listed_files
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import Input, digest, run_state
-from roadie.system import CannotRun, run_query
+from roadie.system import CannotRun, ProgramFailed, run_query
 
 _NODE_ENV = ("NODE_ENV", "NODE_OPTIONS")
 _ROOT_FILES = (
@@ -57,7 +57,7 @@ def _output(root: Path, label: str, *args: str) -> str:
         return run_query(root, *args)
     except CannotRun as error:
         raise RoadieError(str(error)) from error
-    except OSError as error:
+    except ProgramFailed as error:
         raise RoadieError(f"{label} failed: {error}") from error
 
 

@@ -208,27 +208,32 @@ def test_output_is_an_unknown_argument() -> None:
         Site(output="dist")
 
 
-def test_git_that_cannot_start_fails_with_cannot_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("started", [False, True])
+def test_git_query_failure_names_the_operation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, started: bool
 ) -> None:
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     tracked_file = tmp_path / "output.txt"
     tracked_file.write_text("old\n")
     subprocess.run(["git", "add", "output.txt"], cwd=tmp_path, check=True)
-    empty = tmp_path / "empty"
-    empty.mkdir()
-    monkeypatch.setenv("PATH", str(empty))
+    if started:
+        def refused(args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(args, 1, "", "git refused")
+        monkeypatch.setattr(subprocess, "run", refused)
+        reason = "git refused"
+    else:
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        monkeypatch.setenv("PATH", str(empty))
+        reason = "cannot run git: "
     with pytest.raises(RoadieError) as caught:
         tracked(tracked_file)
-    assert str(caught.value).startswith(
-        f"cannot check whether {tracked_file} is tracked: cannot run git: "
-    )
+    assert str(caught.value).startswith(f"cannot check whether {tracked_file} is tracked: {reason}")
     built = tmp_path / "built.txt"
     built.write_text("new\n")
     with pytest.raises(RoadieError) as caught_compare:
         same_as_git_stores(tracked_file, built)
-    assert str(caught_compare.value).startswith("cannot compare ")
-    assert "cannot run git: " in str(caught_compare.value)
+    assert str(caught_compare.value).startswith(f"cannot compare {tracked_file} with git: {reason}")
 
 
 # (spec) Generated files

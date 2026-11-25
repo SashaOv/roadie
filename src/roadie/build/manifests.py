@@ -11,7 +11,7 @@ from pathlib import Path
 
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import Input
-from roadie.system import run_query
+from roadie.system import CannotRun, ProgramFailed, run_query
 
 
 def _tracks(directory: Path, name: str) -> bool:
@@ -27,7 +27,7 @@ def _tracks(directory: Path, name: str) -> bool:
 def _cargo(directory: Path, *args: str) -> str:
     try:
         return run_query(directory, "cargo", *args)
-    except OSError as error:
+    except (CannotRun, ProgramFailed) as error:
         raise RoadieError(f"cannot release: {error}") from error
 
 
@@ -116,7 +116,7 @@ class _ManifestSource(Input):
         if planned.command is not None:
             try:
                 run_query(planned.file.parent, *planned.command)
-            except OSError as error:
+            except (CannotRun, ProgramFailed) as error:
                 raise RoadieError(f"cannot release: {error}") from error
             changed.append(planned.file)
             if planned.lockfile is not None:
@@ -172,7 +172,7 @@ class PyProject(_ManifestSource):
             lockfile = None
         try:
             run_query(directory, *dry)
-        except OSError as error:
+        except (CannotRun, ProgramFailed) as error:
             raise RoadieError(f"cannot release: {error}") from error
         return _PlannedVersion(file, command=command, lockfile=lockfile)
 

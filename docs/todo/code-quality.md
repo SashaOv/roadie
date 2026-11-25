@@ -1278,7 +1278,7 @@ CI run (decision 10).
   - the env-file context variable is released after `load`;
   - the early-failure case of `test_os_environ_is_restored_however_a_run_ends`
     asserts its own message.
-- [ ] **CQ7.5: Report a failed program as ProgramFailed.** Decision 5. The
+- [x] **CQ7.5: Report a failed program as ProgramFailed.** Decision 5. The
   docstring of `run_query` says it. Tests: a non-zero exit raises
   `ProgramFailed` and is not an `OSError`; a program that cannot start
   still raises `CannotRun`; each caller's message for both is unchanged.

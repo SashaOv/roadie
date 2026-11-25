@@ -19,6 +19,10 @@ class CannotRun(OSError):
     """
 
 
+class ProgramFailed(Exception):
+    """The program started and exited non-zero."""
+
+
 def prepare_command(
     args: Sequence[str], env: Mapping[str, str] | None = None
 ) -> list[str] | str:
@@ -48,7 +52,7 @@ def run_query(cwd: Path, *args: str) -> str:
     Find the program as `prepare_command` finds it, run it in `cwd`, and
     decode its output as UTF-8 with undecodable bytes kept as surrogate
     escapes. A program that cannot start raises `CannotRun` with
-    `cannot run <program>: <reason>`. A non-zero exit raises `OSError`
+    `cannot run <program>: <reason>`. A non-zero exit raises `ProgramFailed`
     with the program's standard error, its standard output when that is
     empty, or `<program> exited with status <n>` when both are empty.
     """
@@ -68,7 +72,7 @@ def run_query(cwd: Path, *args: str) -> str:
     if completed.returncode != 0:
         detail = (completed.stderr or "").strip() or (completed.stdout or "").strip()
         reason = detail or f"{args[0]} exited with status {completed.returncode}"
-        raise OSError(reason)
+        raise ProgramFailed(reason)
     return completed.stdout or ""
 
 

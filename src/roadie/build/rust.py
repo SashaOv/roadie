@@ -15,7 +15,7 @@ from roadie.build.binary import Binary
 from roadie.build.files import Files, listed_files
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import Input, digest, run_state
-from roadie.system import CannotRun, executable_suffix, run_query
+from roadie.system import CannotRun, ProgramFailed, executable_suffix, run_query
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -46,7 +46,7 @@ def cargo_rust_packages(directory: Path) -> CargoWorkspace:
         )
     except CannotRun as error:
         raise RoadieError(str(error)) from error
-    except OSError as error:
+    except ProgramFailed as error:
         raise RoadieError(f"cargo metadata failed: {error}") from error
     metadata = json.loads(output)
     root = Path(metadata["workspace_root"]).resolve()
@@ -107,7 +107,7 @@ def _load_snapshot(directory: Path) -> CargoSnapshot:
         output = run_query(directory, "rustc", "--version")
     except CannotRun as error:
         raise RoadieError(str(error)) from error
-    except OSError as error:
+    except ProgramFailed as error:
         raise RoadieError(f"rustc --version failed: {error}") from error
     return CargoSnapshot(cargo_rust_packages(directory), output.strip())
 

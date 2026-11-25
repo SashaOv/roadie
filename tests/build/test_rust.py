@@ -89,6 +89,19 @@ def test_rustc_that_cannot_start_fails_with_cannot_run(
     assert str(caught.value).startswith("cannot run rustc: ")
 
 
+# (spec) Cargo packages
+def test_a_failing_rustc_version_names_the_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refused(args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 1, "", "no version")
+
+    monkeypatch.setattr(subprocess, "run", refused)
+    with pytest.raises(RoadieError) as caught:
+        cargo.CargoPackage("core").fingerprint(tmp_path)
+    assert str(caught.value) == "rustc --version failed: no version"
+
+
 # (spec) Cargo workspace queries
 def test_local_dependency_closure_includes_transitive_dependents() -> None:
     packages = (

@@ -19,7 +19,7 @@ from roadie.build.param import Param
 from roadie.engine.errors import RoadieError
 from roadie.engine.many import one_or_many
 from roadie.engine.step import Step
-from roadie.system import run_query
+from roadie.system import CannotRun, ProgramFailed, run_query
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -31,14 +31,14 @@ _TAG = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
 def _git(repository: Path, *args: str) -> str:
     try:
         return run_query(repository, "git", *args)
-    except OSError as error:
+    except (CannotRun, ProgramFailed) as error:
         raise RoadieError(f"cannot release: {error}") from error
 
 
 def _repository(base_dir: Path) -> Path:
     try:
         output = run_query(base_dir, "git", "rev-parse", "--show-toplevel")
-    except OSError as error:
+    except (CannotRun, ProgramFailed) as error:
         raise RoadieError(f"cannot release: {error}") from error
     return Path(output.strip()).resolve()
 

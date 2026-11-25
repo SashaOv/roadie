@@ -2,6 +2,7 @@
 
 from roadie.system.command import (
     CannotRun,
+    ProgramFailed,
     cannot_run_message,
     prepare_command,
     run_query,
@@ -19,6 +20,7 @@ from roadie.system.trace import parse_trace, traced_command, tracing_error
 
 __all__ = [
     "CannotRun",
+    "ProgramFailed",
     "cannot_run_message",
     "executable_suffix",
     "interrupt_process",

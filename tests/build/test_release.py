@@ -1,6 +1,9 @@
+import errno
 import re
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 from support import execute, failing_check, passing_check, posix_only, write_build
@@ -567,6 +570,54 @@ def test_a_cargo_dotted_version_after_a_valid_manifest_leaves_the_tree_clean(
         execute([step], root=repo)
     assert _porcelain(repo) == ""
     assert _local_tags(repo) == {"v0.1.0"}
+    assert _tags(bare) == set()
+
+
+# (spec) Step kinds
+@pytest.mark.parametrize("started", [False, True])
+@pytest.mark.parametrize(
+    "query",
+    [
+        ("git", "rev-parse", "--show-toplevel"),
+        ("git", "status", "--porcelain"),
+        ("cargo", "locate-project", "--workspace", "--message-format", "plain"),
+        ("uv", "version", "--frozen", "--dry-run", "0.1.1"),
+        ("uv", "version", "--frozen", "0.1.1"),
+    ],
+)
+def test_release_query_failures_keep_their_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, query: tuple[str, ...], started: bool
+) -> None:
+    repo, bare = _repository(tmp_path)
+    source = "pyproject.toml"
+    if query[0] == "cargo":
+        source = "Cargo.toml"
+        (repo / source).write_text('[package]\nname = "demo"\nversion = "0.1.0"\n')
+        _git(repo, "add", source)
+        _git(repo, "commit", "-qm", "cargo")
+    _git(repo, "tag", "v0.1.0")
+    _advance(repo)
+    _git(repo, "push", "-q", "origin", "HEAD")
+
+    real_run = subprocess.run
+
+    def run(args: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if tuple(args) != query or kwargs.get("check") is not False:
+            return real_run(args, **kwargs)
+        if not started:
+            raise FileNotFoundError(errno.ENOENT, "program missing", query[0])
+        return subprocess.CompletedProcess(args, 1, "", "operation refused")
+
+    monkeypatch.setattr("roadie.system.command.prepare_command", lambda command: list(command))
+    monkeypatch.setattr(subprocess, "run", run)
+    step = Release(source)
+    step.base_dir = repo
+    step.name = "release"
+    with pytest.raises(StepFailed) as caught:
+        execute([step], root=repo)
+    reason = "operation refused" if started else f"cannot run {query[0]}: [Errno {errno.ENOENT}] program missing"
+    assert str(caught.value) == f"release failed: cannot release: {reason}"
+    assert _porcelain(repo) == ""
     assert _tags(bare) == set()
 
 

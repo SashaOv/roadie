@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from roadie.engine.errors import RoadieError
-from roadie.system import run_query
+from roadie.system import CannotRun, ProgramFailed, run_query
 
 
 def repository(path: Path) -> Path | None:
@@ -38,7 +38,7 @@ def _listed(repository_path: Path, path: Path) -> list[Path]:
             "--",
             path.relative_to(repository_path).as_posix(),
         )
-    except OSError as error:
+    except (CannotRun, ProgramFailed) as error:
         raise RoadieError(
             f"cannot check whether {path} is tracked: {error}"
         ) from error
@@ -68,7 +68,7 @@ def _git_hash(repository_path: Path, file: Path, path: str) -> str:
             "--",
             str(file),
         )
-    except OSError as error:
+    except (CannotRun, ProgramFailed) as error:
         raise RoadieError(f"cannot compare {file} with git: {error}") from error
     hashed = output.strip()
     if not hashed:

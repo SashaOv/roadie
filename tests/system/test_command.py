@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from support import posix_only
 
-from roadie.system import run_query
-from roadie.system.command import _batch_command_line, prepare_command
+from roadie.system import command, run_query
+from roadie.system.command import CannotRun, _batch_command_line, prepare_command
 
 
 # (spec) Step helpers
@@ -62,33 +62,23 @@ def test_run_query_keeps_undecodable_bytes(tmp_path: Path) -> None:
 
 
 def test_run_query_with_a_missing_program(tmp_path: Path) -> None:
-    with pytest.raises(OSError) as caught:
+    with pytest.raises(CannotRun) as caught:
         run_query(tmp_path, "roadie-no-such-program")
     assert str(caught.value).startswith("cannot run roadie-no-such-program: ")
 
 
-def test_run_query_with_standard_error(tmp_path: Path) -> None:
-    script = _script(
-        tmp_path,
-        "import sys; sys.stderr.write('broken\\n'); sys.exit(3)\n",
-    )
-    with pytest.raises(OSError) as caught:
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ("sys.stderr.write('broken\\n'); sys.stdout.write('other')", "broken"),
+        ("sys.stdout.write('from out\\n')", "from out"),
+        ("pass", f"{sys.executable} exited with status 3"),
+    ],
+)
+def test_run_query_with_an_unsuccessful_exit(tmp_path: Path, body: str, message: str) -> None:
+    script = _script(tmp_path, f"import sys; {body}; sys.exit(3)\n")
+    with pytest.raises(Exception) as caught:
         run_query(tmp_path, sys.executable, str(script))
-    assert str(caught.value) == "broken"
-
-
-def test_run_query_with_only_standard_output(tmp_path: Path) -> None:
-    script = _script(
-        tmp_path,
-        "import sys; sys.stdout.write('from out\\n'); sys.exit(3)\n",
-    )
-    with pytest.raises(OSError) as caught:
-        run_query(tmp_path, sys.executable, str(script))
-    assert str(caught.value) == "from out"
-
-
-def test_run_query_with_no_output(tmp_path: Path) -> None:
-    script = _script(tmp_path, "import sys; sys.exit(3)\n")
-    with pytest.raises(OSError) as caught:
-        run_query(tmp_path, sys.executable, str(script))
-    assert str(caught.value) == f"{sys.executable} exited with status 3"
+    assert not isinstance(caught.value, OSError)
+    assert type(caught.value) is command.ProgramFailed
+    assert str(caught.value) == message
