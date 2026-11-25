@@ -1289,7 +1289,7 @@ CI run (decision 10).
 - [x] **CQ7.7: Normalize check inputs once.** Decision 7. Test,
   parameterized over `Check` and `Pytest`: one input, a step, a mix, a
   generator, and a wrong member, which fails naming that class.
-- [ ] **CQ7.8: Order the edited modules.** Decision 8. Only moves code;
+- [x] **CQ7.8: Order the edited modules.** Decision 8. Only moves code;
   the suite is the check.
 
 **Builder log.** `logs/CQ7.build.log`

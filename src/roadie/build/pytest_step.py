@@ -14,25 +14,6 @@ if TYPE_CHECKING:
     from roadie.engine.run import Run
 
 
-def _junit_failures(report: Path) -> tuple[TestFailure, ...]:
-    failures: list[TestFailure] = []
-    for case in ElementTree.parse(report).getroot().iter("testcase"):
-        label = f"{case.get('classname', '')}::{case.get('name', '')}"
-        for child in case:
-            if child.tag not in {"failure", "error"}:
-                continue
-            failures.append(TestFailure(label, child.get("message", "")))
-    return tuple(failures)
-
-
-def _status_failure(status: int, stderr: str) -> str:
-    tail = stderr[-OUTPUT_TAIL:]
-    reason = f"pytest exited with status {status}"
-    if tail:
-        reason = f"{reason}: {tail}"
-    return reason
-
-
 # (spec) Step kinds
 class Pytest(Tests):
     """Run pytest; the value is `TestResults`.
@@ -71,3 +52,22 @@ class Pytest(Tests):
         if completed.returncode not in (0, 1):
             raise RoadieError(_status_failure(completed.returncode, completed.stderr or ""))
         return TestResults(failures=_junit_failures(report))
+
+
+def _junit_failures(report: Path) -> tuple[TestFailure, ...]:
+    failures: list[TestFailure] = []
+    for case in ElementTree.parse(report).getroot().iter("testcase"):
+        label = f"{case.get('classname', '')}::{case.get('name', '')}"
+        for child in case:
+            if child.tag not in {"failure", "error"}:
+                continue
+            failures.append(TestFailure(label, child.get("message", "")))
+    return tuple(failures)
+
+
+def _status_failure(status: int, stderr: str) -> str:
+    tail = stderr[-OUTPUT_TAIL:]
+    reason = f"pytest exited with status {status}"
+    if tail:
+        reason = f"{reason}: {tail}"
+    return reason

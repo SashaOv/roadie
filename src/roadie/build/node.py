@@ -43,6 +43,48 @@ class NodeSnapshot:
     pnpm: str
 
 
+# (spec) Node environment
+class NodeEnv(Input):
+    """The Node and pnpm versions, and the workspace's manifests and lockfile.
+
+    A step that takes `NodeEnv()` reruns after a Node or pnpm upgrade, an
+    edited `package.json` in any workspace project, or a changed lockfile.
+    """
+
+    def __repr__(self) -> str:
+        return "NodeEnv()"
+
+    def declared_files(self, base_dir: Path) -> set[Path]:
+        return _node_declared(_snapshot(base_dir))
+
+    def fingerprint(self, base_dir: Path) -> str:
+        return digest(_node_environment(_snapshot(base_dir)))
+
+
+# (spec) Pnpm packages
+@dataclass(frozen=True)
+class PnpmPackage(Input):
+    name: str
+
+    def declared_files(self, base_dir: Path) -> set[Path]:
+        return _pnpm_declared(_snapshot(base_dir), self.name)
+
+    def fingerprint(self, base_dir: Path) -> str:
+        snapshot = _snapshot(base_dir)
+        listed = {
+            path.relative_to(snapshot.root).as_posix()
+            for project in _closure(snapshot.projects, self.name)
+            for path in listed_files(snapshot.root / project.root)
+        }
+        return digest(
+            {
+                "package": self.name,
+                "environment": _node_environment(snapshot),
+                "files": _file_digests(snapshot.root, sorted(listed)),
+            }
+        )
+
+
 def _workspace_root(base_dir: Path) -> Path:
     directories = (base_dir.resolve(), *base_dir.resolve().parents)
     for marker in ("pnpm-workspace.yaml", "package.json"):
@@ -141,24 +183,6 @@ def _node_environment(snapshot: NodeSnapshot) -> dict[str, object]:
     }
 
 
-# (spec) Node environment
-class NodeEnv(Input):
-    """The Node and pnpm versions, and the workspace's manifests and lockfile.
-
-    A step that takes `NodeEnv()` reruns after a Node or pnpm upgrade, an
-    edited `package.json` in any workspace project, or a changed lockfile.
-    """
-
-    def __repr__(self) -> str:
-        return "NodeEnv()"
-
-    def declared_files(self, base_dir: Path) -> set[Path]:
-        return _node_declared(_snapshot(base_dir))
-
-    def fingerprint(self, base_dir: Path) -> str:
-        return digest(_node_environment(_snapshot(base_dir)))
-
-
 def _closure(projects: tuple[NodeProject, ...], name: str) -> tuple[NodeProject, ...]:
     by_name = {project.name: project for project in projects if project.name}
     if name not in by_name:
@@ -178,27 +202,3 @@ def _pnpm_declared(snapshot: NodeSnapshot, name: str) -> set[Path]:
     for project in _closure(snapshot.projects, name):
         declared.update(listed_files(snapshot.root / project.root))
     return declared
-
-
-# (spec) Pnpm packages
-@dataclass(frozen=True)
-class PnpmPackage(Input):
-    name: str
-
-    def declared_files(self, base_dir: Path) -> set[Path]:
-        return _pnpm_declared(_snapshot(base_dir), self.name)
-
-    def fingerprint(self, base_dir: Path) -> str:
-        snapshot = _snapshot(base_dir)
-        listed = {
-            path.relative_to(snapshot.root).as_posix()
-            for project in _closure(snapshot.projects, self.name)
-            for path in listed_files(snapshot.root / project.root)
-        }
-        return digest(
-            {
-                "package": self.name,
-                "environment": _node_environment(snapshot),
-                "files": _file_digests(snapshot.root, sorted(listed)),
-            }
-        )

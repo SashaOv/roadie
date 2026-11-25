@@ -38,6 +38,71 @@ class CargoWorkspace:
     packages: tuple[RustPackage, ...]
 
 
+@dataclass(frozen=True)
+class CargoSnapshot:
+    workspace: CargoWorkspace
+    rustc: str
+
+
+# (spec) Cargo packages
+@dataclass(frozen=True)
+class CargoPackage(Input):
+    name: str
+
+    def declared_files(self, base_dir: Path) -> set[Path]:
+        return _cargo_declared(_snapshot(base_dir), self.name)
+
+    def fingerprint(self, base_dir: Path) -> str:
+        snapshot = _snapshot(base_dir)
+        root = snapshot.workspace.root
+        workspace = root.resolve()
+        listed = {
+            path.relative_to(workspace).as_posix()
+            for path in _cargo_declared(snapshot, self.name)
+        }
+        return digest(
+            {
+                "package": self.name,
+                "rustc": snapshot.rustc,
+                "env": _cargo_environment(),
+                "files": {path: _content(root, path) for path in listed},
+            }
+        )
+
+
+# (spec) Step kinds
+@dataclass(eq=False)
+class RustBinary(Binary):
+    """Build the binary target of a Cargo package.
+
+    Run `cargo build --locked -p <package> --message-format=json` in the base
+    directory, take the executable cargo reports for the package's binary
+    target, and copy it, keeping its mode, to the step's artifact (with `.exe`
+    on Windows). Fail with `cargo build --locked -p <package> produced no
+    executable` when cargo reports none, and with `... produced multiple
+    executables` when it reports several different ones.
+    """
+
+    package: CargoPackage
+    files: Files | None = None
+
+    def build(self, run: Run) -> Path:
+        completed = self._cmd(
+            "cargo",
+            "build",
+            "--locked",
+            "-p",
+            self.package.name,
+            "--message-format=json",
+            capture_output=True,
+        )
+        source = cargo_executable(completed.stdout, self.package.name)
+        destination = run.artifact(self, executable_suffix())
+        shutil.copyfile(source, destination)
+        os.chmod(destination, source.stat().st_mode)
+        return destination
+
+
 # (spec) Cargo workspace queries
 def cargo_rust_packages(directory: Path) -> CargoWorkspace:
     try:
@@ -94,12 +159,6 @@ def select_rust_packages(
                 selected.add(package.name)
                 changed = True
     return tuple(package.name for package in packages if package.name in selected)
-
-
-@dataclass(frozen=True)
-class CargoSnapshot:
-    workspace: CargoWorkspace
-    rustc: str
 
 
 def _load_snapshot(directory: Path) -> CargoSnapshot:
@@ -170,65 +229,6 @@ def _cargo_declared(snapshot: CargoSnapshot, name: str) -> set[Path]:
         if (root / filename).exists():
             declared.add(root / filename)
     return declared
-
-
-# (spec) Cargo packages
-@dataclass(frozen=True)
-class CargoPackage(Input):
-    name: str
-
-    def declared_files(self, base_dir: Path) -> set[Path]:
-        return _cargo_declared(_snapshot(base_dir), self.name)
-
-    def fingerprint(self, base_dir: Path) -> str:
-        snapshot = _snapshot(base_dir)
-        root = snapshot.workspace.root
-        workspace = root.resolve()
-        listed = {
-            path.relative_to(workspace).as_posix()
-            for path in _cargo_declared(snapshot, self.name)
-        }
-        return digest(
-            {
-                "package": self.name,
-                "rustc": snapshot.rustc,
-                "env": _cargo_environment(),
-                "files": {path: _content(root, path) for path in listed},
-            }
-        )
-
-
-# (spec) Step kinds
-@dataclass(eq=False)
-class RustBinary(Binary):
-    """Build the binary target of a Cargo package.
-
-    Run `cargo build --locked -p <package> --message-format=json` in the base
-    directory, take the executable cargo reports for the package's binary
-    target, and copy it, keeping its mode, to the step's artifact (with `.exe`
-    on Windows). Fail with `cargo build --locked -p <package> produced no
-    executable` when cargo reports none, and with `... produced multiple
-    executables` when it reports several different ones.
-    """
-
-    package: CargoPackage
-    files: Files | None = None
-
-    def build(self, run: Run) -> Path:
-        completed = self._cmd(
-            "cargo",
-            "build",
-            "--locked",
-            "-p",
-            self.package.name,
-            "--message-format=json",
-            capture_output=True,
-        )
-        source = cargo_executable(completed.stdout, self.package.name)
-        destination = run.artifact(self, executable_suffix())
-        shutil.copyfile(source, destination)
-        os.chmod(destination, source.stat().st_mode)
-        return destination
 
 
 def cargo_executable(output: str, package: str) -> Path:

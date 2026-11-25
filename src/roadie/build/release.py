@@ -29,104 +29,6 @@ _VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 _TAG = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
 
 
-def _git(repository: Path, *args: str) -> str:
-    with release_errors():
-        return run_query(repository, "git", *args)
-
-
-def _repository(base_dir: Path) -> Path:
-    return Path(_git(base_dir, "rev-parse", "--show-toplevel").strip()).resolve()
-
-
-def _status_path(line: str) -> str:
-    entry = line[3:]
-    if " -> " in entry:
-        entry = entry.split(" -> ", 1)[1]
-    return entry.strip().strip('"')
-
-
-def _require_clean(repository: Path) -> None:
-    """Fail when the work tree has changes other than this run's `target/`."""
-    status = _git(repository, "status", "--porcelain")
-    for line in status.splitlines():
-        path = _status_path(line)
-        if line.startswith("??") and (path == "target" or path.startswith("target/")):
-            continue
-        raise RoadieError("cannot release: uncommitted changes")
-
-
-def _upstream(repository: Path) -> tuple[str, str]:
-    completed = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
-        cwd=repository,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise RoadieError("cannot release: no upstream")
-    remote, _, branch = completed.stdout.strip().partition("/")
-    if not branch:
-        raise RoadieError("cannot release: no upstream")
-    return remote, branch
-
-
-def _require_current(repository: Path, remote: str, branch: str) -> None:
-    _git(repository, "fetch", remote)
-    count = _git(repository, "rev-list", "--count", f"HEAD..{remote}/{branch}")
-    if int(count.strip() or "0") > 0:
-        raise RoadieError("cannot release: behind its upstream")
-
-
-def _latest_tag(repository: Path) -> tuple[tuple[int, int, int], str] | None:
-    listed = _git(repository, "tag", "--list", "v*", "--sort=-v:refname")
-    for line in listed.splitlines():
-        match = _TAG.fullmatch(line.strip())
-        if match is None:
-            continue
-        version = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
-        return version, match.group(0)
-    return None
-
-
-def _parse_version(version: str) -> tuple[int, int, int] | None:
-    match = _VERSION.fullmatch(version)
-    if match is None:
-        return None
-    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
-
-
-def _chosen_version(repository: Path, current: str) -> str:
-    latest = _latest_tag(repository)
-    if latest is None:
-        return current
-    number, tag = latest
-    head = _git(repository, "rev-parse", "HEAD").strip()
-    tagged = _git(repository, "rev-parse", f"{tag}^{{commit}}").strip()
-    if head == tagged:
-        raise RoadieError("cannot release: nothing to release")
-    parsed = _parse_version(current)
-    if parsed is None:
-        raise RoadieError(f"cannot release: version {current} is not X.Y.Z")
-    if parsed < number:
-        raise RoadieError(f"cannot release: version {current} is lower than {tag}")
-    if parsed == number:
-        major, minor, build = parsed
-        return f"{major}.{minor}.{build + 1}"
-    return current
-
-
-def _commit(repository: Path, paths: list[Path], version: str, message: str | None) -> None:
-    _git(repository, "add", "--", *[os.fspath(path) for path in paths])
-    if not _git(repository, "diff", "--cached", "--name-only").strip():
-        return
-    subject = f"v{version} release"
-    if message:
-        _git(repository, "commit", "-m", subject, "-m", message)
-        return
-    _git(repository, "commit", "-m", subject)
-
-
 _ManifestKind = PyProject | CargoManifest | PackageJson
 _MANIFESTS: tuple[tuple[str, type[_ManifestKind]], ...] = (
     ("pyproject.toml", PyProject),
@@ -149,45 +51,6 @@ class _Manifest:
         if self.version is None:
             self.version = self.source.read_version(base_dir)
         return self.version
-
-
-def _version_or_none(kind: type[_ManifestKind], file: Path, base_dir: Path) -> str | None:
-    try:
-        return kind(file).read_version(base_dir)
-    except Versionless:
-        return None
-
-
-def _in_directory(directory: Path, base_dir: Path) -> list[_Manifest]:
-    found: list[_Manifest] = []
-    for name, kind in _MANIFESTS:
-        file = directory / name
-        if not file.is_file():
-            continue
-        version = _version_or_none(kind, file, base_dir)
-        if version is None:
-            continue
-        found.append(_Manifest(kind(file), name, version))
-    return found
-
-
-def _one_source(base_dir: Path, source: str) -> list[_Manifest]:
-    raw = Path(source)
-    path = raw.resolve() if raw.is_absolute() else (base_dir / raw).resolve()
-    if path.is_dir():
-        found = _in_directory(path, base_dir)
-        if not found:
-            raise RoadieError(
-                f"cannot release: {source} has no versioned pyproject.toml, "
-                "Cargo.toml or package.json"
-            )
-        return found
-    kind = _MANIFEST_KINDS.get(path.name)
-    if kind is not None and (path.is_file() or not path.exists()):
-        return [_Manifest(kind(source), path.name, None)]
-    raise RoadieError(
-        "Release takes pyproject.toml, Cargo.toml, or package.json files: got " + source
-    )
 
 
 @dataclass
@@ -393,6 +256,143 @@ class Release(Step[str]):
             message=self._release_message(),
             changes=changes,
         )
+
+
+def _git(repository: Path, *args: str) -> str:
+    with release_errors():
+        return run_query(repository, "git", *args)
+
+
+def _repository(base_dir: Path) -> Path:
+    return Path(_git(base_dir, "rev-parse", "--show-toplevel").strip()).resolve()
+
+
+def _status_path(line: str) -> str:
+    entry = line[3:]
+    if " -> " in entry:
+        entry = entry.split(" -> ", 1)[1]
+    return entry.strip().strip('"')
+
+
+def _require_clean(repository: Path) -> None:
+    """Fail when the work tree has changes other than this run's `target/`."""
+    status = _git(repository, "status", "--porcelain")
+    for line in status.splitlines():
+        path = _status_path(line)
+        if line.startswith("??") and (path == "target" or path.startswith("target/")):
+            continue
+        raise RoadieError("cannot release: uncommitted changes")
+
+
+def _upstream(repository: Path) -> tuple[str, str]:
+    completed = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+        cwd=repository,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RoadieError("cannot release: no upstream")
+    remote, _, branch = completed.stdout.strip().partition("/")
+    if not branch:
+        raise RoadieError("cannot release: no upstream")
+    return remote, branch
+
+
+def _require_current(repository: Path, remote: str, branch: str) -> None:
+    _git(repository, "fetch", remote)
+    count = _git(repository, "rev-list", "--count", f"HEAD..{remote}/{branch}")
+    if int(count.strip() or "0") > 0:
+        raise RoadieError("cannot release: behind its upstream")
+
+
+def _latest_tag(repository: Path) -> tuple[tuple[int, int, int], str] | None:
+    listed = _git(repository, "tag", "--list", "v*", "--sort=-v:refname")
+    for line in listed.splitlines():
+        match = _TAG.fullmatch(line.strip())
+        if match is None:
+            continue
+        version = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        return version, match.group(0)
+    return None
+
+
+def _parse_version(version: str) -> tuple[int, int, int] | None:
+    match = _VERSION.fullmatch(version)
+    if match is None:
+        return None
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
+def _chosen_version(repository: Path, current: str) -> str:
+    latest = _latest_tag(repository)
+    if latest is None:
+        return current
+    number, tag = latest
+    head = _git(repository, "rev-parse", "HEAD").strip()
+    tagged = _git(repository, "rev-parse", f"{tag}^{{commit}}").strip()
+    if head == tagged:
+        raise RoadieError("cannot release: nothing to release")
+    parsed = _parse_version(current)
+    if parsed is None:
+        raise RoadieError(f"cannot release: version {current} is not X.Y.Z")
+    if parsed < number:
+        raise RoadieError(f"cannot release: version {current} is lower than {tag}")
+    if parsed == number:
+        major, minor, build = parsed
+        return f"{major}.{minor}.{build + 1}"
+    return current
+
+
+def _commit(repository: Path, paths: list[Path], version: str, message: str | None) -> None:
+    _git(repository, "add", "--", *[os.fspath(path) for path in paths])
+    if not _git(repository, "diff", "--cached", "--name-only").strip():
+        return
+    subject = f"v{version} release"
+    if message:
+        _git(repository, "commit", "-m", subject, "-m", message)
+        return
+    _git(repository, "commit", "-m", subject)
+
+
+def _version_or_none(kind: type[_ManifestKind], file: Path, base_dir: Path) -> str | None:
+    try:
+        return kind(file).read_version(base_dir)
+    except Versionless:
+        return None
+
+
+def _in_directory(directory: Path, base_dir: Path) -> list[_Manifest]:
+    found: list[_Manifest] = []
+    for name, kind in _MANIFESTS:
+        file = directory / name
+        if not file.is_file():
+            continue
+        version = _version_or_none(kind, file, base_dir)
+        if version is None:
+            continue
+        found.append(_Manifest(kind(file), name, version))
+    return found
+
+
+def _one_source(base_dir: Path, source: str) -> list[_Manifest]:
+    raw = Path(source)
+    path = raw.resolve() if raw.is_absolute() else (base_dir / raw).resolve()
+    if path.is_dir():
+        found = _in_directory(path, base_dir)
+        if not found:
+            raise RoadieError(
+                f"cannot release: {source} has no versioned pyproject.toml, "
+                "Cargo.toml or package.json"
+            )
+        return found
+    kind = _MANIFEST_KINDS.get(path.name)
+    if kind is not None and (path.is_file() or not path.exists()):
+        return [_Manifest(kind(source), path.name, None)]
+    raise RoadieError(
+        "Release takes pyproject.toml, Cargo.toml, or package.json files: got " + source
+    )
 
 
 def _left_message(

@@ -15,6 +15,36 @@ from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.graph import load
 from roadie.engine.parameters import ParameterValues
 
+_MANIFEST_CASES = [
+    (
+        PyProject,
+        "pyproject.toml",
+        '[project]\nname = "demo"\nversion = "0.1.0"\n',
+        "not [valid\n",
+        '[project]\nname = "demo"\n',
+        "has no static [project] version",
+        "is not valid TOML",
+    ),
+    (
+        CargoManifest,
+        "Cargo.toml",
+        '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n',
+        "not [valid\n",
+        '[package]\nname = "demo"\nedition = "2021"\n',
+        "has no static Cargo version",
+        "is not valid TOML",
+    ),
+    (
+        PackageJson,
+        "package.json",
+        '{"name": "demo", "version": "0.1.0"}\n',
+        '{"name": \n',
+        '{"name": "demo"}\n',
+        "has no version",
+        "is not valid JSON",
+    ),
+]
+
 
 def _git(repository: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -124,37 +154,6 @@ def test_pyproject_requires_a_static_version_and_fingerprints_its_content(tmp_pa
     original = source.fingerprint(tmp_path)
     missing.write_text('[project]\nname = "demo"\nversion = "0.1.1"\n')
     assert source.fingerprint(tmp_path) != original
-
-
-_MANIFEST_CASES = [
-    (
-        PyProject,
-        "pyproject.toml",
-        '[project]\nname = "demo"\nversion = "0.1.0"\n',
-        "not [valid\n",
-        '[project]\nname = "demo"\n',
-        "has no static [project] version",
-        "is not valid TOML",
-    ),
-    (
-        CargoManifest,
-        "Cargo.toml",
-        '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n',
-        "not [valid\n",
-        '[package]\nname = "demo"\nedition = "2021"\n',
-        "has no static Cargo version",
-        "is not valid TOML",
-    ),
-    (
-        PackageJson,
-        "package.json",
-        '{"name": "demo", "version": "0.1.0"}\n',
-        '{"name": \n',
-        '{"name": "demo"}\n',
-        "has no version",
-        "is not valid JSON",
-    ),
-]
 
 
 # (spec) Step kinds

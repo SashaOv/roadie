@@ -108,6 +108,36 @@ class _Session:
 _session: ContextVar[_Session | None] = ContextVar("roadie_session", default=None)
 
 
+class _Included(Composite):
+    """A group of the included file's default result, with its results as attributes."""
+
+    def __init__(
+        self,
+        path: Path,
+        default: Step[Any] | None,
+        results: Mapping[str, Step[Any]],
+        marked_setup: Step[Any] | None,
+    ) -> None:
+        self._path = path
+        self._results = dict(results)
+        self._setup = marked_setup
+        super().__init__(() if default is None else (default,))
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self._results[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+    def attributes(self) -> dict[str, object]:
+        return {"steps": self.steps}
+
+    def dependencies(self) -> Iterator[Step[Any]]:
+        if not self.steps:
+            raise RoadieError(f"{self._path} marks no default result")
+        yield self.steps[0]
+
+
 def load(directory: Path, *, base_dir: Path | None = None) -> Graph:
     resolved = directory.resolve()
     project = find_project_root(resolved)
@@ -276,36 +306,6 @@ def setup_steps(graph: Graph) -> list[Step[Any]]:
     if graph.setup_step is not None and id(graph.setup_step) not in seen:
         found.append(graph.setup_step)
     return found
-
-
-class _Included(Composite):
-    """A group of the included file's default result, with its results as attributes."""
-
-    def __init__(
-        self,
-        path: Path,
-        default: Step[Any] | None,
-        results: Mapping[str, Step[Any]],
-        marked_setup: Step[Any] | None,
-    ) -> None:
-        self._path = path
-        self._results = dict(results)
-        self._setup = marked_setup
-        super().__init__(() if default is None else (default,))
-
-    def __getattr__(self, name: str) -> Any:
-        try:
-            return self._results[name]
-        except KeyError:
-            raise AttributeError(name) from None
-
-    def attributes(self) -> dict[str, object]:
-        return {"steps": self.steps}
-
-    def dependencies(self) -> Iterator[Step[Any]]:
-        if not self.steps:
-            raise RoadieError(f"{self._path} marks no default result")
-        yield self.steps[0]
 
 
 def _name_steps(

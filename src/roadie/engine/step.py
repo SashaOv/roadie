@@ -29,61 +29,6 @@ if TYPE_CHECKING:
 _serials = itertools.count()
 
 
-def _type_params(cls: type) -> tuple[Any, ...]:
-    params = getattr(cls, "__type_params__", ())
-    return params if isinstance(params, tuple) else ()
-
-
-def _concrete_value_type(cls: type) -> Any:
-    """The step's value type `T` when it is a concrete type, else None."""
-    substitutions: dict[Any, Any] = {}
-
-    def visit(current: type, seen: set[type]) -> None:
-        if current in seen:
-            return
-        seen.add(current)
-        for base in getattr(current, "__orig_bases__", ()):
-            origin = get_origin(base)
-            if not isinstance(origin, type):
-                continue
-            params = _type_params(origin)
-            for param, arg in zip(params, get_args(base), strict=False):
-                if isinstance(param, TypeVar) and param not in substitutions:
-                    substitutions[param] = arg
-            visit(origin, seen)
-        for base in current.__bases__:
-            visit(base, seen)
-
-    visit(cls, set())
-    params = _type_params(Step)
-    if len(params) != 1 or not isinstance(params[0], TypeVar):
-        return None
-    if params[0] not in substitutions:
-        return None
-    arg = substitutions[params[0]]
-    seen_vars: set[Any] = set()
-    while isinstance(arg, TypeVar):
-        if arg in seen_vars or arg not in substitutions:
-            return None
-        seen_vars.add(arg)
-        arg = substitutions[arg]
-    if arg is Any:
-        return None
-    if arg is None:
-        return type(None)
-    return arg
-
-
-def _value_adapter(cls: "type[Step[Any]]") -> TypeAdapter[Any] | None:
-    try:
-        return cls.__dict__["_adapter"]
-    except KeyError:
-        value_type = _concrete_value_type(cls)
-        adapter = None if value_type is None else TypeAdapter(value_type)
-        cls._adapter = adapter
-        return adapter
-
-
 # (spec) Dependencies and attributes
 class Step[T](ABC):
     _adapter: ClassVar[TypeAdapter[Any] | None]
@@ -243,11 +188,67 @@ def _reserved_names() -> frozenset[str]:
 
 _RESERVED = _reserved_names()
 
+_HOOKS = frozenset(name for name in _RESERVED if callable(getattr(Step, name, None)))
+
+
+def _type_params(cls: type) -> tuple[Any, ...]:
+    params = getattr(cls, "__type_params__", ())
+    return params if isinstance(params, tuple) else ()
+
+
+def _concrete_value_type(cls: type) -> Any:
+    """The step's value type `T` when it is a concrete type, else None."""
+    substitutions: dict[Any, Any] = {}
+
+    def visit(current: type, seen: set[type]) -> None:
+        if current in seen:
+            return
+        seen.add(current)
+        for base in getattr(current, "__orig_bases__", ()):
+            origin = get_origin(base)
+            if not isinstance(origin, type):
+                continue
+            params = _type_params(origin)
+            for param, arg in zip(params, get_args(base), strict=False):
+                if isinstance(param, TypeVar) and param not in substitutions:
+                    substitutions[param] = arg
+            visit(origin, seen)
+        for base in current.__bases__:
+            visit(base, seen)
+
+    visit(cls, set())
+    params = _type_params(Step)
+    if len(params) != 1 or not isinstance(params[0], TypeVar):
+        return None
+    if params[0] not in substitutions:
+        return None
+    arg = substitutions[params[0]]
+    seen_vars: set[Any] = set()
+    while isinstance(arg, TypeVar):
+        if arg in seen_vars or arg not in substitutions:
+            return None
+        seen_vars.add(arg)
+        arg = substitutions[arg]
+    if arg is Any:
+        return None
+    if arg is None:
+        return type(None)
+    return arg
+
+
+def _value_adapter(cls: "type[Step[Any]]") -> TypeAdapter[Any] | None:
+    try:
+        return cls.__dict__["_adapter"]
+    except KeyError:
+        value_type = _concrete_value_type(cls)
+        adapter = None if value_type is None else TypeAdapter(value_type)
+        cls._adapter = adapter
+        return adapter
+
 
 def is_reserved(name: str) -> bool:
     """True when `name` is one Roadie keeps for itself on a step."""
     return name in _RESERVED
-_HOOKS = frozenset(name for name in _RESERVED if callable(getattr(Step, name, None)))
 
 
 # (spec) Dependencies and attributes

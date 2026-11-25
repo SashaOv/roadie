@@ -205,143 +205,6 @@ class _Live:
         return id(step) in self._run._values
 
 
-def execute(
-    steps: Sequence[Step[Any]],
-    *,
-    root: Path,
-    locked: bool = False,
-    config_env: Sequence[Path] = (),
-    env: Sequence[Path] = (),
-    dry: bool = False,
-    jobs: int = 1,
-    targets: Sequence[Step[Any]] | None = None,
-    parameters: ParameterValues | None = None,
-    leading: int = 0,
-    report: Path | None = None,
-    enforce: bool = False,
-) -> object:
-    if jobs < 1:
-        raise RoadieError("--jobs must be at least 1")
-    if enforce and dry:
-        raise RoadieError("--enforce does not apply to --dry")
-    if enforce:
-        refusal = tracing_error()
-        if refusal is not None:
-            raise RoadieError(refusal)
-    _one_requested(targets if targets is not None else steps[-1:])
-    with use_project_root(root):
-        writer = Report(report) if report is not None else None
-        try:
-            held = acquire_run_lock(root)
-            try:
-                values = _run_env((*config_env, *env))
-                run = Run(locked=locked, env=values)
-                with _run_environ(values):
-                    if targets is None:
-                        requested = {id(steps[-1])} if steps else set()
-                        names = [steps[-1]._label()] if steps else []
-                    else:
-                        requested = {id(step) for step in targets}
-                        names = [step._label() for step in targets]
-                    plan = _Plan.build(
-                        steps, requested=requested, leading=leading, jobs=jobs, dry=dry
-                    )
-                    live = _Live(run, plan.blockers)
-                    scheduler = _Scheduler(
-                        plan, run, live, run_lock=held, progress=Progress(writer, dry=dry), enforce=enforce
-                    )
-                    return _run_steps(scheduler, parameters, names)
-            finally:
-                held.release()
-        finally:
-            if writer is not None:
-                writer.close()
-
-
-def _run_steps(
-    scheduler: "_Scheduler",
-    parameters: ParameterValues | None,
-    names: list[str],
-) -> object:
-    plan = scheduler.plan
-    steps = plan.steps
-    live = scheduler.live
-    progress = scheduler.progress
-    dry = plan.dry
-    requested = plan.requested
-    reset_interrupt()
-    succeeded = False
-    outcome = "succeeded"
-    previous_before_stop = set_before_stop(scheduler.announce_interrupt)
-    try:
-        with run_scope(), interrupt_on_terminate():
-            bound = None
-            try:
-                bound = bind_parameters(
-                    steps,
-                    parameters if parameters is not None else ParameterValues({}, {}),
-                )
-                progress.run_start(names, plan.jobs)
-                value = scheduler.schedule()
-                if scheduler.interrupted:
-                    outcome = "interrupted"
-                    raise KeyboardInterrupt
-                if scheduler.failures:
-                    outcome = "failed"
-                    raise scheduler.failures[0]
-                if scheduler.undeclared:
-                    outcome = "failed"
-                    names = [
-                        step._label()
-                        for step in steps
-                        if id(step) in scheduler.undeclared
-                    ]
-                    raise RoadieError(
-                        f"undeclared reads in {len(names)} steps: {', '.join(names)}"
-                    )
-                for step in steps:
-                    if step.deferred and id(step) not in requested and id(step) not in scheduler.started:
-                        progress.not_started(step)
-                if dry:
-                    progress.render_plan(steps)
-                    return None
-                succeeded = True
-            except KeyboardInterrupt:
-                outcome = "interrupted"
-                scheduler.announce_interrupt()
-                raise
-            except BaseException:
-                if outcome == "succeeded":
-                    outcome = "failed"
-                raise
-            finally:
-                try:
-                    if not dry:
-                        with scheduler.condition:
-                            expired = live.take_all()
-                        _teardown(expired)
-                except KeyboardInterrupt:
-                    outcome = "interrupted"
-                    raise
-                except BaseException:
-                    if outcome == "succeeded":
-                        outcome = "failed"
-                    raise
-                finally:
-                    progress.run_end(outcome)
-                    if bound is not None:
-                        reset_parameters(bound)
-                    reset_interrupt()
-    except KeyboardInterrupt:
-        scheduler.announce_interrupt()
-        raise
-    finally:
-        set_before_stop(previous_before_stop)
-    if succeeded:
-        progress.finished()
-    return value
-
-
 class _Scheduler:
     """Hold one run's scheduling state and build its steps."""
 
@@ -697,6 +560,143 @@ class _Scheduler:
                 self.started.add(id(dependency))
             self.progress.built(dependency, elapsed)
             self._complete(dependency, self._check(dependency))
+
+
+def execute(
+    steps: Sequence[Step[Any]],
+    *,
+    root: Path,
+    locked: bool = False,
+    config_env: Sequence[Path] = (),
+    env: Sequence[Path] = (),
+    dry: bool = False,
+    jobs: int = 1,
+    targets: Sequence[Step[Any]] | None = None,
+    parameters: ParameterValues | None = None,
+    leading: int = 0,
+    report: Path | None = None,
+    enforce: bool = False,
+) -> object:
+    if jobs < 1:
+        raise RoadieError("--jobs must be at least 1")
+    if enforce and dry:
+        raise RoadieError("--enforce does not apply to --dry")
+    if enforce:
+        refusal = tracing_error()
+        if refusal is not None:
+            raise RoadieError(refusal)
+    _one_requested(targets if targets is not None else steps[-1:])
+    with use_project_root(root):
+        writer = Report(report) if report is not None else None
+        try:
+            held = acquire_run_lock(root)
+            try:
+                values = _run_env((*config_env, *env))
+                run = Run(locked=locked, env=values)
+                with _run_environ(values):
+                    if targets is None:
+                        requested = {id(steps[-1])} if steps else set()
+                        names = [steps[-1]._label()] if steps else []
+                    else:
+                        requested = {id(step) for step in targets}
+                        names = [step._label() for step in targets]
+                    plan = _Plan.build(
+                        steps, requested=requested, leading=leading, jobs=jobs, dry=dry
+                    )
+                    live = _Live(run, plan.blockers)
+                    scheduler = _Scheduler(
+                        plan, run, live, run_lock=held, progress=Progress(writer, dry=dry), enforce=enforce
+                    )
+                    return _run_steps(scheduler, parameters, names)
+            finally:
+                held.release()
+        finally:
+            if writer is not None:
+                writer.close()
+
+
+def _run_steps(
+    scheduler: "_Scheduler",
+    parameters: ParameterValues | None,
+    names: list[str],
+) -> object:
+    plan = scheduler.plan
+    steps = plan.steps
+    live = scheduler.live
+    progress = scheduler.progress
+    dry = plan.dry
+    requested = plan.requested
+    reset_interrupt()
+    succeeded = False
+    outcome = "succeeded"
+    previous_before_stop = set_before_stop(scheduler.announce_interrupt)
+    try:
+        with run_scope(), interrupt_on_terminate():
+            bound = None
+            try:
+                bound = bind_parameters(
+                    steps,
+                    parameters if parameters is not None else ParameterValues({}, {}),
+                )
+                progress.run_start(names, plan.jobs)
+                value = scheduler.schedule()
+                if scheduler.interrupted:
+                    outcome = "interrupted"
+                    raise KeyboardInterrupt
+                if scheduler.failures:
+                    outcome = "failed"
+                    raise scheduler.failures[0]
+                if scheduler.undeclared:
+                    outcome = "failed"
+                    names = [
+                        step._label()
+                        for step in steps
+                        if id(step) in scheduler.undeclared
+                    ]
+                    raise RoadieError(
+                        f"undeclared reads in {len(names)} steps: {', '.join(names)}"
+                    )
+                for step in steps:
+                    if step.deferred and id(step) not in requested and id(step) not in scheduler.started:
+                        progress.not_started(step)
+                if dry:
+                    progress.render_plan(steps)
+                    return None
+                succeeded = True
+            except KeyboardInterrupt:
+                outcome = "interrupted"
+                scheduler.announce_interrupt()
+                raise
+            except BaseException:
+                if outcome == "succeeded":
+                    outcome = "failed"
+                raise
+            finally:
+                try:
+                    if not dry:
+                        with scheduler.condition:
+                            expired = live.take_all()
+                        _teardown(expired)
+                except KeyboardInterrupt:
+                    outcome = "interrupted"
+                    raise
+                except BaseException:
+                    if outcome == "succeeded":
+                        outcome = "failed"
+                    raise
+                finally:
+                    progress.run_end(outcome)
+                    if bound is not None:
+                        reset_parameters(bound)
+                    reset_interrupt()
+    except KeyboardInterrupt:
+        scheduler.announce_interrupt()
+        raise
+    finally:
+        set_before_stop(previous_before_stop)
+    if succeeded:
+        progress.finished()
+    return value
 
 
 def _blockers(steps: Sequence[Step[Any]], requested: set[int]) -> dict[int, set[int]]:
