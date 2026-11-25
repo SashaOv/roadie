@@ -1119,17 +1119,123 @@ CI run (decision 7).
   fails when `cli.py` passes only `--env`. With it, `uv run roadie checks`
   passes with 532 tests and 14 skipped.
 
+### CQ7: A step's outcome is decided once
+
+Status: planned, awaiting author checkpoint
+
+**Improvement.** Today a step's outcome is decided in several places,
+and they disagree. The scheduler prints `build`, `built` and `reused`
+lines, and writes report events beside each print. `Group.build` and
+`_Included.build` print their own `reused` line through a
+`_reports_reused` hook. A dry run marks reuse with a third rule. After
+this build (H2):
+
+- the scheduler alone decides whether a composite step (a group, or an
+  included build file's default) is reused, for a run and a dry run alike;
+- one object turns each step's outcome into its terminal lines, its report
+  events and its dry-run mark, so no step kind prints its own outcome.
+
+**Facts for this build** (2026-11-24, Roadie at `8f69332`, Niva at
+`9282790`):
+
+- The dry run's rule, `_reuses_without_record`, marks `# reuse` for any
+  step that keeps no record and allows reuse, once every dependency is
+  reused. The run prints `reused` only for `Group` and `_Included`, and
+  only when they have members. Reproduced in a scratch project:
+  - `empty = Group()`: the run prints nothing; `--dry` prints
+    `empty = Group()  # reuse`.
+  - `plain = Plain(note)`, a step with `recorded = False` whose dependency
+    is reused: the run prints `[plain] Plain built` every time; `--dry`
+    prints `plain = Plain(source=note)  # reuse`.
+  The spec ("Command line", `--dry`) says a dry run marks `# reuse` where
+  the run prints `reused <name>`.
+- `tests/test_cli.py` asserts the dry rule:
+  `test_dry_run_marks_a_step_without_a_record_by_whether_it_reuses` expects
+  `# reuse` for such a step with `reusable = True`.
+- Report events come from `_report_start` and `_report_end` beside
+  `announce`, `report_built` and a `print(f"reused ...")` in `_run_one`,
+  `_kept`, `_invoke` and `_start_one`. The spec ("Run report") ties them
+  together: the steps reported are those that print a `build` or `reused`
+  line.
+- Niva builds `Group`s but subclasses none, sets no `recorded = False`,
+  and calls none of `_reports_reused`, `announce` or `report_built`. Niva's
+  `uv.lock` pins Roadie at `4ee2b6a`.
+- `uv run roadie checks`: 532 passed, 14 skipped. `src/roadie` has 6,792
+  lines.
+
+**Decisions.** Proposed for the checkpoint.
+
+1. **Composite steps.** `Composite`, in `engine/step.py`, is a step that
+   keeps no record and whose value is the tuple of its `steps`' values.
+   `Group` and `_Included` subclass it. A composite is reused when it has
+   members and every member was reused; the scheduler decides this once,
+   and a dry run marks the same. `Step._reports_reused`, the overrides,
+   the prints in `Group.build` and `_Included.build`, and
+   `_reuses_without_record` go away. A step that keeps no record and is
+   not a composite builds on every run, so a dry run marks it `# run`. The
+   spec's "Reusing a step" states the composite rule.
+2. **One owner of outcomes.** The scheduler reports each step's outcome
+   (building, built, reused, failed, interrupted, not started) to one
+   object, `Progress` in `engine/progress.py`. It prints the step's
+   terminal lines and writes its report events, holding the report and
+   each step's start time. `display.announce`, `display.report_built`, and
+   the scheduler's `report`, `_report_began`, `_report_start` and
+   `_report_end` go away. Every line, its prefix and its order stay as the
+   spec states them, including the undeclared-reads line after `built`.
+3. **Dry-run marks.** A dry run gives `Progress` the same outcomes, and
+   `Progress` prints the `# reuse`, `# run` and `# not started` marks in
+   plan order at the end. The scheduler's `marks` goes away.
+4. **Niva.** No paired change (Facts).
+5. **Push.** The executor pushes `main` after CQ7.3 and records the CI
+   run.
+   - Grant: push `main` after CQ7.3, then the record commit and `CQ7: Fix`
+     commits for a failing acceptance clause, up to three CI runs.
+     AUTHOR: 
+
+**Acceptance check.**
+
+- `uv run roadie checks` passes locally, and CI passes on `ubuntu-latest`
+  and `macos-latest`.
+- `git grep -n -E '_reports_reused|_reuses_without_record|def
+  announce|def report_built|_report_start|_report_end|(self|scheduler)\.marks'
+  -- src` prints nothing (32 lines at planning), and `git grep -n 'print('
+  -- src/roadie/build/group.py src/roadie/engine/graph.py` prints nothing
+  (2 lines at planning).
+- CQ7.1's tests fail before that patch and pass after. CQ7.2's and CQ7.3's
+  tests pin the behavior those moves keep, so they pass before and after.
+- The record states the line count of `src/roadie`.
+
+**Author actions at completion.** None: the executor pushes and records the
+CI run (decision 5).
+
+#### Patches
+
+- [ ] **CQ7.1: Decide a composite step's reuse once.** Decision 1. The
+  spec's "Reusing a step", the `--dry` marks and `Group`'s docstring say
+  it. Tests:
+  - a dry run marks each step the way the run that follows reports it, for
+    an empty group, a group of reused members, an included build file's
+    default, and a step that keeps no record whose dependency is reused;
+  - `test_dry_run_marks_a_step_without_a_record_by_whether_it_reuses`
+    expects `# run` for both values of `reusable`.
+- [ ] **CQ7.2: Give step outcomes one owner.** Decision 2. Test: for a
+  built step, a reused step, a reused group, an included default, a
+  `Tests` step whose results fail, and a deferred service, the steps with a
+  `build` or `reused` line are the steps with report events, each
+  `step-end` outcome matches its line, and the terminal lines are the same
+  when the report cannot be written.
+- [ ] **CQ7.3: Mark a dry run from the same outcomes.** Decision 3. Test: a
+  dry run's marks match the run's lines for a reused step, a built step, a
+  deferred step no step takes, and a deferred step a built step starts.
+
+**Builder log.** `logs/CQ7.build.log`
+
 ## Backlog
 - Niva, when it upgrades Roadie past CQ3: import the process helpers and
   `cargo_executable` from `roadie.build`, and run `gh` through `Command`
   instead of passing a step to `_gh_json`. Its `ContractFuzz` calls
   `self._check_cmd(completed)`, which CQ3 removed. Either Roadie gives
   `Command` a public exit check, or `ContractFuzz` raises its own failure.
-- Separate execution outcomes from their presentation (H2). Execution
-  produces an outcome: identity, reused or built, timing, failure. The
-  terminal and the report render that outcome, and the run computes a
-  composite step's reuse once, instead of `_reports_reused` and printing in
-  `Group.build` and `_Included.build`.
 - Bound a single output line that has no newline, without splitting a
   parallel run's prefix into it.
 
