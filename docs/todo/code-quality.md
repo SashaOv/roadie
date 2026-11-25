@@ -1255,7 +1255,7 @@ CI run (decision 10).
 
 #### Patches
 
-- [ ] **CQ7.1: Decide a composite step's reuse once.** Decision 1. The
+- [x] **CQ7.1: Decide a composite step's reuse once.** Decision 1. The
   spec's "Reusing a step", the `--dry` marks and `Group`'s docstring say
   it. Tests:
   - a dry run marks each step the way the run that follows reports it, for

@@ -132,10 +132,6 @@ class Step[T](ABC):
         """Return the step's name, or its class name when it has none."""
         return self.name or type(self).__name__
 
-    def _reports_reused(self, reused: set[int]) -> bool:
-        """True when this step prints `reused` because every member was reused."""
-        return False
-
     def dependencies(self) -> Iterator["Step[Any]"]:
         for value in self.attributes().values():
             if isinstance(value, Step):
@@ -223,6 +219,20 @@ class Step[T](ABC):
             environment=environment,
             label=self._label(),
         )
+
+
+# (spec) Reusing a step
+class Composite(Step[tuple[object, ...]]):
+    recorded = False
+
+    def __init__(self, steps: tuple[Step[Any], ...]) -> None:
+        self.steps = steps
+
+    def build(self, run: "Run") -> tuple[object, ...]:
+        return tuple(run[step] for step in self.steps)
+
+    def call_arguments(self) -> tuple[list[object], dict[str, object]]:
+        return list(self.steps), {}
 
 
 def _reserved_names() -> frozenset[str]:

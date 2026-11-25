@@ -598,7 +598,11 @@ A step is reusable when a build file names it, by a variable or a derived
 name, and its kind keeps a record and allows reuse. Roadie reuses a
 reusable step when its record has the same fingerprint and the step's kind
 accepts the recorded value. It prints `reused <name>`, and the step's value
-is restored from the record.
+is restored from the record. A composite step (a group or an included
+build file's default as returned by `include`) keeps no record. Roadie
+reuses it when it has members and every member was reused, and obtains
+its tuple of values from those members. Other steps that keep no record
+build whenever they are started.
 
 Before a step that keeps a record builds, Roadie prints
 `build <name> = <Class>(<arguments>)`, with the same arguments `--dry`
@@ -792,8 +796,9 @@ A step's fingerprint is a SHA-256 digest of:
 ### Dry run output
 
 `--dry` prints one line per step in plan order:
-`<name> = <Class>(<arguments>)  # reuse` for a marked step, `# run` for any
-other. `<arguments>` are the step's call arguments: by default every
+`<name> = <Class>(<arguments>)` followed by `# reuse`, `# run`, or
+`# not started` as described under [Command line](#command-line).
+`<arguments>` are the step's call arguments: by default every
 attribute that is not `None`, as `name=value`. A group shows its members
 positionally. A step argument is shown by its name.
 

@@ -16,7 +16,7 @@ from typing import Any
 from roadie.engine.config import file_settings, root_env
 from roadie.engine.errors import RoadieError
 from roadie.engine.root import find_project_root, use_project_root
-from roadie.engine.step import Step, is_reserved
+from roadie.engine.step import Composite, Step, is_reserved
 
 BUILD_FILE = "build.py"
 
@@ -278,10 +278,8 @@ def setup_steps(graph: Graph) -> list[Step[Any]]:
     return found
 
 
-class _Included(Step[tuple[object, ...]]):
+class _Included(Composite):
     """A group of the included file's default result, with its results as attributes."""
-
-    recorded = False
 
     def __init__(
         self,
@@ -293,7 +291,7 @@ class _Included(Step[tuple[object, ...]]):
         self._path = path
         self._results = dict(results)
         self._setup = marked_setup
-        self.steps = () if default is None else (default,)
+        super().__init__(() if default is None else (default,))
 
     def __getattr__(self, name: str) -> Any:
         try:
@@ -308,20 +306,6 @@ class _Included(Step[tuple[object, ...]]):
         if not self.steps:
             raise RoadieError(f"{self._path} marks no default result")
         yield self.steps[0]
-
-    def _reports_reused(self, reused: set[int]) -> bool:
-        return bool(self.steps) and all(id(step) in reused for step in self.steps)
-
-    def build(self, run: Any) -> tuple[object, ...]:
-        if not self.steps:
-            raise RoadieError(f"{self._path} marks no default result")
-        values = tuple(run[step] for step in self.steps)
-        if self._reports_reused(run.reused):
-            print(f"reused {self._label()}", flush=True)
-        return values
-
-    def call_arguments(self) -> tuple[list[object], dict[str, object]]:
-        return list(self.steps), {}
 
 
 def _name_steps(

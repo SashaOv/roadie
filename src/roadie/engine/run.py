@@ -50,7 +50,7 @@ from roadie.engine.records import (
 )
 from roadie.engine.report import Report
 from roadie.engine.root import project_root, use_project_root
-from roadie.engine.step import Step
+from roadie.engine.step import Composite, Step
 from roadie.system import tracing_error
 
 _records = threading.Lock()
@@ -632,6 +632,11 @@ class _Scheduler:
                     self.marks[id(step)] = "not started"
             return
         record = None if self.enforce else _matching(step, step_fingerprint)
+        composite_reused = (
+            isinstance(step, Composite)
+            and bool(step.steps)
+            and all(id(member) in self.run.reused for member in step.steps)
+        )
         if record is not None and self.plan.dry:
             with self.condition:
                 self.run.reused.add(id(step))
@@ -648,7 +653,7 @@ class _Scheduler:
             )
             with self.condition:
                 self.outputs[id(step)] = output
-        elif self.plan.dry and _reuses_without_record(step, self.run):
+        elif self.plan.dry and composite_reused:
             with self.condition:
                 self.run.reused.add(id(step))
                 self.marks[id(step)] = "reuse"
@@ -660,12 +665,15 @@ class _Scheduler:
                 self.outputs[id(step)] = "dry"
         else:
             self._start_deferred(step)
-            member_reused = step._reports_reused(self.run.reused)
-            if member_reused:
+            if composite_reused:
                 self._report_start(step)
             value, elapsed = self._invoke(step)
+            if composite_reused:
+                with self.condition:
+                    self.run.reused.add(id(step))
+                print(f"reused {step._label()}", flush=True)
             _value, output = self._kept(
-                step, value, built=True,
+                step, value, built=True, composite_reused=composite_reused,
                 step_fingerprint=step_fingerprint, elapsed=elapsed,
             )
             with self.condition:
@@ -675,7 +683,7 @@ class _Scheduler:
 
     def _kept(
         self, step: Step[Any], value: object, *, built: bool,
-        step_fingerprint: str, elapsed: float | None = None,
+        step_fingerprint: str, elapsed: float | None = None, composite_reused: bool = False,
     ) -> tuple[object, str]:
         with self.condition:
             self.live.add(step, value)
@@ -693,7 +701,7 @@ class _Scheduler:
         if missing:
             self._record_undeclared(step, missing)
             self._report_end(step, "failed")
-        elif not built or step._reports_reused(self.run.reused):
+        elif not built or composite_reused:
             self._report_end(step, "reused")
         elif elapsed is not None:
             self._report_end(step, "built")
@@ -761,13 +769,6 @@ def _blockers(steps: Sequence[Step[Any]], requested: set[int]) -> dict[int, set[
         if step.deferred and id(step) not in requested:
             extend(step, set(blockers[id(step)]), set())
     return blockers
-
-
-def _reuses_without_record(step: Step[Any], run: Run) -> bool:
-    """True when a run would print `reused` for a step that keeps no record."""
-    if type(step).recorded or not type(step).reusable:
-        return False
-    return all(id(item) in run.reused for item in step.dependencies())
 
 
 def _dry_start_deferred(step: Step[Any], marks: dict[int, str]) -> None:

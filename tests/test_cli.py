@@ -73,16 +73,12 @@ def test_dry_run_marks_reuse_and_run(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 # (spec) Command line
-@pytest.mark.parametrize(
-    ("kind", "marker"),
-    [("reusable = True", "# reuse"), ("reusable = False", "# run")],
-)
+@pytest.mark.parametrize("reusable", [True, False])
 def test_dry_run_marks_a_step_without_a_record_by_whether_it_reuses(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    kind: str,
-    marker: str,
+    reusable: bool,
 ) -> None:
     root = tmp_path.resolve()
     isolate_repo(monkeypatch, root)
@@ -91,7 +87,7 @@ def test_dry_run_marks_a_step_without_a_record_by_whether_it_reuses(
         EMITTER
         + "\nclass After(Step[str]):\n"
         + "    recorded = False\n"
-        + f"    {kind}\n"
+        + f"    reusable = {reusable}\n"
         + "    def __init__(self, source):\n"
         + "        self.source = source\n"
         + "    def build(self, run):\n"
@@ -101,7 +97,41 @@ def test_dry_run_marks_a_step_without_a_record_by_whether_it_reuses(
     cli.run(file=root)
     capsys.readouterr()
     cli.run(file=root, dry_run=True)
-    assert capsys.readouterr().out.splitlines()[-1] == f"after = After(source=api)  {marker}"
+    assert capsys.readouterr().out.splitlines()[-1] == "after = After(source=api)  # run"
+
+
+# (spec) Reusing a step
+# (spec) Dry run output
+def test_composite_dry_marks_match_reuse_lines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path.resolve()
+    isolate_repo(monkeypatch, root)
+    write_build(root / "lib", EMITTER + "default_step(api)\n")
+    write_build(
+        root,
+        EMITTER
+        + "empty = Group()\n"
+        + "group = Group(api)\n"
+        + "lib = include('lib')\n"
+        + "all_steps = Group(empty, group, lib)\n",
+    )
+    cli.run(file=root, jobs=1)
+    capsys.readouterr()
+    cli.run(file=root, jobs=1, dry_run=True)
+    marks = {
+        line.split(" = ", 1)[0]: line.rsplit("  # ", 1)[1]
+        for line in capsys.readouterr().out.splitlines()
+    }
+    cli.run(file=root, jobs=1)
+    reused = {
+        line.removeprefix("reused ")
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("reused ")
+    }
+    assert reused == {"api", "group", "lib:api", "lib"}
+    assert {name for name, mark in marks.items() if mark == "reuse"} == reused
+    assert marks["empty"] == marks["all_steps"] == "run"
 
 
 # (spec) Settings
