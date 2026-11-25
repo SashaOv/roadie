@@ -429,3 +429,71 @@ def test_report_refuses_dry_and_clean_before_anything_runs(
     assert not report.exists()
     assert not (tmp_path / "ran").exists()
     assert (state / "keep").read_text() == "sentinel"
+
+
+# (spec) Run report
+def test_report_outcomes_match_terminal_lines_even_when_reporting_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_build(tmp_path / "lib", _pair() + "default_step(pair)\n")
+    write_build(
+        tmp_path,
+        _pair()
+        + """
+from support import FakeDeployment
+
+class Server(Service):
+    def build(self, run):
+        return FakeDeployment()
+
+class Failing(Tests):
+    def __init__(self, server):
+        self.server = server
+    def build(self, run):
+        return TestResults((TestFailure("case", "wrong result"),))
+
+class Fresh(Side):
+    reusable = False
+
+lib = include("lib")
+server = Server()
+fresh = Fresh("fresh")
+failing = Failing(server)
+""",
+    )
+    cli.run("pair", "lib", file=tmp_path, jobs=1)
+    capsys.readouterr()
+
+    report = tmp_path / "report.jsonl"
+    with pytest.raises(SystemExit, match="case: wrong result"):
+        cli.run("pair", "lib", "fresh", "failing", file=tmp_path, jobs=1, report=report)
+    terminal = capsys.readouterr()
+    visible = {
+        line.split()[1] for line in terminal.out.splitlines() if line.startswith(("build ", "reused "))
+    }
+    completed = {
+        name: outcome
+        for line in terminal.out.splitlines()
+        for outcome, name, *_ in [line.split()]
+        if outcome in {"built", "reused"}
+    }
+    completed["failing"] = "failed"
+    assert "build failing =" in terminal.out
+    assert "built failing " not in terminal.out
+    assert completed == {
+        "a": "reused", "b": "reused", "pair": "reused",
+        "lib:a": "reused", "lib:b": "reused", "lib:pair": "reused",
+        "lib": "reused", "server": "built", "fresh": "built", "failing": "failed",
+    }
+    events = _events(report)
+    assert {event["step"] for event in events if event["event"] == "step-start"} == visible
+    assert {
+        event["step"]: event["outcome"] for event in events if event["event"] == "step-end"
+    } == completed
+
+    with pytest.raises(SystemExit, match="case: wrong result"):
+        cli.run("pair", "lib", "fresh", "failing", file=tmp_path, jobs=1, report=tmp_path)
+    warned = capsys.readouterr()
+    elapsed = re.compile(r" in \d+:\d{2}$", re.MULTILINE)
+    assert elapsed.sub("", warned.out) == elapsed.sub("", terminal.out)
+    assert warned.err.count("cannot write report") == 1

@@ -1263,7 +1263,7 @@ CI run (decision 10).
     default, and a step that keeps no record whose dependency is reused;
   - `test_dry_run_marks_a_step_without_a_record_by_whether_it_reuses`
     expects `# run` for both values of `reusable`.
-- [ ] **CQ7.2: Give step outcomes one owner.** Decision 2. Test: for a
+- [x] **CQ7.2: Give step outcomes one owner.** Decision 2. Test: for a
   built step, a reused step, a reused group, an included default, a
   `Tests` step whose results fail, and a deferred service, the steps with a
   `build` or `reused` line are the steps with report events, each

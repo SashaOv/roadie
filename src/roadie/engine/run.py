@@ -14,7 +14,7 @@ from typing import Any, cast
 
 from dotenv import dotenv_values
 
-from roadie.engine.display import announce, format_elapsed, format_step, report_built
+from roadie.engine.display import format_step
 from roadie.engine.enforce import (
     built_files,
     declared_files,
@@ -31,7 +31,7 @@ from roadie.engine.parameters import (
     current_step,
     reset_parameters,
 )
-from roadie.engine.prefix import parallel_output, reset_prefix, set_prefix, unprefixed
+from roadie.engine.prefix import parallel_output, reset_prefix, set_prefix
 from roadie.engine.process import (
     TraceCollector,
     collect_traces,
@@ -42,6 +42,7 @@ from roadie.engine.process import (
     reset_interrupt,
     set_before_stop,
 )
+from roadie.engine.progress import Progress
 from roadie.engine.records import (
     artifact_dir,
     load_records,
@@ -246,7 +247,9 @@ def execute(
                         steps, requested=requested, leading=leading, jobs=jobs, dry=dry
                     )
                     live = _Live(run, plan.blockers)
-                    scheduler = _Scheduler(plan, run, live, run_lock=held, report=writer, enforce=enforce)
+                    scheduler = _Scheduler(
+                        plan, run, live, run_lock=held, progress=Progress(writer), enforce=enforce
+                    )
                     return _run_steps(scheduler, parameters, names)
             finally:
                 held.release()
@@ -263,13 +266,12 @@ def _run_steps(
     plan = scheduler.plan
     steps = plan.steps
     live = scheduler.live
-    report = scheduler.report
+    progress = scheduler.progress
     dry = plan.dry
     requested = plan.requested
     reset_interrupt()
     succeeded = False
     outcome = "succeeded"
-    reported_run = False
     previous_before_stop = set_before_stop(scheduler.announce_interrupt)
     try:
         with run_scope(), interrupt_on_terminate():
@@ -279,9 +281,7 @@ def _run_steps(
                     steps,
                     parameters if parameters is not None else ParameterValues({}, {}),
                 )
-                if report is not None:
-                    report.run_start(names, plan.jobs)
-                    reported_run = True
+                progress.run_start(names, plan.jobs)
                 value = scheduler.schedule()
                 if scheduler.interrupted:
                     outcome = "interrupted"
@@ -306,8 +306,7 @@ def _run_steps(
                     for step in steps:
                         if not step.deferred or id(step) in requested | scheduler.started:
                             continue
-                        name = step._label()
-                        print(f"not started {name}: no step that takes it runs", flush=True)
+                        progress.not_started(step)
                 if dry:
                     return None
                 succeeded = True
@@ -333,8 +332,7 @@ def _run_steps(
                         outcome = "failed"
                     raise
                 finally:
-                    if report is not None and reported_run:
-                        report.run_end(outcome, time.monotonic() - scheduler.started_at)
+                    progress.run_end(outcome)
                     if bound is not None:
                         reset_parameters(bound)
                     reset_interrupt()
@@ -344,7 +342,7 @@ def _run_steps(
     finally:
         set_before_stop(previous_before_stop)
     if succeeded:
-        scheduler._report_run()
+        progress.finished()
     return value
 
 
@@ -358,7 +356,7 @@ class _Scheduler:
         live: _Live,
         *,
         run_lock: HeldLock | None,
-        report: Report | None,
+        progress: Progress,
         enforce: bool = False,
     ) -> None:
         self.plan = plan
@@ -381,24 +379,9 @@ class _Scheduler:
             id(step): threading.Lock() for step in plan.steps if step.deferred
         }
         self.result: list[object] = []
-        self.report = report
-        self._report_began: dict[int, float] = {}
-        self.started_at = time.monotonic()
-        self.finish_reported = False
+        self.progress = progress
         self._announced = False
         self._announce_lock = threading.RLock()
-
-    def _report_start(self, step: Step[Any]) -> None:
-        if self.report is None or id(step) in self._report_began:
-            return
-        self._report_began[id(step)] = time.monotonic()
-        self.report.step_start(step._label())
-
-    def _report_end(self, step: Step[Any], outcome: str) -> None:
-        if self.report is None or id(step) not in self._report_began:
-            return
-        began = self._report_began.pop(id(step))
-        self.report.step_end(step._label(), outcome, time.monotonic() - began)
 
     def _listed_files(self) -> set[Path]:
         if self._listed is None:
@@ -423,23 +406,11 @@ class _Scheduler:
             root=project_root(),
         )
 
-    def _record_undeclared(self, step: Step[Any], missing: list[str]) -> None:
-        print(
-            f"{step._label()} reads files it does not declare: {', '.join(missing)}",
-            flush=True,
-        )
-        with self.condition:
-            self.undeclared[id(step)] = missing
-
-    def _report_run(self) -> None:
-        if self.finish_reported:
-            return
-        self.finish_reported = True
-        with unprefixed():
-            print(
-                f"finished in {format_elapsed(time.monotonic() - self.started_at)}",
-                flush=True,
-            )
+    def _complete(self, step: Step[Any], missing: list[str], *, reused: bool = False) -> None:
+        if missing:
+            with self.condition:
+                self.undeclared[id(step)] = missing
+        self.progress.completed(step, missing=missing, reused=reused)
 
     def announce_interrupt(self) -> None:
         with self._announce_lock:
@@ -456,9 +427,7 @@ class _Scheduler:
                     for step in self.live.serving()
                     if id(step) not in running_now
                 )
-        line = f"interrupted: stopping {', '.join(names)}" if names else "interrupted"
-        with unprefixed():
-            print(line, flush=True)
+        self.progress.stopping(names)
 
     def schedule(self) -> object:
         jobs = self.plan.jobs
@@ -532,7 +501,7 @@ class _Scheduler:
                 try:
                     self._execute_step(step)
                 except KeyboardInterrupt:
-                    self._report_end(step, "interrupted")
+                    self.progress.interrupted(step)
                     end_prefix()
                     request_stop()
                     with self.condition:
@@ -544,7 +513,7 @@ class _Scheduler:
                         raise
                     return
                 except BaseException as error:  # noqa: BLE001 — SystemExit is a step failure
-                    self._report_end(step, "failed")
+                    self.progress.failed(step)
                     end_prefix()
                     failure = (
                         error
@@ -596,10 +565,7 @@ class _Scheduler:
             raise StepFailed(step._label(), _reason(error)) from error
 
     def _invoke(self, step: Step[Any]) -> tuple[object, float | None]:
-        announce(step)
-        if type(step).recorded:
-            self._report_start(step)
-        began = time.monotonic() if type(step).recorded else None
+        began = self.progress.building(step)
         collector = TraceCollector() if self.enforce else None
         if collector is not None:
             self.traces[id(step)] = collector
@@ -614,8 +580,10 @@ class _Scheduler:
                 value = step.build(self.run)
         except BaseException as error:
             # A program can fail because Ctrl-C stopped it; that step was interrupted.
-            stopped = isinstance(error, KeyboardInterrupt) or interrupt_requested()
-            self._report_end(step, "interrupted" if stopped else "failed")
+            if isinstance(error, KeyboardInterrupt) or interrupt_requested():
+                self.progress.interrupted(step)
+            else:
+                self.progress.failed(step)
             if isinstance(error, (KeyboardInterrupt, StepFailed)):
                 raise
             raise StepFailed(step._label(), _reason(error)) from error
@@ -646,8 +614,7 @@ class _Scheduler:
             value = step.decode(record["value"])
             with self.condition:
                 self.run.reused.add(id(step))
-            self._report_start(step)
-            print(f"reused {step._label()}", flush=True)
+            self.progress.reused(step)
             _value, output = self._kept(
                 step, value, built=False, step_fingerprint=step_fingerprint
             )
@@ -666,12 +633,12 @@ class _Scheduler:
         else:
             self._start_deferred(step)
             if composite_reused:
-                self._report_start(step)
+                self.progress.reusing(step)
             value, elapsed = self._invoke(step)
             if composite_reused:
                 with self.condition:
                     self.run.reused.add(id(step))
-                print(f"reused {step._label()}", flush=True)
+                self.progress.reused(step)
             _value, output = self._kept(
                 step, value, built=True, composite_reused=composite_reused,
                 step_fingerprint=step_fingerprint, elapsed=elapsed,
@@ -696,15 +663,8 @@ class _Scheduler:
         output = _output_fingerprint(step, value, step_fingerprint)
         if not missing:
             _remember(step, step_fingerprint, output, value, run=self.run, built=built)
-        if elapsed is not None:
-            report_built(step, elapsed)
-        if missing:
-            self._record_undeclared(step, missing)
-            self._report_end(step, "failed")
-        elif not built or composite_reused:
-            self._report_end(step, "reused")
-        elif elapsed is not None:
-            self._report_end(step, "built")
+        self.progress.built(step, elapsed)
+        self._complete(step, missing, reused=not built or composite_reused)
         if id(step) in self.plan.requested and (
             step.serves or self.plan.requested.issubset({id(step)})
         ):
@@ -716,7 +676,7 @@ class _Scheduler:
                 sweep_stale_state(project_root())
                 self.run_lock.release()
             if step.serves:
-                self._report_run()
+                self.progress.finished()
             step.serve(self.run, value)
         return value, output
 
@@ -739,14 +699,8 @@ class _Scheduler:
             with self.condition:
                 self.live.add(dependency, value)
                 self.started.add(id(dependency))
-            if elapsed is not None:
-                report_built(dependency, elapsed)
-            missing = self._check(dependency)
-            if missing:
-                self._record_undeclared(dependency, missing)
-                self._report_end(dependency, "failed")
-            else:
-                self._report_end(dependency, "built")
+            self.progress.built(dependency, elapsed)
+            self._complete(dependency, self._check(dependency))
 
 
 def _blockers(steps: Sequence[Step[Any]], requested: set[int]) -> dict[int, set[int]]:
