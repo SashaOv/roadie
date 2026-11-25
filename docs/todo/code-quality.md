@@ -1121,7 +1121,7 @@ CI run (decision 7).
 
 ### CQ7: Each rule the reviews named has one owner
 
-Status: planned, awaiting author checkpoint
+Status: planned, approved 2026-11-24
 
 **Improvement.** H2, H4 and the CQ5 and CQ6 reviews named rules that live
 in two or more places. Some copies already disagree. After this build each
@@ -1231,7 +1231,7 @@ rule has one owner:
     run.
     - Grant: push `main` after CQ7.8, then the record commit and `CQ7: Fix`
       commits for a failing acceptance clause, up to three CI runs.
-      AUTHOR: 
+      AUTHOR:granted 
 
 **Acceptance check.**
 
