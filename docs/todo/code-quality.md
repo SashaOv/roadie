@@ -1119,23 +1119,28 @@ CI run (decision 7).
   fails when `cli.py` passes only `--env`. With it, `uv run roadie checks`
   passes with 532 tests and 14 skipped.
 
-### CQ7: A step's outcome is decided once
+### CQ7: Each rule the reviews named has one owner
 
 Status: planned, awaiting author checkpoint
 
-**Improvement.** Today a step's outcome is decided in several places,
-and they disagree. The scheduler prints `build`, `built` and `reused`
-lines, and writes report events beside each print. `Group.build` and
-`_Included.build` print their own `reused` line through a
-`_reports_reused` hook. A dry run marks reuse with a third rule. After
-this build (H2):
+**Improvement.** H2, H4 and the CQ5 and CQ6 reviews named rules that live
+in two or more places. Some copies already disagree. After this build each
+rule has one owner:
 
 - the scheduler alone decides whether a composite step (a group, or an
   included build file's default) is reused, for a run and a dry run alike;
 - one object turns each step's outcome into its terminal lines, its report
-  events and its dry-run mark, so no step kind prints its own outcome.
+  events and its dry-run mark, so no step kind prints its own outcome (H2);
+- the engine, not the CLI, orders the run's environment files, and one
+  function decides which file keys the run adds;
+- `run_query` reports a program that exited non-zero as its own error, not
+  as `OSError`;
+- a release wraps its failures in `cannot release:` in one place, and its
+  manifest plans are public names in the module that defines them;
+- `Check` and `Pytest` take their inputs through one function (H4);
+- the modules this build edits follow imports, classes, functions (G6).
 
-**Facts for this build** (2026-11-24, Roadie at `8f69332`, Niva at
+**Facts for this build** (2026-11-24, Roadie at `522621c`, Niva at
 `9282790`):
 
 - The dry run's rule, `_reuses_without_record`, marks `# reuse` for any
@@ -1147,19 +1152,33 @@ this build (H2):
   - `plain = Plain(note)`, a step with `recorded = False` whose dependency
     is reused: the run prints `[plain] Plain built` every time; `--dry`
     prints `plain = Plain(source=note)  # reuse`.
+
   The spec ("Command line", `--dry`) says a dry run marks `# reuse` where
   the run prints `reused <name>`.
-- `tests/test_cli.py` asserts the dry rule:
-  `test_dry_run_marks_a_step_without_a_record_by_whether_it_reuses` expects
-  `# reuse` for such a step with `reusable = True`.
+  `test_dry_run_marks_a_step_without_a_record_by_whether_it_reuses` asserts
+  the dry rule.
 - Report events come from `_report_start` and `_report_end` beside
   `announce`, `report_built` and a `print(f"reused ...")` in `_run_one`,
-  `_kept`, `_invoke` and `_start_one`. The spec ("Run report") ties them
-  together: the steps reported are those that print a `build` or `reused`
-  line.
-- Niva builds `Group`s but subclasses none, sets no `recorded = False`,
-  and calls none of `_reports_reused`, `announce` or `report_built`. Niva's
-  `uv.lock` pins Roadie at `4ee2b6a`.
+  `_kept`, `_invoke` and `_start_one`. The spec ("Run report") ties them:
+  the steps reported are those that print a `build` or `reused` line.
+- `cli.py` alone puts `graph.env_paths` before the `--env` files.
+  `_run_env` and `_run_environ` both skip keys `os.environ` holds. `_load`
+  reads `root_env()` for every build file and keeps it only for the root.
+- `run_query` raises `CannotRun`, an `OSError`, for a program that cannot
+  start, and a plain `OSError` for a non-zero exit. Its callers in
+  `generated.py`, `manifests.py`, `node.py`, `release.py` and `rust.py`
+  catch `OSError`; `node.py` and `rust.py` catch `CannotRun` first to word
+  it differently.
+- `manifests.py` and `release.py` wrap `OSError` in `cannot release:` in
+  five places. `release.py` imports `_PlannedVersion` and `_Versionless`.
+  `apply_version` both returns its changes and fills `edited`; only
+  `write_version` uses the return.
+- `Check.__init__` and `Pytest.__init__` repeat the same `inputs` type and
+  `one_or_many` call, differing only in `owner`.
+- Niva builds `Group`, `Check` and `Pytest` with their public signatures,
+  subclasses none of them, sets no `recorded = False`, and calls none of
+  `execute`, `run_query`, `_reports_reused`, `announce`, `report_built` or
+  the manifest methods. Its `uv.lock` pins Roadie at `4ee2b6a`.
 - `uv run roadie checks`: 532 passed, 14 skipped. `src/roadie` has 6,792
   lines.
 
@@ -1169,7 +1188,7 @@ this build (H2):
    keeps no record and whose value is the tuple of its `steps`' values.
    `Group` and `_Included` subclass it. A composite is reused when it has
    members and every member was reused; the scheduler decides this once,
-   and a dry run marks the same. `Step._reports_reused`, the overrides,
+   and a dry run marks the same. `Step._reports_reused`, its overrides,
    the prints in `Group.build` and `_Included.build`, and
    `_reuses_without_record` go away. A step that keeps no record and is
    not a composite builds on every run, so a dry run marks it `# run`. The
@@ -1185,28 +1204,54 @@ this build (H2):
 3. **Dry-run marks.** A dry run gives `Progress` the same outcomes, and
    `Progress` prints the `# reuse`, `# run` and `# not started` marks in
    plan order at the end. The scheduler's `marks` goes away.
-4. **Niva.** No paired change (Facts).
-5. **Push.** The executor pushes `main` after CQ7.3 and records the CI
-   run.
-   - Grant: push `main` after CQ7.3, then the record commit and `CQ7: Fix`
-     commits for a failing acceptance clause, up to three CI runs.
-     AUTHOR: 
+4. **The engine orders environment files.** `execute` takes the root
+   build file's files as `config_env` and the `--env` files as `env`, and
+   reads `config_env` first. `_run_env` alone decides which keys the run
+   adds; `_run_environ` sets every key it is given. `_load` reads
+   `root_env()` only for the root build file.
+5. **Program failures.** `run_query` raises `ProgramFailed`, defined in
+   `system/command.py` and not an `OSError`, for a non-zero exit, with
+   today's message. Callers catch `ProgramFailed` where they mean a failed
+   program, and `CannotRun` where they mean one that did not start. Every
+   message stays the same.
+6. **Release internals.** `PlannedVersion` and `Versionless` lose their
+   underscore. `apply_version` appends to the list it is given and returns
+   nothing. One context manager in `manifests.py` turns `OSError`,
+   `CannotRun` and `ProgramFailed` into `cannot release: <reason>`, and
+   both modules use it. `Release.build`'s left message is built by one
+   function. Every message stays the same.
+7. **Check inputs.** One function in `check.py` normalizes a check's
+   `inputs` for `Check` and `Pytest`, with the step's class name as owner.
+   Their JUnit and exit-code handling stay separate.
+8. **Module order.** The modules this build edits put imports first, then
+   module variables and classes, then functions, in a commit that only
+   moves code.
+9. **Niva.** No paired change (Facts).
+10. **Push.** The executor pushes `main` after CQ7.8 and records the CI
+    run.
+    - Grant: push `main` after CQ7.8, then the record commit and `CQ7: Fix`
+      commits for a failing acceptance clause, up to three CI runs.
+      AUTHOR: 
 
 **Acceptance check.**
 
 - `uv run roadie checks` passes locally, and CI passes on `ubuntu-latest`
   and `macos-latest`.
 - `git grep -n -E '_reports_reused|_reuses_without_record|def
-  announce|def report_built|_report_start|_report_end|(self|scheduler)\.marks'
-  -- src` prints nothing (32 lines at planning), and `git grep -n 'print('
-  -- src/roadie/build/group.py src/roadie/engine/graph.py` prints nothing
-  (2 lines at planning).
-- CQ7.1's tests fail before that patch and pass after. CQ7.2's and CQ7.3's
-  tests pin the behavior those moves keep, so they pass before and after.
+  announce|def report_built|_report_start|_report_end|(self|scheduler)\.marks|_PlannedVersion|_Versionless'
+  -- src` prints nothing (52 lines at planning).
+- `git grep -n 'print(' -- src/roadie/build/group.py
+  src/roadie/engine/graph.py` prints nothing (2 lines at planning).
+- `git grep -n 'raise OSError' -- src/roadie/system/command.py` prints
+  nothing (1 line at planning), and `git grep -n 'cannot release: {error}'
+  -- src` prints one line, the wrapper's (5 at planning).
+- Tests that a patch adds for a changed behavior or contract (CQ7.1,
+  CQ7.4, CQ7.5) fail before that patch and pass after. Tests that pin
+  behavior a move keeps (CQ7.2, CQ7.3, CQ7.6, CQ7.7) pass before and after.
 - The record states the line count of `src/roadie`.
 
 **Author actions at completion.** None: the executor pushes and records the
-CI run (decision 5).
+CI run (decision 10).
 
 #### Patches
 
@@ -1227,6 +1272,25 @@ CI run (decision 5).
 - [ ] **CQ7.3: Mark a dry run from the same outcomes.** Decision 3. Test: a
   dry run's marks match the run's lines for a reused step, a built step, a
   deferred step no step takes, and a deferred step a built step starts.
+- [ ] **CQ7.4: Order the run's environment files in the engine.** Decision
+  4. Tests:
+  - `execute` with `config_env` and `env` lets an `env` value win;
+  - the env-file context variable is released after `load`;
+  - the early-failure case of `test_os_environ_is_restored_however_a_run_ends`
+    asserts its own message.
+- [ ] **CQ7.5: Report a failed program as ProgramFailed.** Decision 5. The
+  docstring of `run_query` says it. Tests: a non-zero exit raises
+  `ProgramFailed` and is not an `OSError`; a program that cannot start
+  still raises `CannotRun`; each caller's message for both is unchanged.
+- [ ] **CQ7.6: Give release failures one wrapper.** Decision 6. Test: each
+  `cannot release:` message from a failed or unstartable program and an
+  unwritable manifest is unchanged, and a late failure still names what it
+  left.
+- [ ] **CQ7.7: Normalize check inputs once.** Decision 7. Test,
+  parameterized over `Check` and `Pytest`: one input, a step, a mix, a
+  generator, and a wrong member, which fails naming that class.
+- [ ] **CQ7.8: Order the edited modules.** Decision 8. Only moves code;
+  the suite is the check.
 
 **Builder log.** `logs/CQ7.build.log`
 
@@ -1251,27 +1315,10 @@ CI run (decision 5).
   spec text with a link to the spec.
 - Share one JUnit reader between `Pytest` and Niva's `ContractFuzz`, after
   the naming and aggregation differences are settled (7).
-- Share the input normalization of `Check` and `Pytest` (H4).
 - Reorder modules to imports, classes, functions when a build already edits
   them (G6).
 - Look for line savings in `tests/`, which is 1.5 times the source and was
   not examined.
-- Release internals (CQ5 review):
-  - `release.py` imports `manifests.py`'s private `_PlannedVersion` and
-    `_Versionless`.
-  - `apply_version` both returns its changes and fills an out-parameter.
-  - `run_query` raises `OSError` for a program that ran and exited non-zero.
-  - The `cannot release:` wrapping is repeated in five places.
-  - `Release.build` formats its left message inline.
-- Run environment internals (CQ6 review):
-  - Only `cli.py` joins the root file's `config(env)` files before the
-    `--env` files; another caller of `load` and `execute` must repeat it.
-  - `_run_env` and `_run_environ` both skip keys `os.environ` holds.
-  - `_load` reads `root_env()` for every build file but keeps it only for
-    the root.
-  - No test shows the env-file context variable is released after load.
-  - The early-failure case of `test_os_environ_is_restored_however_a_run_ends`
-    matches any `Exception` with an incidental message.
 - Niva, when it upgrades Roadie past CQ6: drop its three environment-file
   readers (`forge/forge/build_box.py`, `forge/forge/environment.py`,
   `jammer/ops/pulumi_util.py`), since steps then read the run's values from
