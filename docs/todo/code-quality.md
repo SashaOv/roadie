@@ -1333,7 +1333,7 @@ CI run (decision 10).
 
 ### CQ8: A step's attributes are the fields it declares
 
-Status: planned, approved 2026-11-25
+Status: implemented 2026-11-25 (commits CQ8.*)
 
 **Improvement.** Today a step's attributes are whatever its instance holds
 (`vars(self)` minus eight engine names). A private cache changes the
@@ -1523,6 +1523,20 @@ CI run (decision 13).
   fails on CQ8.9's parent and passes after.
 
 **Builder log.** `logs/CQ8.build.log`
+
+**Execution and acceptance.**
+
+- At `a9c936d1`, tree `3120905c`, `uv run roadie checks` passed
+  with 589 tests passed and 16 skipped. The source greps found one
+  `attributes` definition, one release refusal prefix, and no matches for
+  `vars(self)` or the dry flag in `progress.py`.
+- The new behavior tests fail against the earlier code and pass with the
+  patches. The tests for preserved behavior pass on both sides.
+- CI passed on `ubuntu-latest` and `macos-latest`.
+  [CI run 45577316765](https://github.com/SashaOv/roadie/actions/runs/45577316765)
+- Tracked Python files total 6,883 lines in `src/roadie` and
+  12,348 in `tests`. Local acceptance evidence is in
+  `/tmp/onespec-cq8/accept-final.txt`.
 
 ## Backlog
 - Niva, when it upgrades Roadie past CQ3: import the process helpers and
