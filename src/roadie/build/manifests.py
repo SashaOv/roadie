@@ -16,6 +16,12 @@ from roadie.engine.inputs import Input
 from roadie.system import ProgramFailed, run_query
 
 
+class CannotRelease(RoadieError):
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(f"cannot release: {reason}")
+
+
 class Versionless(RoadieError):
     """A manifest without a static version, which a directory skips."""
 
@@ -191,8 +197,8 @@ class PackageJson(_ManifestSource):
     def plan_version(self, base_dir: Path, version: str) -> PlannedVersion:
         file = self.file(base_dir)
         if _tracks(file.parent, "package-lock.json"):
-            raise RoadieError(
-                f"cannot release: {file} has a package-lock.json, which Roadie does not update"
+            raise CannotRelease(
+                f"{file} has a package-lock.json, which Roadie does not update"
             )
         current = self.read_version(base_dir)
         text = _replace_json_version(_read_text(file), current, version)
@@ -201,11 +207,12 @@ class PackageJson(_ManifestSource):
 
 @contextmanager
 def release_errors(operation: str | None = None) -> Iterator[None]:
+    """Convert OSError and ProgramFailed to CannotRelease, with optional context."""
     try:
         yield
     except (OSError, ProgramFailed) as cause:
         error = str(cause) if operation is None else f"{operation}: {cause}"
-        raise RoadieError(f"cannot release: {error}") from cause
+        raise CannotRelease(error) from cause
 
 
 def _tracks(directory: Path, name: str) -> bool:
@@ -290,7 +297,7 @@ def _replace_version(text: str, table: str, old: str, new: str) -> str:
         quote = match.group(2)
         lines[index] = f"{match.group(1)}{quote}{new}{quote}{match.group(4)}{ending}"
         return "".join(lines)
-    raise RoadieError(f"cannot release: {table} version line is missing")
+    raise CannotRelease(f"{table} version line is missing")
 
 
 def _replace_json_version(text: str, old: str, new: str) -> str:
@@ -326,4 +333,4 @@ def _replace_json_version(text: str, old: str, new: str) -> str:
         elif char == "}":
             depth -= 1
         index += 1
-    raise RoadieError("cannot release: package.json version string was not found")
+    raise CannotRelease("package.json version string was not found")

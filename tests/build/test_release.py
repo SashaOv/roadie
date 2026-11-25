@@ -10,7 +10,7 @@ import pytest
 from support import execute, failing_check, passing_check, posix_only, write_build
 
 from roadie.build import Release
-from roadie.build.manifests import CargoManifest, PackageJson, PyProject
+from roadie.build.manifests import CannotRelease, CargoManifest, PackageJson, PyProject
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.graph import load
 from roadie.engine.parameters import ParameterValues
@@ -391,7 +391,7 @@ def test_package_json_replaces_its_version_and_refuses_a_package_lock(tmp_path: 
     _git(repo, "push", "-q", "origin", "HEAD")
     step = PackageJson("app/package.json")
     with pytest.raises(
-        RoadieError,
+        CannotRelease,
         match=re.escape(
             f"cannot release: {locked.resolve()} has a package-lock.json, "
             "which Roadie does not update"
@@ -432,8 +432,9 @@ def test_release_without_a_version_tag_publishes_the_primary_version(
     assert _git(repo, "log", "-1", "--format=%s").stdout.strip() == "init"
     assert _tags(bare) == {"v0.1.0"}
     assert not (repo / "uv.lock").exists()
-    with pytest.raises(StepFailed, match="cannot release: nothing to release"):
+    with pytest.raises(StepFailed, match="cannot release: nothing to release") as caught:
         _release(repo)
+    assert type(caught.value.__cause__) is CannotRelease
 
 
 # (spec) Step kinds
@@ -477,8 +478,9 @@ def test_release_keeps_a_higher_version_and_rejects_a_lower_one(tmp_path: Path) 
     _project(lower, "0.1.0")
     _git(lower, "add", "pyproject.toml")
     _git(lower, "commit", "-q", "-m", "downgrade")
-    with pytest.raises(StepFailed, match="cannot release: version 0.1.0 is lower than v0.2.0"):
+    with pytest.raises(StepFailed, match="cannot release: version 0.1.0 is lower than v0.2.0") as caught:
         _release(lower)
+    assert type(caught.value.__cause__) is CannotRelease
     assert 'version = "0.1.0"' in (lower / "pyproject.toml").read_text()
     assert _tags(lower_remote) == set()
 
@@ -491,8 +493,9 @@ def test_release_fails_before_changing_anything(
     _git(dirty, "tag", "v0.1.0")
     _advance(dirty)
     (dirty / "pyproject.toml").write_text((dirty / "pyproject.toml").read_text() + "\n")
-    with pytest.raises(StepFailed, match="cannot release: uncommitted changes"):
+    with pytest.raises(StepFailed, match="cannot release: uncommitted changes") as caught:
         _release(dirty)
+    assert type(caught.value.__cause__) is CannotRelease
     assert _tags(dirty_remote) == set()
 
     local = tmp_path / "local"
@@ -502,8 +505,9 @@ def test_release_fails_before_changing_anything(
     _project(local, "0.1.0")
     _git(local, "add", "pyproject.toml")
     _git(local, "commit", "-q", "-m", "init")
-    with pytest.raises(StepFailed, match="cannot release: no upstream"):
+    with pytest.raises(StepFailed, match="cannot release: no upstream") as caught:
         _release(local)
+    assert type(caught.value.__cause__) is CannotRelease
     assert 'version = "0.1.0"' in (local / "pyproject.toml").read_text()
 
     behind, bare = _repository(tmp_path / "behind", "0.1.0")
@@ -515,8 +519,9 @@ def test_release_fails_before_changing_anything(
     _git(clone, "add", "other.txt")
     _git(clone, "commit", "-q", "-m", "remote")
     _git(clone, "push", "-q", "origin", "HEAD")
-    with pytest.raises(StepFailed, match="cannot release: behind its upstream"):
+    with pytest.raises(StepFailed, match="cannot release: behind its upstream") as caught:
         _release(behind)
+    assert type(caught.value.__cause__) is CannotRelease
     assert 'version = "0.1.0"' in (behind / "pyproject.toml").read_text()
     assert _tags(bare) == set()
 
@@ -539,8 +544,9 @@ def test_a_package_lock_beside_a_later_manifest_leaves_the_tree_clean(
     step = Release(".", "web/package.json")
     step.base_dir = repo
     step.name = "release"
-    with pytest.raises(StepFailed, match="package-lock.json"):
+    with pytest.raises(StepFailed, match="package-lock.json") as caught:
         execute([step], root=repo)
+    assert type(caught.value.__cause__) is CannotRelease
     assert _porcelain(repo) == ""
     assert _local_tags(repo) == {"v0.1.0"}
     assert _tags(bare) == set()
@@ -566,8 +572,9 @@ def test_a_cargo_dotted_version_after_a_valid_manifest_leaves_the_tree_clean(
     step = Release("pyproject.toml", "app/Cargo.toml")
     step.base_dir = repo
     step.name = "release"
-    with pytest.raises(StepFailed, match="version line is missing"):
+    with pytest.raises(StepFailed, match="version line is missing") as caught:
         execute([step], root=repo)
+    assert type(caught.value.__cause__) is CannotRelease
     assert _porcelain(repo) == ""
     assert _local_tags(repo) == {"v0.1.0"}
     assert _tags(bare) == set()
@@ -626,6 +633,7 @@ def test_release_query_failures_keep_their_message(
     if late:
         message += f"; left: edited package.json; to undo: git reset --hard {start}"
     assert str(caught.value) == message
+    assert type(caught.value.__cause__) is CannotRelease
     if late:
         assert '"version": "0.1.1"' in (repo / "package.json").read_text()
         _undo(repo, message)
@@ -785,6 +793,7 @@ def test_an_unwritable_manifest_names_what_it_left(tmp_path: Path) -> None:
         with pytest.raises(StepFailed) as caught:
             execute([step], root=repo)
         message = str(caught.value)
+        assert type(caught.value.__cause__) is CannotRelease
         denied = PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(package.resolve()))
         assert message == (
             f"release failed: cannot release: cannot write {package.resolve()}: {denied}; "
@@ -815,6 +824,7 @@ def test_a_refused_commit_names_what_it_left(tmp_path: Path) -> None:
     with pytest.raises(StepFailed) as caught:
         execute([step], root=repo)
     message = str(caught.value)
+    assert type(caught.value.__cause__) is CannotRelease
     assert message == (
         f"release failed: cannot release: git exited with status 1; "
         f"left: edited pyproject.toml; to undo: git reset --hard {start}"
@@ -1034,8 +1044,9 @@ def test_a_directory_with_no_versioned_manifest_fails(tmp_path: Path) -> None:
         match=re.escape(
             "cannot release: blank has no versioned pyproject.toml, Cargo.toml or package.json"
         ),
-    ):
+    ) as caught:
         _run(repo, "blank")
+    assert type(caught.value.__cause__) is CannotRelease
     assert _tags(bare) == set()
     assert 'version = "0.1.0"' in (repo / "pyproject.toml").read_text()
 
@@ -1086,8 +1097,9 @@ def test_disagreeing_manifests_fail_until_primary_names_one(tmp_path: Path) -> N
             "cannot release: . holds different versions: "
             "pyproject.toml 0.2.0, package.json 0.1.0; name one with primary="
         ),
-    ):
+    ) as caught:
         _run(repo, ".")
+    assert type(caught.value.__cause__) is CannotRelease
     assert (repo / "pyproject.toml").read_text() == pyproject
     assert package.read_text() == original
     assert _tags(bare) == set()
@@ -1150,3 +1162,30 @@ def test_a_niva_shaped_tree_releases_the_named_directories(tmp_path: Path) -> No
     assert root_package.read_text() == root_package_text
     assert vendor.read_text() == vendor_text
     assert "v0.1.1" in _tags(bare)
+
+
+# (spec) Step kinds
+def test_release_refuses_a_non_triplet_version_after_a_tag(tmp_path: Path) -> None:
+    repo, bare = _repository(tmp_path, "0.1.0")
+    _git(repo, "tag", "v0.1.0")
+    _project(repo, "0.1")
+    _git(repo, "add", "pyproject.toml")
+    _git(repo, "commit", "-q", "-m", "non-triplet")
+
+    with pytest.raises(StepFailed, match=r"cannot release: version 0\.1 is not X\.Y\.Z") as caught:
+        _release(repo)
+    assert type(caught.value.__cause__) is CannotRelease
+    assert _porcelain(repo) == ""
+    assert _tags(bare) == set()
+
+
+# (spec) Step kinds
+def test_package_json_refuses_a_version_key_it_cannot_replace(tmp_path: Path) -> None:
+    repo, _bare = _repository(tmp_path, "0.1.0")
+    original = r'{"versi\u006fn": "0.1.0"}'
+    package = repo / "package.json"
+    package.write_text(original)
+
+    with pytest.raises(CannotRelease, match=r"cannot release: package\.json version string was not found"):
+        PackageJson("package.json").write_version(repo, "0.1.1")
+    assert package.read_text() == original

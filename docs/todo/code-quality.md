@@ -1509,7 +1509,7 @@ CI run (decision 13).
   a step's `print` of the same length does too, and `LineSink` keeps at
   most 65,536 pending characters; captured output equals what the program
   wrote; a line of exactly 65,536 prints once.
-- [ ] **CQ8.5: Give release refusals one error.** Decision 6. Test: each
+- [x] **CQ8.5: Give release refusals one error.** Decision 6. Test: each
   refusal's message is unchanged and its type is `CannotRelease`.
 - [ ] **CQ8.6: Record a reused step in one place.** Decision 7. The reuse
   tests are the check.

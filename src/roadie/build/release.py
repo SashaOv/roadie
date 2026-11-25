@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from roadie.build.manifests import (
+    CannotRelease,
     CargoManifest,
     PackageJson,
     PlannedVersion,
@@ -187,8 +188,8 @@ class Release(Step[str]):
             shown = ", ".join(
                 f"{item.name} {version}" for item, version in zip(found, versions, strict=True)
             )
-            raise RoadieError(
-                f"cannot release: {source} holds different versions: {shown}; "
+            raise CannotRelease(
+                f"{source} holds different versions: {shown}; "
                 "name one with primary="
             )
         return versions[0]
@@ -225,11 +226,11 @@ class Release(Step[str]):
                 f"HEAD:{plan.branch}",
                 f"v{plan.version}",
             )
-        except RoadieError as error:
+        except CannotRelease as error:
             if not edited and commit is None and not tagged:
                 raise
             left = _left_message(plan, edited, commit, tagged=tagged)
-            raise RoadieError(f"{error}; {left}") from error
+            raise CannotRelease(f"{error.reason}; {left}") from error
         print(f"released v{plan.version}", flush=True)
         return plan.version
 
@@ -285,7 +286,7 @@ def _require_clean(repository: Path) -> None:
         path = _status_path(line)
         if line.startswith("??") and (path == "target" or path.startswith("target/")):
             continue
-        raise RoadieError("cannot release: uncommitted changes")
+        raise CannotRelease("uncommitted changes")
 
 
 def _upstream(repository: Path) -> tuple[str, str]:
@@ -297,10 +298,10 @@ def _upstream(repository: Path) -> tuple[str, str]:
         check=False,
     )
     if completed.returncode != 0:
-        raise RoadieError("cannot release: no upstream")
+        raise CannotRelease("no upstream")
     remote, _, branch = completed.stdout.strip().partition("/")
     if not branch:
-        raise RoadieError("cannot release: no upstream")
+        raise CannotRelease("no upstream")
     return remote, branch
 
 
@@ -308,7 +309,7 @@ def _require_current(repository: Path, remote: str, branch: str) -> None:
     _git(repository, "fetch", remote)
     count = _git(repository, "rev-list", "--count", f"HEAD..{remote}/{branch}")
     if int(count.strip() or "0") > 0:
-        raise RoadieError("cannot release: behind its upstream")
+        raise CannotRelease("behind its upstream")
 
 
 def _latest_tag(repository: Path) -> tuple[tuple[int, int, int], str] | None:
@@ -337,12 +338,12 @@ def _chosen_version(repository: Path, current: str) -> str:
     head = _git(repository, "rev-parse", "HEAD").strip()
     tagged = _git(repository, "rev-parse", f"{tag}^{{commit}}").strip()
     if head == tagged:
-        raise RoadieError("cannot release: nothing to release")
+        raise CannotRelease("nothing to release")
     parsed = _parse_version(current)
     if parsed is None:
-        raise RoadieError(f"cannot release: version {current} is not X.Y.Z")
+        raise CannotRelease(f"version {current} is not X.Y.Z")
     if parsed < number:
-        raise RoadieError(f"cannot release: version {current} is lower than {tag}")
+        raise CannotRelease(f"version {current} is lower than {tag}")
     if parsed == number:
         major, minor, build = parsed
         return f"{major}.{minor}.{build + 1}"
@@ -386,8 +387,8 @@ def _one_source(base_dir: Path, source: str) -> list[_Manifest]:
     if path.is_dir():
         found = _in_directory(path, base_dir)
         if not found:
-            raise RoadieError(
-                f"cannot release: {source} has no versioned pyproject.toml, "
+            raise CannotRelease(
+                f"{source} has no versioned pyproject.toml, "
                 "Cargo.toml or package.json"
             )
         return found
