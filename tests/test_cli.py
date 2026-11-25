@@ -478,3 +478,48 @@ def test_a_setup_step_is_reused(tmp_path: Path, capsys: pytest.CaptureFixture[st
     run_cli(["--jobs", "1", "-f", str(tmp_path)])
 
     assert "reused prep" in capsys.readouterr().out
+
+
+# (spec) Dry run output
+# (spec) Deferred steps
+def test_dry_run_marks_match_build_reuse_and_unstarted_lines(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_build(
+        tmp_path,
+        """
+from support import FakeDeployment
+
+class Server(Service):
+    def build(self, run):
+        return FakeDeployment()
+
+class Job(Step[str]):
+    def __init__(self, server):
+        self.server = server
+    def build(self, run):
+        return "done"
+
+idle = Server()
+cached = Job(idle)
+active = Server()
+fresh = Job(active)
+""",
+    )
+    cli.run("cached", file=tmp_path, jobs=1)
+    capsys.readouterr()
+    cli.run("cached", "fresh", file=tmp_path, jobs=1, dry_run=True)
+    dry_lines = capsys.readouterr().out.splitlines()
+    assert dry_lines == [
+        "idle = Server()  # not started",
+        "cached = Job(server=idle)  # reuse",
+        "active = Server()  # run",
+        "fresh = Job(server=active)  # run",
+    ]
+
+    cli.run("cached", "fresh", file=tmp_path, jobs=1)
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "reused cached"
+    assert lines[1] == "build active = Server()"
+    assert lines[3] == "build fresh = Job(server=active)"
+    assert lines[5] == "not started idle: no step that takes it runs"

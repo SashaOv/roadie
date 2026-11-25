@@ -14,7 +14,6 @@ from typing import Any, cast
 
 from dotenv import dotenv_values
 
-from roadie.engine.display import format_step
 from roadie.engine.enforce import (
     built_files,
     declared_files,
@@ -248,7 +247,7 @@ def execute(
                     )
                     live = _Live(run, plan.blockers)
                     scheduler = _Scheduler(
-                        plan, run, live, run_lock=held, progress=Progress(writer), enforce=enforce
+                        plan, run, live, run_lock=held, progress=Progress(writer, dry=dry), enforce=enforce
                     )
                     return _run_steps(scheduler, parameters, names)
             finally:
@@ -299,15 +298,11 @@ def _run_steps(
                     raise RoadieError(
                         f"undeclared reads in {len(names)} steps: {', '.join(names)}"
                     )
-                if dry:
-                    for step in steps:
-                        print(f"{format_step(step)}  # {scheduler.marks[id(step)]}", flush=True)
-                else:
-                    for step in steps:
-                        if not step.deferred or id(step) in requested | scheduler.started:
-                            continue
+                for step in steps:
+                    if step.deferred and id(step) not in requested and id(step) not in scheduler.started:
                         progress.not_started(step)
                 if dry:
+                    progress.render_plan(steps)
                     return None
                 succeeded = True
             except KeyboardInterrupt:
@@ -374,7 +369,6 @@ class _Scheduler:
         self.interrupted = False
         self.outputs: dict[int, str] = {}
         self.started: set[int] = set()
-        self.marks: dict[int, str] = {}
         self.guards = {
             id(step): threading.Lock() for step in plan.steps if step.deferred
         }
@@ -596,8 +590,6 @@ class _Scheduler:
             # consumer can be reused without it. The consumer builds it.
             with self.condition:
                 self.outputs[id(step)] = step_fingerprint
-                if self.plan.dry:
-                    self.marks[id(step)] = "not started"
             return
         record = None if self.enforce else _matching(step, step_fingerprint)
         composite_reused = (
@@ -605,11 +597,19 @@ class _Scheduler:
             and bool(step.steps)
             and all(id(member) in self.run.reused for member in step.steps)
         )
-        if record is not None and self.plan.dry:
-            with self.condition:
-                self.run.reused.add(id(step))
-                self.marks[id(step)] = "reuse"
-                self.outputs[id(step)] = str(record["output"])
+        if self.plan.dry:
+            if record is not None or composite_reused:
+                self.progress.reused(step)
+                with self.condition:
+                    self.run.reused.add(id(step))
+                    self.outputs[id(step)] = str(record["output"]) if record is not None else step_fingerprint
+            else:
+                self._start_deferred(step)
+                self.progress.building(step)
+                with self.condition:
+                    if step.deferred:
+                        self.started.add(id(step))
+                    self.outputs[id(step)] = "dry"
         elif record is not None:
             value = step.decode(record["value"])
             with self.condition:
@@ -620,16 +620,6 @@ class _Scheduler:
             )
             with self.condition:
                 self.outputs[id(step)] = output
-        elif self.plan.dry and composite_reused:
-            with self.condition:
-                self.run.reused.add(id(step))
-                self.marks[id(step)] = "reuse"
-                self.outputs[id(step)] = step_fingerprint
-        elif self.plan.dry:
-            _dry_start_deferred(step, self.marks)
-            with self.condition:
-                self.marks[id(step)] = "run"
-                self.outputs[id(step)] = "dry"
         else:
             self._start_deferred(step)
             if composite_reused:
@@ -695,6 +685,11 @@ class _Scheduler:
         with self.guards[id(dependency)]:
             if id(dependency) in self.started:
                 return
+            if self.plan.dry:
+                self.progress.building(dependency)
+                with self.condition:
+                    self.started.add(id(dependency))
+                return
             value, elapsed = self._invoke(dependency)
             with self.condition:
                 self.live.add(dependency, value)
@@ -723,15 +718,6 @@ def _blockers(steps: Sequence[Step[Any]], requested: set[int]) -> dict[int, set[
         if step.deferred and id(step) not in requested:
             extend(step, set(blockers[id(step)]), set())
     return blockers
-
-
-def _dry_start_deferred(step: Step[Any], marks: dict[int, str]) -> None:
-    """Mark the deferred steps `step` would start, without building them."""
-    for dependency in step.dependencies():
-        if not dependency.deferred or marks.get(id(dependency)) == "run":
-            continue
-        _dry_start_deferred(dependency, marks)
-        marks[id(dependency)] = "run"
 
 
 # (spec) Deferred steps

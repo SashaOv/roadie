@@ -1269,7 +1269,7 @@ CI run (decision 10).
   `build` or `reused` line are the steps with report events, each
   `step-end` outcome matches its line, and the terminal lines are the same
   when the report cannot be written.
-- [ ] **CQ7.3: Mark a dry run from the same outcomes.** Decision 3. Test: a
+- [x] **CQ7.3: Mark a dry run from the same outcomes.** Decision 3. Test: a
   dry run's marks match the run's lines for a reused step, a built step, a
   deferred step no step takes, and a deferred step a built step starts.
 - [ ] **CQ7.4: Order the run's environment files in the engine.** Decision
