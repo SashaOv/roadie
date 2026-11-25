@@ -1333,7 +1333,7 @@ CI run (decision 10).
 
 ### CQ8: A step's attributes are the fields it declares
 
-Status: planned, awaiting author checkpoint
+Status: planned, approved 2026-11-25
 
 **Improvement.** Today a step's attributes are whatever its instance holds
 (`vars(self)` minus eight engine names). A private cache changes the
@@ -1461,7 +1461,7 @@ This finishes the backlog except Niva's items, Windows and the JUnit reader.
     run.
     - Grant: push `main` after CQ8.10, then the record commit and `CQ8: Fix`
       commits for a failing acceptance clause, up to three CI runs.
-      AUTHOR: 
+      AUTHOR:granted 
 
 **Acceptance check.**
 
