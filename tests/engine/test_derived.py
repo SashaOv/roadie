@@ -32,7 +32,7 @@ class Emit(Step[str]):
 
 @dataclass(eq=False)
 class Hold(Step[str]):
-    source: Step
+    source: Attribute[Step]
     def build(self, run):
         path = run.artifact(self, ".txt")
         path.write_text(run[self.source])
@@ -40,11 +40,12 @@ class Hold(Step[str]):
 
 @dataclass(eq=False)
 class Bundle(Step[str]):
-    parts: tuple
+    parts: Attribute[tuple]
     def build(self, run):
         return "v"
 
 class Wrap(Step[str]):
+    source: Attribute[Step]
     def __init__(self, source):
         self.source = source
     def call_arguments(self):
@@ -235,7 +236,7 @@ class Emit(Step[str]):
 
 @dataclass(eq=False)
 class Copy(File):
-    source: Step
+    source: Attribute[Step]
     def build(self, run):
         path = run.artifact(self, ".txt")
         path.write_text(run[self.source] + "\\n")

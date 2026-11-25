@@ -6,7 +6,7 @@ import pytest
 from support import Value, execute, isolate_repo, needs_symlinks, write_build
 
 import roadie.engine.fingerprint as fingerprints
-from roadie.build import Files, Input, RoadieError, Step
+from roadie.build import Attribute, Files, Input, RoadieError, Step
 from roadie.engine.fingerprint import fingerprint
 from roadie.engine.graph import load
 from roadie.engine.inputs import digest
@@ -18,7 +18,7 @@ from roadie.engine.run import Run
 def test_plain_attribute_of_unsupported_type_is_an_error() -> None:
     @dataclass(eq=False)
     class Custom(Step[None]):
-        value: object
+        value: Attribute[object]
 
         def build(self, run: Run) -> None:
             pass
@@ -41,8 +41,8 @@ def test_step_fingerprint_covers_files_dependency_outputs_and_env(tmp_path: Path
 
         @dataclass(eq=False)
         class Bundle(Step[None]):
-            files: Files
-            source: Step[str]
+            files: Attribute[Files]
+            source: Attribute[Step[str]]
 
             def build(self, run: Run) -> None:
                 pass
@@ -81,7 +81,7 @@ def test_step_fingerprint_records_a_link_by_its_target(
 
         @dataclass(eq=False)
         class Bundle(Step[None]):
-            files: Files
+            files: Attribute[Files]
 
             def build(self, run: Run) -> None:
                 pass
@@ -102,8 +102,8 @@ from pathlib import Path
 
 @dataclass(eq=False)
 class Note(Step[None]):
-    source: Path
-    extras: tuple[Path, ...]
+    source: Attribute[Path]
+    extras: Attribute[tuple[Path, ...]]
     def build(self, run):
         return None
 
@@ -163,7 +163,7 @@ def test_code_hash_keys_sources_by_module_name(monkeypatch: pytest.MonkeyPatch) 
 def test_a_reserved_name_fails_when_the_step_is_fingerprinted() -> None:
     @dataclass(eq=False)
     class Named(Step[str]):
-        name: str
+        name: Attribute[str]
 
         def build(self, run: Run) -> str:
             return self.name
@@ -174,7 +174,7 @@ def test_a_reserved_name_fails_when_the_step_is_fingerprinted() -> None:
 
     @dataclass(eq=False)
     class Logged(Step[str]):
-        report: str
+        report: Attribute[str]
 
         def build(self, run: Run) -> str:
             return self.report
@@ -193,7 +193,7 @@ def test_a_reserved_name_fails_when_a_dry_run_shows_the_step(
 
     @dataclass(eq=False)
     class Logged(Step[str]):
-        report: str
+        report: Attribute[str]
 
         def build(self, run: Run) -> str:
             return self.report
@@ -215,6 +215,8 @@ def test_a_changed_input_digest_changes_the_step_fingerprint() -> None:
             return digest(self.value)
 
     class Noted(Step[None]):
+        stamp: Attribute[Stamp]
+
         def __init__(self, stamp: Stamp) -> None:
             self.stamp = stamp
 

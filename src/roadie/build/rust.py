@@ -15,6 +15,7 @@ from roadie.build.binary import Binary
 from roadie.build.files import Files, listed_files
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import Input, digest, run_state
+from roadie.engine.step import Attribute
 from roadie.system import CannotRun, ProgramFailed, executable_suffix, run_query
 
 if TYPE_CHECKING:
@@ -83,8 +84,8 @@ class RustBinary(Binary):
     executables` when it reports several different ones.
     """
 
-    package: CargoPackage
-    files: Files | None = None
+    package: Attribute[CargoPackage]
+    files: Attribute[Files | None] = None
 
     def build(self, run: Run) -> Path:
         completed = self._cmd(

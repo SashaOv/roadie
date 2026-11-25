@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from roadie import cli
-from roadie.build import File, Service, Step
+from roadie.build import Attribute, File, Service, Step
 from roadie.engine.graph import load
 from roadie.engine.run import Run
 from roadie.engine.run import execute as _execute
@@ -132,7 +132,7 @@ class Boom(Step[None]):
 
 @dataclass(eq=False)
 class Value(Step[str]):
-    value: str
+    value: Attribute[str]
 
     def build(self, run: Run) -> str:
         return self.value
@@ -140,7 +140,7 @@ class Value(Step[str]):
 
 @dataclass(eq=False)
 class TextFile(File):
-    text: str
+    text: Attribute[str]
 
     def build(self, run: Run) -> Path:
         artifact = run.artifact(self, ".txt")
@@ -167,7 +167,7 @@ from roadie.engine.run import Run
 
 @dataclass(eq=False)
 class Emitter(File):
-    text: str = "v1"
+    text: Attribute[str] = "v1"
     def build(self, run: Run) -> Path:
         path = run.artifact(self, ".txt")
         path.write_text(self.text)

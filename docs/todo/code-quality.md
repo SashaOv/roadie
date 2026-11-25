@@ -1487,7 +1487,7 @@ CI run (decision 13).
 
 - [x] **CQ8.1: Share repeated test steps.** Decision 11. Only moves test
   code; the suite is the check.
-- [ ] **CQ8.2: Declare every step field.** Decisions 1 and 4, with
+- [x] **CQ8.2: Declare every step field.** Decisions 1 and 4, with
   `attributes()` still reading the instance: `Attribute` exists, and `src`
   and test steps mark and declare their fields. Test: every step kind in
   `src`, built with each argument, has the same `attributes()` as the marks

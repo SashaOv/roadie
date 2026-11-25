@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from support import execute, run_cli, write_build
 
-from roadie.build import Param, RoadieError, Step
+from roadie.build import Attribute, Param, RoadieError, Step
 from roadie.engine.errors import StepFailed
 from roadie.engine.parameters import ParameterValues
 from roadie.engine.run import Run
@@ -36,6 +36,8 @@ def test_a_parameter_reaches_a_deferred_and_an_immediate_step(
     class Api(Step[str]):
         deferred = True
 
+        mode: Attribute[Param]
+
         def __init__(self) -> None:
             self.mode = Param("mode", default="dep")
 
@@ -46,6 +48,9 @@ def test_a_parameter_reaches_a_deferred_and_an_immediate_step(
             return self.mode.value or ""
 
     class Job(Step[str]):
+        api: Attribute[Api]
+        mode: Attribute[Param]
+
         def __init__(self, api: Api) -> None:
             self.api = api
             self.mode = Param("mode", default="job")
@@ -84,6 +89,7 @@ def test_an_unset_parameter_differs_from_an_empty_one(
     write_build(
         tmp_path,
         "class Note(Step[str]):\n"
+        "    mode: Attribute[Param]\n"
         "    def __init__(self):\n"
         "        self.mode = Param('mode', default=None)\n"
         "    def build(self, run):\n"
@@ -108,12 +114,16 @@ def test_a_parameter_after_a_result_does_not_reach_its_dependencies(tmp_path: Pa
     write_build(
         tmp_path,
         "class Source(Step[str]):\n"
+        "    mode: Attribute[Param]\n"
         "    def __init__(self):\n"
         "        self.mode = Param('mode', default='dep')\n"
         "    def build(self, run):\n"
         "        (self.base_dir / 'dep').write_text(self.mode.value or '')\n"
         "        return self.mode.value or ''\n"
         "class Job(Step[str]):\n"
+        "    source: Attribute[Step[str]]\n"
+        "    label: Attribute[str]\n"
+        "    mode: Attribute[Param]\n"
         "    def __init__(self, source, label):\n"
         "        self.source = source\n"
         "        self.label = label\n"
@@ -139,6 +149,7 @@ def test_parameter_words_fail_before_a_step_builds(tmp_path: Path) -> None:
     write_build(
         tmp_path,
         "class Note(Step[str]):\n"
+        "    mode: Attribute[Param]\n"
         "    def __init__(self):\n"
         "        self.mode = Param('mode', default=None)\n"
         "    def build(self, run):\n"
@@ -173,6 +184,7 @@ def test_parameter_words_fail_before_a_step_builds(tmp_path: Path) -> None:
     write_build(
         tmp_path,
         "class Note(Step[str]):\n"
+        "    mode: Attribute[Param]\n"
         "    def __init__(self):\n"
         "        self.mode = Param('mode')\n"
         "    def build(self, run):\n"
@@ -191,6 +203,7 @@ def test_dry_run_shows_a_param(tmp_path: Path, capsys: pytest.CaptureFixture[str
     write_build(
         tmp_path,
         "class Note(Step[str]):\n"
+        "    mode: Attribute[Param]\n"
         "    def __init__(self):\n"
         "        self.mode = Param('mode', default=None)\n"
         "    def build(self, run):\n"

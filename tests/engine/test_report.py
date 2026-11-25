@@ -13,7 +13,7 @@ import pytest
 from support import Boom, FakeDeployment, execute, write_build
 
 from roadie import cli
-from roadie.build import Group, Service, Step
+from roadie.build import Attribute, Group, Service, Step
 from roadie.engine.errors import StepFailed
 from roadie.engine.process import request_stop
 from roadie.engine.run import Run
@@ -45,6 +45,7 @@ def _assert_common(event: dict[str, Any]) -> None:
 def _pair() -> str:
     return (
         "class Side(Step[str]):\n"
+        "    label: Attribute[str]\n"
         "    def __init__(self, label: str) -> None:\n"
         "        self.label = label\n"
         "    def build(self, run: Run) -> str:\n"
@@ -60,6 +61,8 @@ def _run_overlapping_pair(root: Path, report: Path) -> None:
     ready = {"a": threading.Event(), "b": threading.Event()}
 
     class Side(Step[str]):
+        label: Attribute[str]
+
         def __init__(self, label: str) -> None:
             self.label = label
 
@@ -173,6 +176,8 @@ def test_a_deferred_step_ends_when_its_start_ends(
             return FakeDeployment()
 
     class After(Step[str]):
+        server: Attribute[Service]
+
         def __init__(self, server: Server) -> None:
             self.server = server
 
@@ -433,6 +438,8 @@ class Server(Service):
         return FakeDeployment()
 
 class Failing(Tests):
+    server: Attribute[Service]
+
     def __init__(self, server):
         self.server = server
     def build(self, run):

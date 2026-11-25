@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from support import execute, git_init, needs_symlinks, posix_only
 
-from roadie.build import Files, Step
+from roadie.build import Attribute, Files, Step
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.run import Run
 
@@ -199,7 +199,7 @@ def test_unreadable_directory_outside_a_work_tree_fails_the_step(tmp_path: Path)
 
         @dataclass(eq=False)
         class Bundle(Step[None]):
-            files: Files
+            files: Attribute[Files]
 
             def build(self, run: Run) -> None:
                 return None

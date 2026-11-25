@@ -3,13 +3,15 @@ from pathlib import Path
 import pytest
 from support import Boom, Stopped, execute, isolate_repo
 
-from roadie.build import Group, Service, Step
+from roadie.build import Attribute, Group, Service, Step
 from roadie.engine.errors import StepFailed
 from roadie.engine.run import Run
 
 
 def _note(label: str = "v") -> Step[str]:
     class Note(Step[str]):
+        text: Attribute[str]
+
         def __init__(self, text: str) -> None:
             self.text = text
 
@@ -78,6 +80,8 @@ def test_a_deferred_step_is_shown_when_it_starts(
             return Stopped()
 
     class After(Step[str]):
+        server: Attribute[Service]
+
         def __init__(self, server: Server) -> None:
             self.server = server
 

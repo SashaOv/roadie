@@ -19,6 +19,7 @@ from support import (
 
 from roadie import cli
 from roadie.build import (
+    Attribute,
     HttpService,
     Service,
     Step,
@@ -54,7 +55,7 @@ def test_service_process_is_stopped_after_run(ending: str) -> None:
 
     @dataclass(eq=False)
     class Consumer(Step[None]):
-        server: Service
+        server: Attribute[Service]
 
         def build(self, run: Run) -> None:
             assert run[self.server].process.poll() is None
@@ -101,7 +102,7 @@ def test_http_service_waits_for_its_health_path_and_fails_when_the_process_exits
 
     @dataclass(eq=False)
     class After(Step[None]):
-        server: Service
+        server: Attribute[Service]
 
         def build(self, run: Run) -> None:
             return None

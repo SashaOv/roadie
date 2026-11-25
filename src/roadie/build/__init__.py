@@ -33,9 +33,10 @@ from roadie.engine.process import (
     wait_for_port,
 )
 from roadie.engine.run import Run
-from roadie.engine.step import Step
+from roadie.engine.step import Attribute, Step
 
 __all__ = [
+    "Attribute",
     "Binary",
     "CargoPackage",
     "Check",

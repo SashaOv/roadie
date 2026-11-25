@@ -88,6 +88,7 @@ def test_dry_run_marks_a_step_without_a_record_by_whether_it_reuses(
         + "\nclass After(Step[str]):\n"
         + "    recorded = False\n"
         + f"    reusable = {reusable}\n"
+        + "    source: Attribute[Step[str]]\n"
         + "    def __init__(self, source):\n"
         + "        self.source = source\n"
         + "    def build(self, run):\n"
@@ -170,7 +171,7 @@ from roadie.engine.run import Run
 
 @dataclass(eq=False)
 class Combined(Step[None]):
-    inputs: tuple[Step, ...]
+    inputs: Attribute[tuple[Step, ...]]
     def build(self, run: Run) -> None:
         pass
 
@@ -219,8 +220,8 @@ def test_dry_run_omits_attributes_whose_value_is_none(tmp_path: Path, capsys: py
         "from roadie.engine.run import Run\n\n"
         "@dataclass(eq=False)\n"
         "class Setting(Step[None]):\n"
-        "    label: str | None\n"
-        "    note: str | None = None\n"
+        "    label: Attribute[str | None]\n"
+        "    note: Attribute[str | None] = None\n"
         "    def build(self, run: Run) -> None:\n"
         "        pass\n\n"
         "item = Setting(None)\n",
@@ -236,6 +237,7 @@ def test_dry_run_prints_attributes_of_a_plain_class_as_keywords(
     write_build(
         tmp_path,
         "class Plain(Step[None]):\n"
+        "    label: Attribute[str]\n"
         "    def __init__(self, label):\n"
         "        self.label = label\n"
         "    def build(self, run):\n"
@@ -262,6 +264,8 @@ def test_dry_run_marks_a_deferred_step_not_started_unless_a_consumer_runs(
         "        (self.base_dir / 'server.txt').write_text('up')\n"
         "        return Up()\n"
         "class Job(Step[str]):\n"
+        "    server: Attribute[Service]\n"
+        "    label: Attribute[str]\n"
         "    def __init__(self, server, label='a'):\n"
         "        self.server = server\n"
         "        self.label = label\n"
@@ -292,6 +296,8 @@ def test_dry_run_marks_a_deferred_step_not_started_unless_a_consumer_runs(
         "        (self.base_dir / 'server.txt').write_text('up')\n"
         "        return Up()\n"
         "class Job(Step[str]):\n"
+        "    server: Attribute[Service]\n"
+        "    label: Attribute[str]\n"
         "    def __init__(self, server, label='b'):\n"
         "        self.server = server\n"
         "        self.label = label\n"
@@ -340,6 +346,7 @@ def test_several_results_run_once_over_their_shared_steps(
         "    def build(self, run):\n"
         "        return 'n'\n"
         "class Job(Step[str]):\n"
+        "    source: Attribute[Step[str]]\n"
         "    def __init__(self, source):\n"
         "        self.source = source\n"
         "    def build(self, run):\n"
@@ -495,6 +502,8 @@ class Server(Service):
         return FakeDeployment()
 
 class Job(Step[str]):
+    server: Attribute[Service]
+
     def __init__(self, server):
         self.server = server
     def build(self, run):

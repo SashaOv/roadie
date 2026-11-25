@@ -12,7 +12,7 @@ import pytest
 from support import execute, git_init, tracing_only
 
 from roadie import cli
-from roadie.build import Directory, File, Files, Step
+from roadie.build import Attribute, Directory, File, Files, Step
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.run import Run
 
@@ -41,6 +41,10 @@ def _read_script(*names: str) -> str:
 
 
 class Reader(Step[str]):
+    script: Attribute[str]
+    declared_input: Attribute[Files | None]
+    source: Attribute[Step[object] | None]
+
     def __init__(
         self,
         script: str,
@@ -59,6 +63,8 @@ class Reader(Step[str]):
 
 
 class GenFile(File):
+    target: Attribute[str]
+
     def __init__(self, target: str) -> None:
         self.target = target
         self.copy_to = None
@@ -71,6 +77,8 @@ class GenFile(File):
 
 
 class GenDir(Directory):
+    target: Attribute[str]
+
     def __init__(self, target: str) -> None:
         self.target = target
         self.copy_to = None

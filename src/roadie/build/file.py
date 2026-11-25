@@ -9,6 +9,7 @@ from roadie.build.generated import same_as_git_stores as _same_as_git_stores
 from roadie.build.generated import tracked as _tracked
 from roadie.build.path import PathStep, sha256
 from roadie.engine.errors import RoadieError
+from roadie.engine.step import Attribute
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -25,7 +26,7 @@ class File(PathStep):
     unchanged content leaves its consumers reusable.
     """
 
-    copy_to: str | Path | None = None
+    copy_to: Attribute[str | Path | None] = None
 
     def publish(self, run: "Run", value: Path) -> Path:
         if self.copy_to is None:

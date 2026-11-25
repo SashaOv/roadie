@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from support import execute, isolate_repo
 
-from roadie.build import File
+from roadie.build import Attribute, File
 from roadie.build import TestFailure as Failure
 from roadie.build import TestResults as Results
 from roadie.build import Tests as Checks
@@ -47,7 +47,7 @@ def test_tests_consumer_is_reused_when_the_replayed_log_would_differ(tmp_path: P
 
     @dataclass(eq=False)
     class Downstream(File):
-        source: Checks
+        source: Attribute[Checks]
 
         def build(self, run: Run) -> Path:
             built.append("down")

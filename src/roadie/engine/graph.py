@@ -111,6 +111,10 @@ _session: ContextVar[_Session | None] = ContextVar("roadie_session", default=Non
 class _Included(Composite):
     """A group of the included file's default result, with its results as attributes."""
 
+    _path: Path
+    _results: dict[str, Step[Any]]
+    _setup: Step[Any] | None
+
     def __init__(
         self,
         path: Path,

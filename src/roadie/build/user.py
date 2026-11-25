@@ -8,7 +8,7 @@ from roadie.build.tests import TestFailure, TestResults, Tests
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.inputs import Input
 from roadie.engine.many import one_or_many
-from roadie.engine.step import Step
+from roadie.engine.step import Attribute, Step
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -42,6 +42,9 @@ class UserTask(Tests):
     """
 
     asks: ClassVar[bool] = True
+    instructions: Attribute[str]
+    checks: Attribute[tuple[str, ...]]
+    inputs: Attribute[tuple[Input | Step[object], ...]]
 
     def __init__(
         self,
@@ -62,7 +65,7 @@ class UserTask(Tests):
                 )
         self.instructions = instructions
         self.checks = checks
-        self.inputs: tuple[Input | Step[object], ...] = one_or_many(
+        self.inputs = one_or_many(
             inputs,
             (Input, Step),
             owner="UserTask",
@@ -127,6 +130,8 @@ class UserApproval(Step[None]):
     asks: ClassVar[bool] = True
     reusable: ClassVar[bool] = False
     recorded: ClassVar[bool] = False
+
+    question: Attribute[str]
 
     def __init__(self, question: str) -> None:
         if not isinstance(question, str):

@@ -7,6 +7,7 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
+    Annotated,
     Any,
     ClassVar,
     Self,
@@ -25,6 +26,10 @@ from roadie.engine.process import Command, RunningProcess
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
+
+_AttributeT = TypeVar("_AttributeT")
+_ATTRIBUTE_MARK = object()
+Attribute = Annotated[_AttributeT, _ATTRIBUTE_MARK]
 
 _serials = itertools.count()
 
@@ -169,6 +174,7 @@ class Step[T](ABC):
 # (spec) Reusing a step
 class Composite(Step[tuple[object, ...]]):
     recorded = False
+    steps: Attribute[tuple[Step[Any], ...]]
 
     def __init__(self, steps: tuple[Step[Any], ...]) -> None:
         self.steps = steps

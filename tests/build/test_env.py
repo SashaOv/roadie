@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from support import execute, isolate_repo
 
-from roadie.build import Env, RoadieError, Step
+from roadie.build import Attribute, Env, RoadieError, Step
 from roadie.engine.run import Run
 
 
@@ -46,6 +46,8 @@ def test_a_step_reruns_when_its_env_input_changes(
     built: list[str] = []
 
     class Bundle(Step[str]):
+        mode: Attribute[Env]
+
         def __init__(self) -> None:
             self.mode = Env("MODE")
 

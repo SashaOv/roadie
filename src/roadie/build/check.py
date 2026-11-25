@@ -8,7 +8,7 @@ from roadie.build.tests import TestFailure, TestResults, Tests
 from roadie.engine.inputs import Input
 from roadie.engine.many import one_or_many
 from roadie.engine.process import OUTPUT_TAIL
-from roadie.engine.step import Step
+from roadie.engine.step import Attribute, Step
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -29,6 +29,9 @@ class Check(Tests):
     check's. A value of the wrong kind fails with `Check inputs takes inputs
     or steps: got <type>`. Recording and reuse are those of a test step.
     """
+
+    command: Attribute[tuple[str, ...]]
+    inputs: Attribute[tuple[Input | Step[object], ...]]
 
     def __init__(
         self,

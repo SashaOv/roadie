@@ -16,6 +16,10 @@ import time
 from pathlib import Path
 
 class Side(Step[str]):
+    label: Attribute[str]
+    ready: Attribute[str]
+    peer: Attribute[str]
+
     def __init__(self, label: str, ready: str, peer: str) -> None:
         self.label = label
         self.ready = ready
@@ -31,6 +35,8 @@ class Side(Step[str]):
         raise RuntimeError("peer did not start")
 
 class Slow(Step[None]):
+    ready: Attribute[str]
+
     def __init__(self, ready: str) -> None:
         self.ready = ready
 

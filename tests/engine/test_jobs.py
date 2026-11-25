@@ -12,7 +12,7 @@ import pytest
 from support import FakeDeployment, Note, execute, write_build
 
 from roadie import cli
-from roadie.build import Service, Step
+from roadie.build import Attribute, Service, Step
 from roadie.engine import process as processes
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.inputs import run_state
@@ -64,7 +64,7 @@ def test_parallel_output_prefixes_each_line(tmp_path: Path, capsys: pytest.Captu
 
     @dataclass(eq=False)
     class Side(Step[str]):
-        label: str
+        label: Attribute[str]
 
         def build(self, run: Run) -> str:
             print(f"step-{self.label}", flush=True)
@@ -250,7 +250,7 @@ def test_independent_steps_run_at_once(tmp_path: Path) -> None:
 
     @dataclass(eq=False)
     class Side(Step[str]):
-        label: str
+        label: Attribute[str]
 
         def build(self, run: Run) -> str:
             started[self.label].set()
@@ -390,8 +390,8 @@ def test_a_deferred_step_starts_once_while_consumers_run(tmp_path: Path) -> None
 
     @dataclass(eq=False)
     class Uses(Step[str]):
-        lazy: Step[str]
-        label: str
+        lazy: Attribute[Step[str]]
+        label: Attribute[str]
 
         def build(self, run: Run) -> str:
             consumers[self.label].set()
@@ -437,8 +437,8 @@ def test_a_shared_deferred_step_around_a_build_failure(
 
     @dataclass(eq=False)
     class Uses(Step[str]):
-        api: Step[str]
-        label: str
+        api: Attribute[Step[str]]
+        label: Attribute[str]
 
         def build(self, run: Run) -> str:
             assert run[self.api] == "up"
@@ -473,7 +473,7 @@ def test_a_shared_deferred_step_around_a_consumer_hook_failure(
 
     @dataclass(eq=False)
     class Uses(Step[str]):
-        api: Step[str]
+        api: Attribute[Step[str]]
 
         def build(self, run: Run) -> str:
             return run[self.api]
@@ -489,7 +489,7 @@ def test_a_shared_deferred_step_around_a_consumer_hook_failure(
 
     @dataclass(eq=False)
     class Other(Step[str]):
-        api: Step[str]
+        api: Attribute[Step[str]]
 
         def build(self, run: Run) -> str:
             return run[self.api]
@@ -517,7 +517,7 @@ def test_a_shared_deferred_step_around_an_interrupt(
 
     @dataclass(eq=False)
     class Uses(Step[None]):
-        api: Step[str]
+        api: Attribute[Step[str]]
 
         def build(self, run: Run) -> None:
             assert run[self.api] == "up"
@@ -556,7 +556,7 @@ def test_a_shared_deferred_step_whose_teardown_fails_after_a_consumer(
 
     @dataclass(eq=False)
     class Uses(Step[str]):
-        api: Step[str]
+        api: Attribute[Step[str]]
 
         def build(self, run: Run) -> str:
             assert run[self.api] == "up"
@@ -585,7 +585,7 @@ def test_a_step_is_torn_down_after_every_step_that_takes_it(tmp_path: Path) -> N
 
     @dataclass(eq=False)
     class Consumer(Step[None]):
-        resource: Step[str]
+        resource: Attribute[Step[str]]
 
         def build(self, run: Run) -> None:
             events.append("consume")
@@ -607,7 +607,7 @@ def test_worker_threads_share_run_state_and_see_the_project_root(tmp_path: Path)
 
     @dataclass(eq=False)
     class Side(Step[tuple[str, ...]]):
-        label: str
+        label: Attribute[str]
 
         def build(self, run: Run) -> tuple[str, ...]:
             run.artifact(self, ".txt")
@@ -659,7 +659,7 @@ def test_an_interrupt_stops_the_program_a_step_is_running(tmp_path: Path, jobs: 
 
     @dataclass(eq=False)
     class Program(Step[None]):
-        resource: Step[str]
+        resource: Attribute[Step[str]]
 
         def build(self, run: Run) -> None:
             assert run[self.resource] == "held"
@@ -829,7 +829,7 @@ def test_an_interrupt_does_not_name_a_kind_that_only_calls_super_serve(
 
     @dataclass(eq=False)
     class Note(Step[None]):
-        api: Almost
+        api: Attribute[Almost]
 
         def build(self, run: Run) -> None:
             assert run[self.api] == "up"
@@ -857,7 +857,7 @@ def test_an_interrupt_names_a_live_service(
 
     @dataclass(eq=False)
     class Note(Step[None]):
-        api: Api
+        api: Attribute[Api]
 
         def build(self, run: Run) -> None:
             assert run[self.api] is not None

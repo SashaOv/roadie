@@ -13,7 +13,7 @@ from support import (
     write_build,
 )
 
-from roadie.build import Directory, File, Step
+from roadie.build import Attribute, Directory, File, Step
 from roadie.build.generated import same_as_git_stores, tracked
 from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.graph import load
@@ -104,7 +104,7 @@ def test_file_output_value_is_available_to_dependents(tmp_path: Path, monkeypatc
 
     @dataclass(eq=False)
     class Consumer(Step[str]):
-        source: File
+        source: Attribute[File]
 
         def build(self, run: Run) -> str:
             assert run[self.source] == tmp_path / "output.txt"

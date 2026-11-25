@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from support import execute, git_init, isolate_repo, needs_symlinks, write_build
 
-from roadie.build import Directory, Step
+from roadie.build import Attribute, Directory, Step
 from roadie.engine.errors import StepFailed
 from roadie.engine.root import use_project_root
 from roadie.engine.run import Run
@@ -105,7 +105,7 @@ def test_rebuilt_directory_with_identical_files_reuses_its_consumer(
 
     @dataclass(eq=False)
     class Site(Directory):
-        marker: str = "a"
+        marker: Attribute[str] = "a"
 
         def build(self, run: Run) -> Path:
             built.append("site")
@@ -116,7 +116,7 @@ def test_rebuilt_directory_with_identical_files_reuses_its_consumer(
 
     @dataclass(eq=False)
     class Consumer(Step[str]):
-        source: Directory
+        source: Attribute[Directory]
 
         def build(self, run: Run) -> str:
             built.append("consumer")
@@ -521,8 +521,8 @@ from roadie.engine.run import Run
 
 @dataclass(eq=False, kw_only=True)
 class Site(Directory):
-    text: str = {text!r}
-    marker: Files = Files("marker.txt")
+    text: Attribute[str] = {text!r}
+    marker: Attribute[Files] = Files("marker.txt")
 
     def build(self, run: Run) -> Path:
         (self.base_dir / "marker.txt").read_text()
@@ -533,7 +533,7 @@ class Site(Directory):
 
 @dataclass(eq=False)
 class Consumer(Step[str]):
-    source: Directory
+    source: Attribute[Directory]
 
     def build(self, run: Run) -> str:
         tally = self.base_dir / "consumer-runs.txt"
@@ -543,7 +543,7 @@ class Consumer(Step[str]):
 
 @dataclass(eq=False)
 class Watch(Step[None]):
-    files: Files
+    files: Attribute[Files]
 
     def build(self, run: Run) -> None:
         return None

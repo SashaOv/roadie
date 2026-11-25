@@ -6,7 +6,7 @@ from pathlib import Path
 
 from support import execute, windows_only
 
-from roadie.build import Service, Step
+from roadie.build import Attribute, Service, Step
 from roadie.engine.process import RunningProcess, available_port
 from roadie.engine.run import Run
 
@@ -77,7 +77,7 @@ def test_a_cmd_service_starts_and_stops(tmp_path: Path) -> None:
 
     @dataclass(eq=False)
     class After(Step[None]):
-        server: Service
+        server: Attribute[Service]
 
         def build(self, run: Run) -> None:
             assert run[self.server].process.poll() is None

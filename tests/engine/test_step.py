@@ -6,13 +6,31 @@ import tracemalloc
 import weakref
 from dataclasses import dataclass
 from pathlib import Path
+from typing import get_args, get_type_hints
 
 import pytest
 from support import execute, isolate_repo, write_build
 
 import roadie
-from roadie.build import Service, Step
+from roadie.build import (
+    Attribute,
+    CargoPackage,
+    Check,
+    Directory,
+    File,
+    Files,
+    Group,
+    Param,
+    Pytest,
+    Release,
+    RustBinary,
+    Service,
+    Step,
+    UserApproval,
+    UserTask,
+)
 from roadie.engine.errors import StepFailed
+from roadie.engine.graph import load
 from roadie.engine.process import RunningProcess, available_port
 from roadie.engine.run import Run
 
@@ -197,7 +215,7 @@ def test_started_commands_run_in_the_steps_base_directory(tmp_path: Path, monkey
 
     @dataclass(eq=False)
     class After(Step[None]):
-        server: Service
+        server: Attribute[Service]
 
         def build(self, run: Run) -> None:
             return None
@@ -238,7 +256,7 @@ def test_an_unrequested_service_reads_the_null_device(
 
     @dataclass(eq=False)
     class After(Step[None]):
-        server: Service
+        server: Attribute[Service]
 
         def build(self, run: Run) -> None:
             return None
@@ -342,3 +360,36 @@ def test_value_adapter_does_not_retain_a_dropped_step_class(tmp_path: Path) -> N
     reference = build_once()
     gc.collect()
     assert reference() is None
+
+# (spec) Dependencies and attributes
+def test_builtin_steps_declare_their_attributes(tmp_path: Path) -> None:
+    class Artifact(File):
+        def build(self, run: Run) -> Path:
+            return run.artifact(self, ".txt")
+
+    class Site(Directory):
+        def build(self, run: Run) -> Path:
+            return run.artifact(self, "")
+
+    write_build(tmp_path / "lib", "default_step_result = default_step(Group())")
+    write_build(tmp_path, "result = include('lib')")
+    included = load(tmp_path).result()
+    files = Files("input.txt")
+    artifact = Artifact(copy_to="generated.txt")
+    steps = [
+        Check("python", "-V", inputs=(files, artifact)),
+        Pytest("-q", inputs=(files, artifact)),
+        UserTask("Open the app", "Does it launch", inputs=(files, artifact)),
+        UserApproval("Release?"),
+        Release(".", primary="pyproject.toml", requires=artifact, message=Param("message")),
+        Site(copy_to="public"),
+        artifact,
+        RustBinary(CargoPackage("example"), files),
+        Group(artifact),
+        included,
+    ]
+    mark = get_args(Attribute[str])[1]
+    for step in steps:
+        hints = get_type_hints(type(step), include_extras=True)
+        marked = {name: getattr(step, name) for name, hint in hints.items() if mark in get_args(hint)[1:]}
+        assert marked == step.attributes(), type(step).__name__

@@ -4,7 +4,7 @@ import pytest
 from support import Boom, FakeDeployment, Note, execute, isolate_repo
 
 import roadie.engine.run as run_module
-from roadie.build import Group, Service, Step
+from roadie.build import Attribute, Group, Service, Step
 from roadie.engine.errors import StepFailed
 from roadie.engine.run import Run
 
@@ -139,6 +139,8 @@ def test_a_deferred_step_times_its_start(
             return FakeDeployment()
 
     class After(Step[str]):
+        server: Attribute[Service]
+
         def __init__(self, server: Server) -> None:
             self.server = server
 

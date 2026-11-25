@@ -10,7 +10,7 @@ from roadie.build.path import content_digest, link_target, walk_files
 from roadie.engine.errors import RoadieError
 from roadie.engine.inputs import digest
 from roadie.engine.root import from_stored, to_stored
-from roadie.engine.step import Step
+from roadie.engine.step import Attribute, Step
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -76,7 +76,7 @@ class Directory(Step[Path]):
     and one line per changed path, and nothing is written.
     """
 
-    copy_to: str | Path | None = None
+    copy_to: Attribute[str | Path | None] = None
 
     def encode(self, value: Path) -> object:
         return {"path": to_stored(value), "files": self._listing(value)}

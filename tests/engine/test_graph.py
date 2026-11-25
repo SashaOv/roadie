@@ -6,6 +6,7 @@ import pytest
 from support import plan_names, write_build
 
 from roadie.build import (
+    Attribute,
     CargoPackage,
     Group,
     RoadieError,
@@ -263,8 +264,8 @@ def test_include_cycle_names_the_files(tmp_path: Path) -> None:
 def test_graph_finds_dependencies_from_step_attributes(tmp_path: Path) -> None:
     @dataclass(eq=False)
     class Custom(Step[str]):
-        argument: object
-        other: object = 42
+        argument: Attribute[object]
+        other: Attribute[object] = 42
 
         def build(self, run: Run) -> str:
             raise AssertionError("planning ran a step")
@@ -282,7 +283,7 @@ def test_graph_finds_dependencies_from_step_attributes(tmp_path: Path) -> None:
 def test_step_dependency_cycle_names_the_steps(tmp_path: Path) -> None:
     @dataclass(eq=False)
     class Custom(Step[None]):
-        argument: object = None
+        argument: Attribute[object] = None
 
         def build(self, run: Run) -> None:
             pass

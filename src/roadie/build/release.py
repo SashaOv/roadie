@@ -19,7 +19,7 @@ from roadie.build.manifests import (
 from roadie.build.param import Param
 from roadie.engine.errors import RoadieError
 from roadie.engine.many import one_or_many
-from roadie.engine.step import Step
+from roadie.engine.step import Attribute, Step
 from roadie.system import run_query
 
 if TYPE_CHECKING:
@@ -130,6 +130,10 @@ class Release(Step[str]):
 
     reusable: ClassVar[bool] = False
     recorded: ClassVar[bool] = False
+    sources: Attribute[tuple[str, ...]]
+    primary: Attribute[str | None]
+    requires: Attribute[tuple[Step[Any], ...]]
+    message: Attribute[str | Param | None]
 
     def __init__(
         self,

@@ -20,6 +20,7 @@ from support import (
 
 from roadie import cli
 from roadie.build import (
+    Attribute,
     Binary,
     Command,
     File,
@@ -43,7 +44,7 @@ def test_steps_build_in_plan_order_with_dependency_values(tmp_path: Path) -> Non
 
     @dataclass
     class Consumer(Step[str]):
-        source: Step[str]
+        source: Attribute[Step[str]]
 
         def build(self, run: Run) -> str:
             events.append(run[self.source])
@@ -66,7 +67,7 @@ def test_teardown_after_last_consumer_and_on_failure_or_interrupt(ending: str) -
 
     @dataclass(eq=False)
     class Resource(Step[str]):
-        label: str
+        label: Attribute[str]
 
         def build(self, run: Run) -> str:
             events.append("build " + self.label)
@@ -77,7 +78,7 @@ def test_teardown_after_last_consumer_and_on_failure_or_interrupt(ending: str) -
 
     @dataclass(eq=False)
     class Consumer(Step[str]):
-        resource: Step[str]
+        resource: Attribute[Step[str]]
 
         def build(self, run: Run) -> str:
             events.append("consume " + run[self.resource])
@@ -101,7 +102,7 @@ def test_teardown_after_last_consumer_and_on_failure_or_interrupt(ending: str) -
     # The held resource also belongs to the final step's dependencies.
     @dataclass(eq=False)
     class Last(Step[None]):
-        resource: Step[str]
+        resource: Attribute[Step[str]]
 
         def build(self, run: Run) -> None:
             events.append("last")
@@ -136,8 +137,8 @@ def test_teardown_failure_is_visible_and_does_not_skip_other_cleanup() -> None:
 
     @dataclass(eq=False)
     class Consumer(Step[None]):
-        one: Step[str]
-        two: Step[str]
+        one: Attribute[Step[str]]
+        two: Attribute[Step[str]]
 
         def build(self, run: Run) -> None:
             pass
@@ -158,7 +159,7 @@ def test_failure_keeps_its_name_when_teardown_also_fails() -> None:
 
     @dataclass(eq=False)
     class Fails(Step[None]):
-        resource: Step[str]
+        resource: Attribute[Step[str]]
 
         def build(self, run: Run) -> None:
             raise RuntimeError("rejected")
@@ -282,8 +283,8 @@ def test_changed_files_rerun_a_step_and_identical_output_reuses_consumers(tmp_pa
 
     @dataclass(eq=False)
     class Note(File):
-        files: Files
-        note: str = "a"
+        files: Attribute[Files]
+        note: Attribute[str] = "a"
 
         def build(self, run: Run) -> Path:
             built.append("note")
@@ -293,7 +294,7 @@ def test_changed_files_rerun_a_step_and_identical_output_reuses_consumers(tmp_pa
 
     @dataclass(eq=False)
     class Downstream(File):
-        source: File
+        source: Attribute[File]
 
         def build(self, run: Run) -> Path:
             built.append("down")
@@ -486,7 +487,7 @@ def test_service_starts_only_when_a_consumer_must_run(
 
     @dataclass(eq=False)
     class Note(File):
-        label: str = "a"
+        label: Attribute[str] = "a"
 
         def build(self, run: Run) -> Path:
             events.append("note")
@@ -496,7 +497,7 @@ def test_service_starts_only_when_a_consumer_must_run(
 
     @dataclass(eq=False)
     class Server(Service):
-        binary: Binary
+        binary: Attribute[Binary]
 
         def build(self, run: Run) -> Stopped:
             events.append("server")
@@ -516,8 +517,8 @@ def test_service_starts_only_when_a_consumer_must_run(
 
     @dataclass(eq=False)
     class Consumer(File):
-        source: File
-        server: Service
+        source: Attribute[File]
+        server: Attribute[Service]
 
         def build(self, run: Run) -> Path:
             events.append("consumer")
@@ -610,7 +611,7 @@ def test_a_commands_own_environment_wins_over_file_values(
 
     @dataclass(eq=False)
     class After(Step[None]):
-        server: Service
+        server: Attribute[Service]
 
         def build(self, run: Run) -> None:
             self._cmd("tool", environment={"PORT": "step", "NAME": "step", "ONLY": "step"})
@@ -936,7 +937,7 @@ def test_run_env_holds_the_file_values_for_every_step(
 
     @dataclass(eq=False)
     class Second(Step[str]):
-        first: Step[str]
+        first: Attribute[Step[str]]
 
         def build(self, run: Run) -> str:
             seen.append(("second", run.env["TOKEN"]))
@@ -1061,7 +1062,7 @@ def test_report_and_serve_receive_the_run(
 
     @dataclass(eq=False)
     class Consumer(Step[str]):
-        source: Step[str]
+        source: Attribute[Step[str]]
 
         def build(self, run: Run) -> str:
             return run[self.source]
@@ -1103,8 +1104,10 @@ def test_os_environ_is_restored_however_a_run_ends(
                 raise KeyboardInterrupt
 
     class Bad(Step[None]):
+        marker: Attribute[object]
+
         def __init__(self) -> None:
-            self.marker: object = object()
+            self.marker = object()
 
         def build(self, run: Run) -> None:
             raise AssertionError("fingerprinted, not built")

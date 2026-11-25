@@ -8,7 +8,9 @@ from xml.etree import ElementTree
 from roadie.build.check import CheckInputs, normalize_check_inputs
 from roadie.build.tests import TestFailure, TestResults, Tests
 from roadie.engine.errors import RoadieError
+from roadie.engine.inputs import Input
 from roadie.engine.process import OUTPUT_TAIL
+from roadie.engine.step import Attribute, Step
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -30,6 +32,9 @@ class Pytest(Tests):
     of the wrong kind fails with `Pytest inputs takes inputs or steps: got
     <type>`. Recording and reuse are those of a test step.
     """
+
+    args: Attribute[tuple[str, ...]]
+    inputs: Attribute[tuple[Input | Step[object], ...]]
 
     def __init__(
         self, *args: str, inputs: CheckInputs = ()
