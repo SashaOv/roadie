@@ -1282,7 +1282,7 @@ CI run (decision 10).
   docstring of `run_query` says it. Tests: a non-zero exit raises
   `ProgramFailed` and is not an `OSError`; a program that cannot start
   still raises `CannotRun`; each caller's message for both is unchanged.
-- [ ] **CQ7.6: Give release failures one wrapper.** Decision 6. Test: each
+- [x] **CQ7.6: Give release failures one wrapper.** Decision 6. Test: each
   `cannot release:` message from a failed or unstartable program and an
   unwritable manifest is unchanged, and a late failure still names what it
   left.

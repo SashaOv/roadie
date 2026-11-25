@@ -1,4 +1,5 @@
 import errno
+import os
 import re
 import subprocess
 from collections.abc import Sequence
@@ -595,10 +596,16 @@ def test_release_query_failures_keep_their_message(
         (repo / source).write_text('[package]\nname = "demo"\nversion = "0.1.0"\n')
         _git(repo, "add", source)
         _git(repo, "commit", "-qm", "cargo")
+    late = query == ("uv", "version", "--frozen", "0.1.1")
+    if late:
+        (repo / "package.json").write_text('{"name": "demo", "version": "0.1.0"}\n')
+        _git(repo, "add", "package.json")
+        _git(repo, "commit", "-qm", "node manifest")
     _git(repo, "tag", "v0.1.0")
     _advance(repo)
     _git(repo, "push", "-q", "origin", "HEAD")
 
+    start = _short_head(repo)
     real_run = subprocess.run
 
     def run(args: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -610,13 +617,19 @@ def test_release_query_failures_keep_their_message(
 
     monkeypatch.setattr("roadie.system.command.prepare_command", lambda command: list(command))
     monkeypatch.setattr(subprocess, "run", run)
-    step = Release(source)
+    step = Release("package.json", source) if late else Release(source)
     step.base_dir = repo
     step.name = "release"
     with pytest.raises(StepFailed) as caught:
         execute([step], root=repo)
     reason = "operation refused" if started else f"cannot run {query[0]}: [Errno {errno.ENOENT}] program missing"
-    assert str(caught.value) == f"release failed: cannot release: {reason}"
+    message = f"release failed: cannot release: {reason}"
+    if late:
+        message += f"; left: edited package.json; to undo: git reset --hard {start}"
+    assert str(caught.value) == message
+    if late:
+        assert '"version": "0.1.1"' in (repo / "package.json").read_text()
+        _undo(repo, message)
     assert _porcelain(repo) == ""
     assert _tags(bare) == set()
 
@@ -773,9 +786,10 @@ def test_an_unwritable_manifest_names_what_it_left(tmp_path: Path) -> None:
         with pytest.raises(StepFailed) as caught:
             execute([step], root=repo)
         message = str(caught.value)
-        assert f"cannot release: cannot write {package.resolve()}: " in message
-        assert message.endswith(
-            f"; left: edited pyproject.toml; to undo: git reset --hard {start}"
+        denied = PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(package.resolve()))
+        assert message == (
+            f"release failed: cannot release: cannot write {package.resolve()}: {denied}; "
+            f"left: edited pyproject.toml; to undo: git reset --hard {start}"
         )
         assert package.read_text() == '{"name": "web", "version": "0.1.0"}\n'
         _undo(repo, message)

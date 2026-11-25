@@ -3,7 +3,7 @@
 import os
 import re
 import subprocess
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -11,15 +11,16 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from roadie.build.manifests import (
     CargoManifest,
     PackageJson,
+    PlannedVersion,
     PyProject,
-    _PlannedVersion,
-    _Versionless,
+    Versionless,
+    release_errors,
 )
 from roadie.build.param import Param
 from roadie.engine.errors import RoadieError
 from roadie.engine.many import one_or_many
 from roadie.engine.step import Step
-from roadie.system import CannotRun, ProgramFailed, run_query
+from roadie.system import run_query
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -29,18 +30,12 @@ _TAG = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
 
 
 def _git(repository: Path, *args: str) -> str:
-    try:
+    with release_errors():
         return run_query(repository, "git", *args)
-    except (CannotRun, ProgramFailed) as error:
-        raise RoadieError(f"cannot release: {error}") from error
 
 
 def _repository(base_dir: Path) -> Path:
-    try:
-        output = run_query(base_dir, "git", "rev-parse", "--show-toplevel")
-    except (CannotRun, ProgramFailed) as error:
-        raise RoadieError(f"cannot release: {error}") from error
-    return Path(output.strip()).resolve()
+    return Path(_git(base_dir, "rev-parse", "--show-toplevel").strip()).resolve()
 
 
 def _status_path(line: str) -> str:
@@ -159,7 +154,7 @@ class _Manifest:
 def _version_or_none(kind: type[_ManifestKind], file: Path, base_dir: Path) -> str | None:
     try:
         return kind(file).read_version(base_dir)
-    except _Versionless:
+    except Versionless:
         return None
 
 
@@ -203,7 +198,7 @@ class _ReleasePlan:
     start: str
     version: str
     message: str | None
-    changes: list[tuple[_Manifest, _PlannedVersion]] = field(default_factory=list)
+    changes: list[tuple[_Manifest, PlannedVersion]] = field(default_factory=list)
 
 
 # (spec) Step kinds
@@ -342,23 +337,19 @@ class Release(Step[str]):
         edited: list[Path] = []
         commit: str | None = None
         tagged = False
-        phase = "apply"
         try:
             for item, planned in plan.changes:
                 item.source.apply_version(planned, edited)
-            phase = "commit"
             if edited:
                 _commit(plan.repository, edited, plan.version, plan.message)
                 head = _git(plan.repository, "rev-parse", "--short", "HEAD").strip()
                 if head != plan.start:
                     commit = head
-            phase = "tag"
             if plan.message:
                 _git(plan.repository, "tag", "-a", "-m", plan.message, f"v{plan.version}")
             else:
                 _git(plan.repository, "tag", f"v{plan.version}")
             tagged = True
-            phase = "push"
             _git(
                 plan.repository,
                 "push",
@@ -370,31 +361,8 @@ class Release(Step[str]):
         except RoadieError as error:
             if not edited and commit is None and not tagged:
                 raise
-            left: list[str] = []
-            if edited:
-                shown = ", ".join(
-                    path.relative_to(plan.repository).as_posix()
-                    if path.is_relative_to(plan.repository)
-                    else path.as_posix()
-                    for path in edited
-                )
-                left.append(f"edited {shown}")
-            if commit is not None:
-                left.append(f"commit {commit}")
-            if tagged:
-                left.append(f"tag v{plan.version}")
-            message = (
-                f"{error}; left: {', '.join(left)}; "
-                f"to undo: git reset --hard {plan.start}"
-            )
-            if tagged:
-                message += f" && git tag -d v{plan.version}"
-            if phase == "push":
-                message += (
-                    f"; to retry: git push --atomic {plan.remote} "
-                    f"HEAD:{plan.branch} v{plan.version}"
-                )
-            raise RoadieError(message) from error
+            left = _left_message(plan, edited, commit, tagged=tagged)
+            raise RoadieError(f"{error}; {left}") from error
         print(f"released v{plan.version}", flush=True)
         return plan.version
 
@@ -406,7 +374,7 @@ class Release(Step[str]):
         _require_current(repository, remote, branch)
         start = _git(repository, "rev-parse", "--short", "HEAD").strip()
         version = _chosen_version(repository, self._primary_version(groups))
-        changes: list[tuple[_Manifest, _PlannedVersion]] = []
+        changes: list[tuple[_Manifest, PlannedVersion]] = []
         seen: set[Path] = set()
         for _, found in groups:
             for item in found:
@@ -425,3 +393,28 @@ class Release(Step[str]):
             message=self._release_message(),
             changes=changes,
         )
+
+
+def _left_message(
+    plan: _ReleasePlan, edited: Sequence[Path], commit: str | None, *, tagged: bool
+) -> str:
+    left: list[str] = []
+    if edited:
+        shown = ", ".join(
+            path.relative_to(plan.repository).as_posix()
+            if path.is_relative_to(plan.repository)
+            else path.as_posix()
+            for path in edited
+        )
+        left.append(f"edited {shown}")
+    if commit is not None:
+        left.append(f"commit {commit}")
+    if tagged:
+        left.append(f"tag v{plan.version}")
+    message = f"left: {', '.join(left)}; to undo: git reset --hard {plan.start}"
+    if tagged:
+        message += (
+            f" && git tag -d v{plan.version}; to retry: git push --atomic {plan.remote} "
+            f"HEAD:{plan.branch} v{plan.version}"
+        )
+    return message
