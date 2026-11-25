@@ -1513,7 +1513,7 @@ CI run (decision 13).
   refusal's message is unchanged and its type is `CannotRelease`.
 - [x] **CQ8.6: Record a reused step in one place.** Decision 7. The reuse
   tests are the check.
-- [ ] **CQ8.7: Give dry-run marks their own owner.** Decision 8. The dry-run
+- [x] **CQ8.7: Give dry-run marks their own owner.** Decision 8. The dry-run
   tests are the check.
 - [ ] **CQ8.8: Remove implementation-only docstrings.** Decision 9. The
   commit body lists each docstring.

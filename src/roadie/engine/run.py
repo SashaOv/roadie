@@ -42,7 +42,7 @@ from roadie.engine.process import (
     reset_interrupt,
     set_before_stop,
 )
-from roadie.engine.progress import Progress
+from roadie.engine.progress import DryProgress, Progress
 from roadie.engine.records import (
     artifact_dir,
     load_records,
@@ -611,8 +611,9 @@ def execute(
                         steps, requested=requested, leading=leading, jobs=jobs, dry=dry
                     )
                     live = _Live(run, plan.blockers)
+                    progress = DryProgress() if dry else Progress(writer)
                     scheduler = _Scheduler(
-                        plan, run, live, run_lock=held, progress=Progress(writer, dry=dry), enforce=enforce
+                        plan, run, live, run_lock=held, progress=progress, enforce=enforce
                     )
                     return _run_steps(scheduler, parameters, names)
             finally:
@@ -666,7 +667,7 @@ def _run_steps(
                 for step in steps:
                     if step.deferred and id(step) not in requested and id(step) not in scheduler.started:
                         progress.not_started(step)
-                if dry:
+                if isinstance(progress, DryProgress):
                     progress.render_plan(steps)
                     return None
                 succeeded = True

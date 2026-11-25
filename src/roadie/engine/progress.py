@@ -13,10 +13,8 @@ from roadie.engine.step import Step
 
 # (spec) Run report
 class Progress:
-    def __init__(self, report: Report | None, *, dry: bool) -> None:
+    def __init__(self, report: Report | None) -> None:
         self._report = report
-        self._dry = dry
-        self._marks: dict[int, str] = {}
         self._began: dict[int, float] = {}
         self._started_at = time.monotonic()
         self._reported_run = False
@@ -44,9 +42,6 @@ class Progress:
             print(line, flush=True)
 
     def building(self, step: Step[Any]) -> float | None:
-        if self._dry:
-            self._marks[id(step)] = "run"
-            return None
         if not type(step).recorded:
             return None
         print(f"build {format_step(step)}", flush=True)
@@ -62,9 +57,6 @@ class Progress:
         self._step_start(step)
 
     def reused(self, step: Step[Any]) -> None:
-        if self._dry:
-            self._marks[id(step)] = "reuse"
-            return
         self._step_start(step)
         print(f"reused {step._label()}", flush=True)
 
@@ -85,14 +77,7 @@ class Progress:
         self._step_end(step, "interrupted")
 
     def not_started(self, step: Step[Any]) -> None:
-        if self._dry:
-            self._marks[id(step)] = "not started"
-            return
         print(f"not started {step._label()}: no step that takes it runs", flush=True)
-
-    def render_plan(self, steps: Sequence[Step[Any]]) -> None:
-        for step in steps:
-            print(f"{format_step(step)}  # {self._marks[id(step)]}", flush=True)
 
     def _step_start(self, step: Step[Any]) -> None:
         if self._report is None or id(step) in self._began:
@@ -106,3 +91,22 @@ class Progress:
         began = self._began.pop(id(step), None)
         if began is not None:
             self._report.step_end(step._label(), outcome, time.monotonic() - began)
+
+
+class DryProgress(Progress):
+    def __init__(self) -> None:
+        super().__init__(None)
+        self._marks: dict[int, str] = {}
+
+    def building(self, step: Step[Any]) -> None:
+        self._marks[id(step)] = "run"
+
+    def reused(self, step: Step[Any]) -> None:
+        self._marks[id(step)] = "reuse"
+
+    def not_started(self, step: Step[Any]) -> None:
+        self._marks[id(step)] = "not started"
+
+    def render_plan(self, steps: Sequence[Step[Any]]) -> None:
+        for step in steps:
+            print(f"{format_step(step)}  # {self._marks[id(step)]}", flush=True)
