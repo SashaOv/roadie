@@ -1,5 +1,3 @@
-"""A step that builds a directory."""
-
 import os
 from dataclasses import dataclass
 from pathlib import Path

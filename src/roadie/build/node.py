@@ -45,11 +45,7 @@ class NodeSnapshot:
 
 # (spec) Node environment
 class NodeEnv(Input):
-    """The Node and pnpm versions, and the workspace's manifests and lockfile.
-
-    A step that takes `NodeEnv()` reruns after a Node or pnpm upgrade, an
-    edited `package.json` in any workspace project, or a changed lockfile.
-    """
+    """See docs/spec.md, "Node environment"."""
 
     def __repr__(self) -> str:
         return "NodeEnv()"

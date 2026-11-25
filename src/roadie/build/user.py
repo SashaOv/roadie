@@ -1,5 +1,3 @@
-"""Steps that ask the user at a terminal."""
-
 import sys
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, ClassVar

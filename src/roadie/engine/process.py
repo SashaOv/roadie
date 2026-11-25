@@ -47,8 +47,6 @@ OUTPUT_LINE_LIMIT = 65_536
 
 @dataclass
 class TraceCollector:
-    """The files one step's traced programs read and wrote."""
-
     reads: set[Path] = field(default_factory=set)
     written: set[Path] = field(default_factory=set)
 
@@ -116,8 +114,6 @@ class _Tail(list[str]):
 # (spec) Step helpers
 @dataclass(frozen=True)
 class Command:
-    """A command with the directory, environment and label it runs with."""
-
     args: tuple[str, ...]
     cwd: Path
     environment: Mapping[str, str] | None = None
@@ -384,7 +380,6 @@ def _print_server_lines(pipe: IO[bytes], stream: TextIO, prefix: str) -> threadi
 
 @contextmanager
 def command_context(*, inherit: bool) -> Generator[None]:
-    """Give commands in this scope a stdin choice."""
     stdin_token = _inherit_stdin.set(inherit)
     try:
         yield

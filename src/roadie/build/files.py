@@ -1,4 +1,4 @@
-"""The `Files` input: files and directories a step reads."""
+"""See docs/spec.md, "Files input"."""
 
 import os
 import subprocess
@@ -125,7 +125,6 @@ def _git_list(root: Path, directory: Path, spec: str) -> list[Path]:
 
 
 def _refuse_ignored_directory(raw: str | Path, directory: Path) -> None:
-    """Fail when a directory in a work tree is ignored by git."""
     root = _work_tree(directory)
     if root is None:
         return

@@ -1,12 +1,10 @@
-"""Show a step as the call `--dry` prints."""
-
 from typing import Any
 
 from roadie.engine.step import Step
 
 
 def format_step(step: Step[Any]) -> str:
-    """`<name> = <Class>(<arguments>)`, or `<Class>(<arguments>)` when unnamed."""
+    """See docs/spec.md, "Dry run output"."""
     text = _call(step)
     return f"{step.name} = {text}" if step.name else text
 

@@ -1,5 +1,3 @@
-"""Inputs a step fingerprints without building them."""
-
 import hashlib
 import json
 import threading
@@ -25,14 +23,10 @@ def digest(payload: object) -> str:
 class Input(ABC):
     @abstractmethod
     def fingerprint(self, base_dir: Path) -> str:
-        """Hash of this input as seen from a step's base directory."""
+        """See docs/spec.md, "Input fingerprints"."""
 
     def declared_files(self, base_dir: Path) -> set[Path]:
-        """Files this input's fingerprint reads, as seen from `base_dir`.
-
-        Empty by default: an input whose fingerprint reads no project
-        file declares none.
-        """
+        """See docs/spec.md, "Input fingerprints"."""
         return set()
 
 

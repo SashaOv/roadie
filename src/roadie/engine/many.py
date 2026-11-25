@@ -1,5 +1,3 @@
-"""Store one value or many as a tuple."""
-
 from collections.abc import Iterable
 from typing import Any
 

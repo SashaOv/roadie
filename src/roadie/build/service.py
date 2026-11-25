@@ -1,5 +1,3 @@
-"""Steps that start a long-running process."""
-
 import subprocess
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, ClassVar, Protocol

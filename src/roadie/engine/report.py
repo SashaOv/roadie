@@ -22,7 +22,7 @@ def _timestamp() -> str:
 
 # (spec) Run report
 class Report:
-    """Append JSON events to one file. A write or open failure warns once."""
+    """See docs/spec.md, "Run report"."""
 
     def __init__(self, path: Path) -> None:
         self._path = path

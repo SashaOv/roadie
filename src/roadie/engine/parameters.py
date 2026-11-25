@@ -1,5 +1,3 @@
-"""Parameter values supplied to steps for one run."""
-
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
@@ -19,8 +17,6 @@ _current: ContextVar[Step[Any] | None] = ContextVar("roadie_parameter_step", def
 
 # (spec) Parameters
 class Parameter(Input):
-    """An input whose value is chosen for the run."""
-
     def __init__(self, name: str, *, default: str | None, required: bool) -> None:
         self.name = name
         self.default = default

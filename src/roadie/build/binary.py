@@ -1,5 +1,3 @@
-"""Steps that build executables."""
-
 from pathlib import Path
 
 from roadie.build.path import PathStep

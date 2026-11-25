@@ -138,7 +138,7 @@ def select_rust_packages(
     packages: Sequence[RustPackage],
     changed_paths: Sequence[Path],
 ) -> tuple[str, ...]:
-    """Packages whose files changed, plus every workspace package that depends on them."""
+    """See docs/spec.md, "Cargo workspace queries"."""
     if any(path.as_posix() in {"Cargo.toml", "Cargo.lock"} for path in changed_paths):
         return tuple(package.name for package in packages)
 

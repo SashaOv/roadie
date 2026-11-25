@@ -1,5 +1,3 @@
-"""The `PythonEnv` input: the interpreter and its installed distributions."""
-
 import importlib.metadata
 import platform
 from pathlib import Path
@@ -19,12 +17,7 @@ def _distributions() -> list[tuple[str, str]]:
 
 # (spec) Python environment
 class PythonEnv(Input):
-    """The interpreter running Roadie and the distributions installed in it.
-
-    The fingerprint is that interpreter's version and the name and version of
-    every distribution. A check that takes `PythonEnv()` reruns when one of
-    them changes, such as a mypy upgrade.
-    """
+    """See docs/spec.md, "Python environment"."""
 
     def __repr__(self) -> str:
         return "PythonEnv()"

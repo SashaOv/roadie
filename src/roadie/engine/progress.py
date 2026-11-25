@@ -1,5 +1,3 @@
-"""Report step outcomes to the terminal and the run report."""
-
 import sys
 import time
 from collections.abc import Sequence

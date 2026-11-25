@@ -151,7 +151,6 @@ def read_lines(
 
 @contextmanager
 def parallel_output(line_limit: int) -> Iterator[None]:
-    """Send standard output through a line sink for the duration of a parallel run."""
     sink = LineSink(sys.stdout, sys.stderr, line_limit=line_limit)
     token = _sink.set(sink)
     previous = sys.stdout

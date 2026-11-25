@@ -704,10 +704,10 @@ unique to the step and the suffix, and creates its parent directory.
 
 `Step` provides helpers that run a program in the step's base directory:
 `_cmd` runs it to completion, and `_start_cmd` starts
-a server and returns a `RunningProcess` once it is ready. Their docstrings
-specify them. A command that cannot start fails with `<step> failed: cannot
-run <program>: <reason>`, where `<reason>` is the error's text without its
-filename.
+a server and returns a `RunningProcess` once it is ready. The docstrings of
+`Command.run` and `Command.start` specify output, options, and readiness.
+A command that cannot start fails with `<step> failed: cannot run <program>:
+<reason>`, where `<reason>` is the error's text without its filename.
 
 On Windows, a program `_cmd` or a service names without a directory is found
 as a shell finds it: `shutil.which` along the `PATH` the program runs with,

@@ -1,5 +1,3 @@
-"""The `Env` input: named process environment variables."""
-
 import os
 from pathlib import Path
 
@@ -9,13 +7,7 @@ from roadie.engine.inputs import Input, digest
 
 # (spec) Environment variables
 class Env(Input):
-    """The values of named process environment variables.
-
-    The fingerprint lists each name and its value, in the order given. An
-    unset variable differs from an empty one. No names fails with `Env takes
-    at least one variable name`. A name that is not a string fails with
-    `Env takes variable names: got <type>`.
-    """
+    """See docs/spec.md, "Environment variables"."""
 
     def __init__(self, *names: str) -> None:
         if not names:

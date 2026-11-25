@@ -1,5 +1,3 @@
-"""A test step that runs pytest and reads its JUnit report."""
-
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING

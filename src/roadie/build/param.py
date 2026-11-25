@@ -1,5 +1,3 @@
-"""The `Param` input: a value the command line passes to a step."""
-
 from typing import Any
 
 from roadie.engine.errors import RoadieError
@@ -10,15 +8,7 @@ _MISSING: Any = object()
 
 # (spec) Parameters
 class Param(Parameter):
-    """A command-line parameter.
-
-    `name` is an identifier. `default`, when given, is a string or `None`;
-    without it the parameter is required. Inside `build`, `value` is the
-    step's value for this run: its own parameter, else the run-wide one, else
-    this default. An unset optional parameter differs from an empty one.
-    Outside a run, `value` fails with `parameter <name> has no value outside
-    a run`.
-    """
+    """See docs/spec.md, "Parameters"."""
 
     def __init__(self, name: str, default: Any = _MISSING) -> None:
         if not isinstance(name, str) or not name.isidentifier():

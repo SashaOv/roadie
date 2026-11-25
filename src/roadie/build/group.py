@@ -1,5 +1,3 @@
-"""A step that stands for several steps."""
-
 from typing import Any
 
 from roadie.engine.errors import RoadieError

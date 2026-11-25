@@ -1,5 +1,3 @@
-"""Step fingerprints from class, code, inputs, and dependencies."""
-
 import hashlib
 import sys
 from collections.abc import Mapping

@@ -1,5 +1,3 @@
-"""Exclusive lock on an open file."""
-
 import sys
 from typing import BinaryIO
 

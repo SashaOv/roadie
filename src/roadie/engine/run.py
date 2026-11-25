@@ -1,5 +1,3 @@
-"""Build a plan and tear down each step after every step that takes it."""
-
 import contextvars
 import os
 import sys
@@ -207,8 +205,6 @@ class _Live:
 
 
 class _Scheduler:
-    """Hold one run's scheduling state and build its steps."""
-
     def __init__(
         self,
         plan: _Plan,
@@ -248,7 +244,6 @@ class _Scheduler:
         return self._listed
 
     def _check(self, step: Step[Any]) -> list[str]:
-        """Undeclared reads of `step`, or none when enforcement is off."""
         if not self.enforce:
             return []
         collector = self.traces.get(id(step))
@@ -319,7 +314,6 @@ class _Scheduler:
             return self.result[-1] if self.result else None
 
     def _work(self, *, propagate: bool) -> None:
-        """Claim and build ready steps until none is left or one fails."""
         token = None
 
         def end_prefix() -> None:
@@ -731,7 +725,7 @@ def _blockers(steps: Sequence[Step[Any]], requested: set[int]) -> dict[int, set[
 
 # (spec) Deferred steps
 def _inherits_stdin(step: Step[Any], requested: frozenset[int]) -> bool:
-    """A service keeps the terminal only when it is a requested result."""
+    """See docs/spec.md, "Step hooks"."""
     return not step.serves or id(step) in requested
 
 

@@ -1,5 +1,3 @@
-"""Declare steps, the hooks Roadie calls on them, and the commands they run."""
-
 import itertools
 import subprocess
 import sys
@@ -113,30 +111,30 @@ class Step[T](ABC):
     # (spec) Step hooks
     @abstractmethod
     def build(self, run: "Run") -> T:
-        """Build this step from its dependencies' values."""
+        """See docs/spec.md, "Dependencies and attributes"."""
 
     def teardown(self, value: T) -> None:
         pass
 
     def publish(self, run: "Run", value: T) -> T:
-        """Return the value of a step that just built, after acting on it."""
+        """See docs/spec.md, "Step hooks"."""
         return value
 
     def report(self, run: "Run", value: T) -> None:
-        """Show a built or reused value; raise to fail the step."""
+        """See docs/spec.md, "Step hooks"."""
 
     def serve(self, run: "Run", value: T) -> None:
-        """Keep the requested result in use before the run tears it down."""
+        """See docs/spec.md, "Step hooks"."""
 
     def encode(self, value: T) -> object:
-        """Return the JSON value the step's record keeps."""
+        """See docs/spec.md, "Step hooks"."""
         adapter = _value_adapter(type(self))
         if adapter is None:
             return value
         return adapter.dump_python(value, mode="json")
 
     def matches(self, recorded: object) -> bool:
-        """True when a recorded value can still be restored."""
+        """See docs/spec.md, "Step hooks"."""
         return True
 
     def decode(self, recorded: object) -> T:
@@ -146,11 +144,11 @@ class Step[T](ABC):
         return cast(T, adapter.validate_python(recorded))
 
     def output_fingerprint(self, fingerprint: str, value: T) -> str:
-        """Digest of what this step built, which its consumers' fingerprints include."""
+        """See docs/spec.md, "Step hooks"."""
         return digest(value)
 
     def call_arguments(self) -> tuple[list[object], dict[str, object]]:
-        """Positional and keyword arguments that `--dry` shows."""
+        """See docs/spec.md, "Dry run output"."""
         validate_attributes(self)
         named = {key: value for key, value in self.attributes().items() if value is not None}
         return [], named
@@ -165,7 +163,7 @@ class Step[T](ABC):
         environment: Mapping[str, str] | None = None,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        """Run a program; in an enforcement run it runs under the trace."""
+        """See docs/spec.md, "Step helpers" and "Enforcing declared inputs"."""
         return self._command(args, environment).run(
             capture_output=capture_output, show_output=show_output, check=check
         )
@@ -270,7 +268,6 @@ def _value_adapter(cls: "type[Step[Any]]") -> TypeAdapter[Any] | None:
 
 
 def is_reserved(name: str) -> bool:
-    """True when `name` is one Roadie keeps for itself on a step."""
     return name in _RESERVED
 
 

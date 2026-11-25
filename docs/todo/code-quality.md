@@ -1515,7 +1515,7 @@ CI run (decision 13).
   tests are the check.
 - [x] **CQ8.7: Give dry-run marks their own owner.** Decision 8. The dry-run
   tests are the check.
-- [ ] **CQ8.8: Remove implementation-only docstrings.** Decision 9. The
+- [x] **CQ8.8: Remove implementation-only docstrings.** Decision 9. The
   commit body lists each docstring.
 - [ ] **CQ8.9: Order the remaining modules.** Decision 10's reorder. Only
   moves code; the suite is the check.

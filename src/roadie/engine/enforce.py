@@ -1,5 +1,3 @@
-"""Work out the files a step reads but does not declare."""
-
 from __future__ import annotations
 
 import subprocess
@@ -28,7 +26,6 @@ def iter_inputs(step: Step[Any]) -> list[Input]:
 
 
 def declared_files(step: Step[Any]) -> set[Path]:
-    """Files a step declares through its inputs."""
     declared: set[Path] = set()
     for item in iter_inputs(step):
         declared.update(item.declared_files(step.base_dir))

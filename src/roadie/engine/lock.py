@@ -41,7 +41,7 @@ def lock_path(root: Path) -> Path:
 
 # (spec) Command line
 def clean_project(root: Path) -> None:
-    """Take the run lock, delete `target/roadie/` except the lock, and return."""
+    """See docs/spec.md, "One run at a time"."""
     held = acquire_run_lock(root)
     try:
         state = root / "target" / "roadie"

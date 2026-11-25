@@ -1,4 +1,4 @@
-"""Per-build-file record of the last successful step fingerprints."""
+"""See docs/spec.md, "Records"."""
 
 import hashlib
 import json
@@ -69,7 +69,7 @@ _ROOT_FILES = {"run.lock", "swept"}
 
 # (spec) Artifacts
 def sweep_stale_state(root: Path) -> None:
-    """Drop artifacts no record lists, and dead record directories, at most daily."""
+    """See docs/spec.md, "Artifacts"."""
     state = root / "target" / "roadie"
     if not state.is_dir():
         return

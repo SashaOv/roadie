@@ -1,9 +1,4 @@
-"""Load build.py files into a graph of results and plan the steps a result needs.
-
-Loading a build.py runs no steps: each step call records a step and returns
-it. A result's position is the order its step was called, not the order of
-the module's variables, so reassigning a name does not move its result.
-"""
+"""See docs/spec.md, "Build files"."""
 
 import runpy
 from collections.abc import Iterator, Mapping, Sequence
@@ -45,11 +40,11 @@ class Graph:
 
     # (spec) Plan order
     def plan(self, name: str | None = None) -> list[Step[Any]]:
-        """Return the steps `name` needs, each after the steps it takes results from."""
+        """See docs/spec.md, "Plan order"."""
         return self.order(self.result(name))
 
     def order(self, origin: Step[Any]) -> list[Step[Any]]:
-        """Return the steps `origin` needs, each after the steps it takes results from."""
+        """See docs/spec.md, "Plan order"."""
         ordered: list[Step[Any]] = []
         seen: set[int] = set()
         visiting: list[Step[Any]] = []
@@ -109,7 +104,7 @@ _session: ContextVar[_Session | None] = ContextVar("roadie_session", default=Non
 
 
 class _Included(Composite):
-    """A group of the included file's default result, with its results as attributes."""
+    """See docs/spec.md, "Including build files"."""
 
     _path: Path
     _results: dict[str, Step[Any]]
@@ -179,15 +174,7 @@ def setup(step: Step[Any]) -> Step[Any]:
 
 # (spec) Including build files
 def include(path: str) -> Step[Any]:
-    """Load a build file, or `build.py` in a directory, and return its default step.
-
-    A file is that build file; a directory means the `build.py` inside it.
-    The file's results are attributes (`lib.test`) and are not dependencies.
-    A result named like a `Step` member fails with `<path>: result <name> is
-    reserved by Roadie in an included file`. A plan that holds the returned
-    step fails with `<path> marks no default result` when the file has no
-    `default_step` mark.
-    """
+    """See docs/spec.md, "Including build files"."""
     session = _session.get()
     if session is None:
         raise RoadieError("include() works only in a build.py that Roadie loads")
@@ -203,7 +190,6 @@ def include(path: str) -> Step[Any]:
 
 # (spec) Loading a build file
 def _build_file(candidate: Path) -> Path:
-    """The build file `candidate` names: itself when it is a file, else `build.py` inside it."""
     if candidate.is_file():
         return candidate
     build_file = candidate / BUILD_FILE
@@ -315,7 +301,7 @@ def _name_steps(
     prefix: str,
     directory: Path,
 ) -> None:
-    """Name every step a result reaches, and keep derived names with this file."""
+    """See docs/spec.md, "Results"."""
     owned: list[Step[Any]] = []
     owned_ids: set[int] = set()
     names: set[str] = set(results)

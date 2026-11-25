@@ -1,5 +1,3 @@
-"""Path conventions that differ by platform."""
-
 import sys
 
 

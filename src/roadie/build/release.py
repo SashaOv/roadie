@@ -1,5 +1,3 @@
-"""Release a version from a `pyproject.toml` and push the tag."""
-
 import os
 import re
 import subprocess
