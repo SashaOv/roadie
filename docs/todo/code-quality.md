@@ -1511,7 +1511,7 @@ CI run (decision 13).
   wrote; a line of exactly 65,536 prints once.
 - [x] **CQ8.5: Give release refusals one error.** Decision 6. Test: each
   refusal's message is unchanged and its type is `CannotRelease`.
-- [ ] **CQ8.6: Record a reused step in one place.** Decision 7. The reuse
+- [x] **CQ8.6: Record a reused step in one place.** Decision 7. The reuse
   tests are the check.
 - [ ] **CQ8.7: Give dry-run marks their own owner.** Decision 8. The dry-run
   tests are the check.

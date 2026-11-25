@@ -5,7 +5,7 @@ import os
 import sys
 import threading
 import time
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
@@ -464,10 +464,9 @@ class _Scheduler:
         )
         if self.plan.dry:
             if record is not None or composite_reused:
-                self.progress.reused(step)
-                with self.condition:
-                    self.run.reused.add(id(step))
-                    self.outputs[id(step)] = str(record["output"]) if record is not None else step_fingerprint
+                self._record_reused(
+                    step, lambda: str(record["output"]) if record is not None else step_fingerprint
+                )
             else:
                 self._start_deferred(step)
                 self.progress.building(step)
@@ -477,36 +476,43 @@ class _Scheduler:
                     self.outputs[id(step)] = "dry"
         elif record is not None:
             value = step.decode(record["value"])
-            with self.condition:
-                self.run.reused.add(id(step))
-            self.progress.reused(step)
-            _value, output = self._kept(
-                step, value, built=False, step_fingerprint=step_fingerprint
+            self._record_reused(
+                step, lambda: self._kept(step, value, built=False, step_fingerprint=step_fingerprint)
             )
-            with self.condition:
-                self.outputs[id(step)] = output
         else:
             self._start_deferred(step)
             if composite_reused:
                 self.progress.reusing(step)
             value, elapsed = self._invoke(step)
+
+            def keep() -> str:
+                return self._kept(
+                    step, value, built=True, composite_reused=composite_reused,
+                    step_fingerprint=step_fingerprint, elapsed=elapsed,
+                )
+
             if composite_reused:
+                self._record_reused(step, keep)
+            else:
+                output = keep()
                 with self.condition:
-                    self.run.reused.add(id(step))
-                self.progress.reused(step)
-            _value, output = self._kept(
-                step, value, built=True, composite_reused=composite_reused,
-                step_fingerprint=step_fingerprint, elapsed=elapsed,
-            )
-            with self.condition:
-                if step.deferred:
+                    self.outputs[id(step)] = output
+            if step.deferred:
+                with self.condition:
                     self.started.add(id(step))
-                self.outputs[id(step)] = output
+
+    def _record_reused(self, step: Step[Any], output: Callable[[], str]) -> None:
+        with self.condition:
+            self.run.reused.add(id(step))
+        self.progress.reused(step)
+        fingerprint = output()
+        with self.condition:
+            self.outputs[id(step)] = fingerprint
 
     def _kept(
         self, step: Step[Any], value: object, *, built: bool,
         step_fingerprint: str, elapsed: float | None = None, composite_reused: bool = False,
-    ) -> tuple[object, str]:
+    ) -> str:
         with self.condition:
             self.live.add(step, value)
         if built:
@@ -533,7 +539,7 @@ class _Scheduler:
             if step.serves:
                 self.progress.finished()
             step.serve(self.run, value)
-        return value, output
+        return output
 
     def _start_deferred(self, step: Step[Any]) -> None:
         """Build the deferred steps `step` takes, just before `step` builds.
