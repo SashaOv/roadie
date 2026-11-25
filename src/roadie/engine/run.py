@@ -270,7 +270,7 @@ class _Scheduler:
                 self.undeclared[id(step)] = missing
         self.progress.completed(step, missing=missing, reused=reused)
 
-    def announce_interrupt(self) -> None:
+    def report_interrupt(self) -> None:
         with self._announce_lock:
             if self._announced:
                 return
@@ -629,7 +629,7 @@ def _run_steps(
     reset_interrupt()
     succeeded = False
     outcome = "succeeded"
-    previous_before_stop = set_before_stop(scheduler.announce_interrupt)
+    previous_before_stop = set_before_stop(scheduler.report_interrupt)
     try:
         with run_scope(), interrupt_on_terminate():
             bound = None
@@ -665,7 +665,7 @@ def _run_steps(
                 succeeded = True
             except KeyboardInterrupt:
                 outcome = "interrupted"
-                scheduler.announce_interrupt()
+                scheduler.report_interrupt()
                 raise
             except BaseException:
                 if outcome == "succeeded":
@@ -690,7 +690,7 @@ def _run_steps(
                         reset_parameters(bound)
                     reset_interrupt()
     except KeyboardInterrupt:
-        scheduler.announce_interrupt()
+        scheduler.report_interrupt()
         raise
     finally:
         set_before_stop(previous_before_stop)
