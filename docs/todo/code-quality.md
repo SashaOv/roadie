@@ -1121,7 +1121,7 @@ CI run (decision 7).
 
 ### CQ7: Each rule the reviews named has one owner
 
-Status: planned, approved 2026-11-24
+Status: implemented 2026-11-24 (commits CQ7.*)
 
 **Improvement.** H2, H4 and the CQ5 and CQ6 reviews named rules that live
 in two or more places. Some copies already disagree. After this build each
@@ -1293,6 +1293,21 @@ CI run (decision 10).
   the suite is the check.
 
 **Builder log.** `logs/CQ7.build.log`
+
+### Execution and acceptance
+
+- CQ7.1 through CQ7.8 are committed in order. `70d1ca34` renames the
+  scheduler's interrupt callback after the acceptance grep matched its
+  name. The interruption tests and the grep pass after the rename.
+- At head `70d1ca34`, tree `60a0986d`, `uv run roadie checks` passed
+  on macOS with 551 tests passed and 14 skipped. The source greps produced
+  three empty results and one match in the release wrapper. Evidence is
+  in `/tmp/onespec-cq7/accept.txt`.
+- The changed-contract tests fail before their patches and pass after.
+  The tests for preserved behavior pass before and after their patches.
+- CI passed on `ubuntu-latest` and `macos-latest`.
+  [CI run 45553214265](https://github.com/SashaOv/roadie/actions/runs/45553214265)
+- `src/roadie` has 6,807 lines in 47 Python files, 15 more than at planning.
 
 ## Backlog
 - Niva, when it upgrades Roadie past CQ3: import the process helpers and
