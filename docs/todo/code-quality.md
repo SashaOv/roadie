@@ -1519,7 +1519,7 @@ CI run (decision 13).
   commit body lists each docstring.
 - [x] **CQ8.9: Order the remaining modules.** Decision 10's reorder. Only
   moves code; the suite is the check.
-- [ ] **CQ8.10: Check module order in a test.** Decision 10's test. It
+- [x] **CQ8.10: Check module order in a test.** Decision 10's test. It
   fails on CQ8.9's parent and passes after.
 
 **Builder log.** `logs/CQ8.build.log`
