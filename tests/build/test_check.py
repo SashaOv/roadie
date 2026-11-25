@@ -3,12 +3,30 @@ import sys
 from pathlib import Path
 
 import pytest
-from support import execute
+from support import Value, execute
 
-from roadie.build import Check, Files
+from roadie.build import Check, Files, Pytest
 from roadie.build import TestResults as Results
-from roadie.engine.errors import StepFailed
+from roadie.engine.errors import RoadieError, StepFailed
 from roadie.engine.fingerprint import fingerprint
+
+
+# (spec) Step kinds
+@pytest.mark.parametrize("kind", [Check, Pytest])
+def test_check_inputs_accept_one_or_many_inputs_and_steps(kind: type[Check] | type[Pytest]) -> None:
+    source = Files("src")
+    dependency = Value("value")
+    assert kind(inputs=source).inputs == (source,)
+    assert kind(inputs=dependency).inputs == (dependency,)
+    assert kind(inputs=[source, dependency]).inputs == (source, dependency)
+
+    generated = kind(inputs=(item for item in (dependency, source)))
+    assert generated.inputs == (dependency, source)
+    assert tuple(generated.dependencies()) == (dependency,)
+
+    with pytest.raises(RoadieError) as error:
+        kind(inputs=[source, 42])
+    assert str(error.value) == f"{kind.__name__} inputs takes inputs or steps: got int"
 
 
 def _check(*command: str, inputs: tuple[Files, ...] = ()) -> Check:

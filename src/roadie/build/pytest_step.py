@@ -1,17 +1,14 @@
 """A test step that runs pytest and reads its JUnit report."""
 
 import sys
-from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 from xml.etree import ElementTree
 
+from roadie.build.check import CheckInputs, normalize_check_inputs
 from roadie.build.tests import TestFailure, TestResults, Tests
 from roadie.engine.errors import RoadieError
-from roadie.engine.inputs import Input
-from roadie.engine.many import one_or_many
 from roadie.engine.process import OUTPUT_TAIL
-from roadie.engine.step import Step
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -54,12 +51,10 @@ class Pytest(Tests):
     """
 
     def __init__(
-        self, *args: str, inputs: Input | Step[object] | Iterable[Input | Step[object]] = ()
+        self, *args: str, inputs: CheckInputs = ()
     ) -> None:
         self.args = args
-        self.inputs: tuple[Input | Step[object], ...] = one_or_many(
-            inputs, (Input, Step), owner="Pytest", parameter="inputs", takes="inputs or steps"
-        )
+        self.inputs = normalize_check_inputs(inputs, owner=type(self).__name__)
 
     def build(self, run: "Run") -> TestResults:
         report = run.artifact(self, ".xml")

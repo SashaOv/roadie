@@ -14,6 +14,9 @@ if TYPE_CHECKING:
     from roadie.engine.run import Run
 
 
+type CheckInputs = Input | Step[object] | Iterable[Input | Step[object]]
+
+
 # (spec) Step kinds
 class Check(Tests):
     """Run a command; the value is `TestResults`.
@@ -30,12 +33,10 @@ class Check(Tests):
     def __init__(
         self,
         *command: str,
-        inputs: Input | Step[object] | Iterable[Input | Step[object]] = (),
+        inputs: CheckInputs = (),
     ) -> None:
         self.command = command
-        self.inputs: tuple[Input | Step[object], ...] = one_or_many(
-            inputs, (Input, Step), owner="Check", parameter="inputs", takes="inputs or steps"
-        )
+        self.inputs = normalize_check_inputs(inputs, owner=type(self).__name__)
 
     def build(self, run: "Run") -> TestResults:
         completed = self._cmd(
@@ -46,3 +47,9 @@ class Check(Tests):
         output = f"{completed.stdout or ''}{completed.stderr or ''}"
         failure = TestFailure(shlex.join(self.command), output[-OUTPUT_TAIL:])
         return TestResults(failures=(failure,))
+
+
+def normalize_check_inputs(inputs: CheckInputs, *, owner: str) -> tuple[Input | Step[object], ...]:
+    return one_or_many(
+        inputs, (Input, Step), owner=owner, parameter="inputs", takes="inputs or steps"
+    )

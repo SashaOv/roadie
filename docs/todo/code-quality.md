@@ -1286,7 +1286,7 @@ CI run (decision 10).
   `cannot release:` message from a failed or unstartable program and an
   unwritable manifest is unchanged, and a late failure still names what it
   left.
-- [ ] **CQ7.7: Normalize check inputs once.** Decision 7. Test,
+- [x] **CQ7.7: Normalize check inputs once.** Decision 7. Test,
   parameterized over `Check` and `Pytest`: one input, a step, a mix, a
   generator, and a wrong member, which fails naming that class.
 - [ ] **CQ7.8: Order the edited modules.** Decision 8. Only moves code;
