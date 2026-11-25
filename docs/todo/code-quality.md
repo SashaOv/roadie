@@ -1309,6 +1309,28 @@ CI run (decision 10).
   [CI run 45553214265](https://github.com/SashaOv/roadie/actions/runs/45553214265)
 - `src/roadie` has 6,807 lines in 47 Python files, 15 more than at planning.
 
+### Review
+
+2026-11-24, at `5eeec1e`, by the planning agent.
+
+- The eight patch commits carry their planned names. `5eeec1e` changes
+  only this spec, so the acceptance at `70d1ca3` holds. The four greps
+  print as planned.
+- Fail-before, rerun here on each patch's parent with its tests: CQ7.1,
+  CQ7.4 and CQ7.5 fail before and pass after; CQ7.2, CQ7.3 and CQ7.7 pass
+  before and after, as planned. CQ7.4 also removes the keys it set when
+  setting one fails, a failure path decision 4 implies.
+- Plan defect: the grep's `def announce` also matched
+  `announce_interrupt`, so `70d1ca3` renamed a callback only to satisfy
+  it.
+- Gap, against decision 8: `step.py` kept `_reserved_names` between its
+  classes and its module variables. `_RESERVED` is now computed in place.
+  With it, `uv run roadie checks` passes with 551 tests and 14 skipped.
+- Dispatch: codex's sandbox fails
+  `test_stopping_reaches_a_descendant_outside_the_process_group` and
+  lacks cargo and pnpm, so the build ran as `codex-open`, without the
+  sandbox (author, 2026-11-24).
+
 ## Backlog
 - Niva, when it upgrades Roadie past CQ3: import the process helpers and
   `cargo_executable` from `roadie.build`, and run `gh` through `Command`
@@ -1334,6 +1356,14 @@ CI run (decision 10).
   them (G6).
 - Look for line savings in `tests/`, which is 1.5 times the source and was
   not examined.
+- Scheduler and release internals (CQ7 review):
+  - The `cannot release:` prefix is still written in about a dozen
+    refusals in `manifests.py` and `release.py`; one release error could
+    carry it.
+  - `release_errors` turns every `OSError` into `cannot release:` and has
+    no docstring naming what it converts.
+  - `_execute_step` repeats the reuse bookkeeping in three branches.
+  - `Progress` branches on `dry` in each method.
 - Niva, when it upgrades Roadie past CQ6: drop its three environment-file
   readers (`forge/forge/build_box.py`, `forge/forge/environment.py`,
   `jammer/ops/pulumi_util.py`), since steps then read the run's values from

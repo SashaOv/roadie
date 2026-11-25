@@ -180,14 +180,9 @@ class Composite(Step[tuple[object, ...]]):
         return list(self.steps), {}
 
 
-def _reserved_names() -> frozenset[str]:
-    names = set(Step.__annotations__)
-    names.update(name for name in vars(Step) if not name.startswith("_"))
-    return frozenset(names)
-
-
-_RESERVED = _reserved_names()
-
+_RESERVED = frozenset(
+    {*Step.__annotations__, *(name for name in vars(Step) if not name.startswith("_"))}
+)
 _HOOKS = frozenset(name for name in _RESERVED if callable(getattr(Step, name, None)))
 
 
