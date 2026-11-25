@@ -11,8 +11,9 @@ number (1–10, G1–G6, H1–H7) and does not restate them.
 
 The measure is the line count of `git ls-files 'src/roadie/*.py'`. Each
 build's record states the count it leaves. The count is reported, not
-gated: code is not packed, inlined or stripped of its documentation to meet
-an estimate, and a build that misses its estimate says so at the checkpoint.
+estimated or gated: code is not packed, inlined or stripped of its
+documentation to shorten it. Estimates were dropped after CQ5 and CQ6
+missed theirs by 168 and 40 lines (author, 2026-11-24).
 
 The work has three kinds, done in this order within the sketch below:
 
@@ -27,20 +28,16 @@ The work has three kinds, done in this order within the sketch below:
 ### Build sketch
 
 The author allowed build boundaries to be sketched ahead. A sketched build
-has no number and no patches until it is planned; the order and the line
-estimates are proposals.
+has no number and no patches until it is planned; the order is a proposal.
 
-| Build | Covers | Lines |
-|---|---|---:|
-| Failures surface and state ends with its run | 1, G2, G3, G4, G5 | +40 |
-| Nothing is written twice | G1 (docstring), G6 (test layout), the duplicates in Facts | −110 |
-| One owner runs commands | 2, 6, G1, H1, the author's two finds | −25 |
-| The scheduler owns its state | 4, H3, the serving flag, `env_values` | −120 |
-| A step declares its attributes | 5, the selected `attributes()` approach | +50 |
-| Release plans before it changes anything | 8, H7 | −30 |
-
-That is about 190 lines, 3% of the source, counting CQ2's and CQ3's actual
-results (−121 and −13). `run.py` gives the largest share.
+| Build | Covers |
+|---|---|
+| Failures surface and state ends with its run | 1, G2, G3, G4, G5 |
+| Nothing is written twice | G1 (docstring), G6 (test layout), the duplicates in Facts |
+| One owner runs commands | 2, 6, G1, H1, the author's two finds |
+| The scheduler owns its state | 4, H3, the serving flag, `env_values` |
+| A step declares its attributes | 5, the selected `attributes()` approach |
+| Release plans before it changes anything | 8, H7 |
 
 Order constraints:
 
@@ -1098,6 +1095,30 @@ CI run (decision 7).
   Facts. The estimate was about 0; the count is reported, not gated, and
   no code was packed to meet it.
 
+### Review
+
+2026-11-24, at `deb510a`, by the planning agent.
+
+- The three patch commits carry their planned names. `deb510a` changes
+  only this spec, so the acceptance at `131d255` holds. The full
+  acceptance grep, including `def environment\(`, prints nothing.
+- Each patch's new tests, run on its parent with the patch's tests, fail;
+  they pass on the patch. The dry-run and failure-before-any-step cases of
+  `test_os_environ_is_restored_however_a_run_ends` pass before CQ6.2,
+  because nothing then wrote `os.environ`.
+- Drift: `131d255` fixed a local acceptance clause before the first push;
+  the grant named `CQ6: Fix` commits for a failing CI clause. It only
+  renames, and CI passed on it.
+- Drift: the Builder log's times (21:50 to 23:00 on 2026-11-23) do not
+  match the commits (01:51 to 01:58 on 2026-11-24).
+- Plan defect: the line estimate, again. `src/roadie` grew by 40 against
+  about 0.
+- Test gap, against decision 1: no test ran the CLI's order of root
+  `config(env)` files before `--env` files; the test built that tuple
+  itself. `test_config_env_applies_before_cli_env` now runs the CLI, and
+  fails when `cli.py` passes only `--env`. With it, `uv run roadie checks`
+  passes with 532 tests and 14 skipped.
+
 ## Backlog
 - Niva, when it upgrades Roadie past CQ3: import the process helpers and
   `cargo_executable` from `roadie.build`, and run `gh` through `Command`
@@ -1136,6 +1157,15 @@ CI run (decision 7).
   - `run_query` raises `OSError` for a program that ran and exited non-zero.
   - The `cannot release:` wrapping is repeated in five places.
   - `Release.build` formats its left message inline.
+- Run environment internals (CQ6 review):
+  - Only `cli.py` joins the root file's `config(env)` files before the
+    `--env` files; another caller of `load` and `execute` must repeat it.
+  - `_run_env` and `_run_environ` both skip keys `os.environ` holds.
+  - `_load` reads `root_env()` for every build file but keeps it only for
+    the root.
+  - No test shows the env-file context variable is released after load.
+  - The early-failure case of `test_os_environ_is_restored_however_a_run_ends`
+    matches any `Exception` with an incidental message.
 - Niva, when it upgrades Roadie past CQ6: drop its three environment-file
   readers (`forge/forge/build_box.py`, `forge/forge/environment.py`,
   `jammer/ops/pulumi_util.py`), since steps then read the run's values from

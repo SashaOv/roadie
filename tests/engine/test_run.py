@@ -14,6 +14,7 @@ from support import (
     execute,
     is_posix,
     isolate_repo,
+    run_cli,
     write_build,
 )
 
@@ -817,8 +818,7 @@ def test_config_env_applies_before_cli_env(tmp_path: Path, monkeypatch: pytest.M
     (tmp_path / "from-config.env").write_text("MODE=config\nTOKEN=from-config\n")
     cli_env = tmp_path / "cli.env"
     cli_env.write_text("MODE=cli\n")
-    graph = load(tmp_path)
-    execute(graph.plan(), env=(*graph.env_paths, cli_env))
+    run_cli(["--env", str(cli_env), "-f", str(tmp_path)])
     assert (tmp_path / "seen.txt").read_text() == "cli from-config"
 
 
