@@ -9,9 +9,10 @@ from pathlib import Path
 from typing import get_args, get_type_hints
 
 import pytest
-from support import execute, isolate_repo, write_build
+from support import Note, execute, isolate_repo, write_build
 
 import roadie
+from roadie import cli
 from roadie.build import (
     Attribute,
     CargoPackage,
@@ -30,6 +31,7 @@ from roadie.build import (
     UserTask,
 )
 from roadie.engine.errors import StepFailed
+from roadie.engine.fingerprint import fingerprint
 from roadie.engine.graph import load
 from roadie.engine.process import RunningProcess, available_port
 from roadie.engine.run import Run
@@ -393,3 +395,163 @@ def test_builtin_steps_declare_their_attributes(tmp_path: Path) -> None:
         hints = get_type_hints(type(step), include_extras=True)
         marked = {name: getattr(step, name) for name, hint in hints.items() if mark in get_args(hint)[1:]}
         assert marked == step.attributes(), type(step).__name__
+
+
+# (spec) Dependencies and attributes
+def test_step_state_stays_out_of_its_attributes_dependencies_and_fingerprint() -> None:
+    class Stateful(Step[None]):
+        label: Attribute[str]
+        count: int
+        _peer: Step[str]
+        _cache: object
+
+        def __init__(self) -> None:
+            self.label = "marked"
+            self.count = 0
+            self._peer = Note()
+
+        def build(self, run: Run) -> None:
+            self._cache = object()
+            self.count += 1
+
+    step = Stateful()
+    assert list(step.dependencies()) == []
+    assert step.call_arguments() == ([], {"label": "marked"})
+    before = fingerprint(step)
+    execute([step])
+    assert step.count == 1
+    assert fingerprint(step) == before
+    assert list(step.dependencies()) == []
+
+
+# (spec) Dependencies and attributes
+def test_inherited_attributes_use_declaration_order() -> None:
+    class Base(Step[None]):
+        first: Attribute[str]
+        second: Attribute[str] = "second"
+
+        def build(self, run: Run) -> None:
+            return None
+
+    class Child(Base):
+        third: Attribute[str]
+
+        def __init__(self) -> None:
+            self.third = "third"
+            self.first = "first"
+
+    assert list(Child().attributes().items()) == [
+        ("first", "first"),
+        ("second", "second"),
+        ("third", "third"),
+    ]
+
+
+# (spec) Dependencies and attributes
+def test_step_field_metadata_lives_only_as_long_as_the_class() -> None:
+    def read_fields() -> weakref.ReferenceType[type[Step[None]]]:
+        class Temporary(Step[None]):
+            label: Attribute[str] = "value"
+
+            def build(self, run: Run) -> None:
+                return None
+
+        assert Temporary().attributes() == {"label": "value"}
+        return weakref.ref(Temporary)
+
+    cls = read_fields()
+    gc.collect()
+    assert cls() is None
+
+
+# (spec) Dependencies and attributes
+@pytest.mark.parametrize("dry", [False, True], ids=["run", "dry"])
+def test_step_annotations_are_read_in_the_build_file_module(
+    tmp_path: Path, dry: bool
+) -> None:
+    root = tmp_path
+    (root / "build.py").write_text(
+        """from __future__ import annotations
+from roadie.build import *
+
+class Custom(Step[str]):
+    field: Attribute[Label] = "value"
+    quoted: Attribute["Hint"] = "also marked"
+    private: list[int] = []
+
+    def build(self, run: Run) -> str:
+        return self.field
+
+type Label = str
+step = Custom()
+""",
+    )
+    step = load(root).result()
+    assert step.attributes() == {"field": "value", "quoted": "also marked"}
+    assert execute([step], root=root, dry=dry) == (None if dry else "value")
+
+
+# (spec) Dependencies and attributes
+@pytest.mark.parametrize("dry", [False, True], ids=["run", "dry"])
+@pytest.mark.parametrize("future", [False, True], ids=["deferred", "future"])
+def test_unreadable_step_annotation_names_the_class_and_field(
+    tmp_path: Path, dry: bool, future: bool
+) -> None:
+    if not future and sys.version_info < (3, 14):
+        pytest.skip("deferred annotations require Python 3.14")
+    source = """
+class Custom(Step[None]):
+    field: Attribute[Missing] = "value"
+
+    def build(self, run: Run) -> None:
+        return None
+
+step = Custom()
+"""
+    if future:
+        source = "from __future__ import annotations\n" + source
+    path = tmp_path / "build.py"
+    path.write_text(source.replace("\nclass Custom", "\nfrom roadie.build import *\n\nclass Custom", 1))
+    with pytest.raises(SystemExit, match=r"Custom\.field annotation cannot be read: name 'Missing' is not defined"):
+        cli.run(file=tmp_path, dry_run=dry)
+
+
+# (spec) Dependencies and attributes
+@pytest.mark.parametrize("dry", [False, True], ids=["run", "dry"])
+@pytest.mark.parametrize("kind", ["dataclass", "initializer"])
+@pytest.mark.parametrize(
+    ("declaration", "assignment", "message"),
+    [
+        ("", "self.extra = 'value'", "attribute extra is not declared in its class"),
+        ("extra: Step[None]", "self.extra = Group()", "field extra holds a step but is not an Attribute"),
+        ("extra: Files", "self.extra = Files('input.txt')", "field extra holds a step but is not an Attribute"),
+        ("extra: tuple[Step[None], ...]", "self.extra = (Group(),)", "field extra holds a step but is not an Attribute"),
+        ("report: Attribute[str]", "self.report = 'value'", "attribute report is reserved by Roadie"),
+    ],
+)
+def test_invalid_step_fields_fail_a_run_and_dry_run(
+    tmp_path: Path, dry: bool, kind: str, declaration: str, assignment: str, message: str
+) -> None:
+    decorator = "@dataclass(eq=False)\n" if kind == "dataclass" else ""
+    initializer = "__post_init__(self)" if kind == "dataclass" else "__init__(self)"
+    if kind == "dataclass" and declaration:
+        declaration += " = field(init=False)"
+    write_build(
+        tmp_path,
+        f"""
+from dataclasses import dataclass, field
+
+{decorator}class Invalid(Step[None]):
+    {declaration}
+
+    def {initializer}:
+        {assignment}
+
+    def build(self, run: Run) -> None:
+        return None
+
+invalid = Invalid()
+""",
+    )
+    with pytest.raises(SystemExit, match=f"invalid {message}"):
+        cli.run(file=tmp_path, dry_run=dry)

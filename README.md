@@ -32,7 +32,7 @@ from roadie.build import *
 
 @dataclass(eq=False)
 class Emitter(File):
-    text: str = "hello"
+    text: Attribute[str] = "hello"
 
     def build(self, run: Run) -> Path:
         path = run.artifact(self, ".txt")
@@ -42,7 +42,7 @@ class Emitter(File):
 
 @dataclass(eq=False)
 class Copy(File):
-    source: File
+    source: Attribute[File]
 
     def build(self, run: Run) -> Path:
         path = run.artifact(self, ".txt")

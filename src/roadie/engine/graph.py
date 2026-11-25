@@ -133,9 +133,6 @@ class _Included(Composite):
         except KeyError:
             raise AttributeError(name) from None
 
-    def attributes(self) -> dict[str, object]:
-        return {"steps": self.steps}
-
     def dependencies(self) -> Iterator[Step[Any]]:
         if not self.steps:
             raise RoadieError(f"{self._path} marks no default result")

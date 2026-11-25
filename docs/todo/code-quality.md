@@ -1492,7 +1492,7 @@ CI run (decision 13).
   and test steps mark and declare their fields. Test: every step kind in
   `src`, built with each argument, has the same `attributes()` as the marks
   name.
-- [ ] **CQ8.3: Read attributes from the marks.** Decisions 1–3. The spec
+- [x] **CQ8.3: Read attributes from the marks.** Decisions 1–3. The spec
   states it. Tests:
   - a private field, a declared unmarked field and a cache set during
     `build` change neither the fingerprint nor the dependencies;

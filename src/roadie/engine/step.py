@@ -2,14 +2,20 @@
 
 import itertools
 import subprocess
+import sys
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
+from inspect import get_annotations as inspect_annotations
 from pathlib import Path
+from threading import RLock
+from types import MemberDescriptorType
 from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
     ClassVar,
+    ForwardRef,
     Self,
     TypeVar,
     cast,
@@ -21,8 +27,11 @@ from pydantic import TypeAdapter
 
 from roadie.engine.config import base_directory, loading_directory
 from roadie.engine.errors import RoadieError
-from roadie.engine.inputs import digest
+from roadie.engine.inputs import Input, digest
 from roadie.engine.process import Command, RunningProcess
+
+if sys.version_info >= (3, 14):
+    from annotationlib import Format, get_annotations
 
 if TYPE_CHECKING:
     from roadie.engine.run import Run
@@ -32,11 +41,23 @@ _ATTRIBUTE_MARK = object()
 Attribute = Annotated[_AttributeT, _ATTRIBUTE_MARK]
 
 _serials = itertools.count()
+_fields_lock = RLock()
+
+
+@dataclass(frozen=True)
+class _FieldNames:
+    names: dict[str, bool | None]
+    slots: tuple[str, ...]
+    reserved: str | None
+    error: str | None
 
 
 # (spec) Dependencies and attributes
 class Step[T](ABC):
     _adapter: ClassVar[TypeAdapter[Any] | None]
+    _roadie_fields: ClassVar[_FieldNames]
+    _roadie_local_fields: ClassVar[_FieldNames]
+    _roadie_annotation_globals: ClassVar[dict[str, Any]]
     reusable: ClassVar[bool] = True
     recorded: ClassVar[bool] = True
     deferred: ClassVar[bool] = False
@@ -50,6 +71,14 @@ class Step[T](ABC):
     build_variables: frozenset[str] | None
     name: str | None
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        if loading_directory() is not None:
+            # runpy removes the build module from sys.modules after loading.
+            module = sys.modules.get(cls.__module__)
+            if module is not None:
+                cls._roadie_annotation_globals = vars(module)
+
     def __new__(cls, *args: object, **kwargs: object) -> Self:
         instance = super().__new__(cls)
         instance.serial = next(_serials)
@@ -62,17 +91,9 @@ class Step[T](ABC):
 
     def attributes(self) -> dict[str, object]:
         return {
-            key: value
-            for key, value in vars(self).items()
-            if key
-            not in {
-                "serial",
-                "name",
-                "base_dir",
-                "build_dir",
-                "variable",
-                "build_variables",
-            }
+            name: getattr(self, name)
+            for name, marked in _fields_for(type(self)).names.items()
+            if marked
         }
 
     def resolve(self, path: str | Path) -> Path:
@@ -130,7 +151,7 @@ class Step[T](ABC):
 
     def call_arguments(self) -> tuple[list[object], dict[str, object]]:
         """Positional and keyword arguments that `--dry` shows."""
-        reject_reserved(self)
+        validate_attributes(self)
         named = {key: value for key, value in self.attributes().items() if value is not None}
         return [], named
 
@@ -190,6 +211,7 @@ _RESERVED = frozenset(
     {*Step.__annotations__, *(name for name in vars(Step) if not name.startswith("_"))}
 )
 _HOOKS = frozenset(name for name in _RESERVED if callable(getattr(Step, name, None)))
+_ENGINE_FIELDS = frozenset(Step.__annotations__)
 
 
 def _type_params(cls: type) -> tuple[Any, ...]:
@@ -252,27 +274,115 @@ def is_reserved(name: str) -> bool:
     return name in _RESERVED
 
 
+def _fields_for(cls: type[Step[Any]]) -> _FieldNames:
+    try:
+        return cls.__dict__["_roadie_fields"]
+    except KeyError:
+        with _fields_lock:
+            cached = cls.__dict__.get("_roadie_fields")
+            if cached is not None:
+                return cached
+            names: dict[str, bool | None] = {}
+            slots: list[str] = []
+            error = reserved = None
+            saved_globals = {
+                base.__module__: base.__dict__["_roadie_annotation_globals"]
+                for base in cls.__mro__
+                if "_roadie_annotation_globals" in base.__dict__
+            }
+            for base in reversed(cls.__mro__):
+                if base is Step or base is object:
+                    continue
+                fields = _local_fields(base, saved_globals.get(base.__module__))
+                names.update(fields.names)
+                slots.extend(fields.slots)
+                if fields.reserved is not None:
+                    reserved = fields.reserved
+                if fields.error is not None:
+                    error = fields.error
+            cls._roadie_fields = _FieldNames(names, tuple(slots), reserved, error)
+            if "_roadie_annotation_globals" in cls.__dict__:
+                del cls._roadie_annotation_globals
+            return cls._roadie_fields
+
+
+def _local_fields(cls: type, saved_globals: dict[str, Any] | None) -> _FieldNames:
+    cached = cls.__dict__.get("_roadie_local_fields")
+    if cached is not None:
+        return cached
+
+    if sys.version_info >= (3, 14):
+        try:
+            hints = get_annotations(cls, format=Format.FORWARDREF)
+        except Exception:  # noqa: BLE001 - annotations can raise arbitrary errors
+            # Inspect fields separately when the annotation function fails.
+            hints = get_annotations(cls, format=Format.STRING)
+    else:
+        hints = inspect_annotations(cls)
+
+    module = sys.modules.get(cls.__module__)
+    namespace = saved_globals if saved_globals is not None else (vars(module) if module else {})
+    local = dict(vars(cls))
+    local.update((param.__name__, param) for param in _type_params(cls))
+    names: dict[str, bool | None] = {}
+    error = None
+    source = None
+    for name, hint in hints.items():
+        try:
+            if sys.version_info >= (3, 14) and _contains_forward_ref(hint):
+                # Re-evaluate the expression to distinguish an undefined name
+                # from a quoted inner type, which need not be resolved.
+                if source is None:
+                    source = get_annotations(cls, format=Format.STRING)
+                hint = source[name]
+            if isinstance(hint, str):
+                hint = eval(hint, namespace, local)
+                if isinstance(hint, str):
+                    hint = eval(hint, namespace, local)
+            names[name] = (
+                None if get_origin(hint) is ClassVar
+                else get_origin(hint) is Annotated and any(mark is _ATTRIBUTE_MARK for mark in get_args(hint)[1:])
+            )
+        except Exception as cause:  # noqa: BLE001 - report the field with its error
+            if error is None:
+                error = f"{cls.__name__}.{name} annotation cannot be read: {cause}"
+
+    slots = tuple(name for name, value in vars(cls).items() if isinstance(value, MemberDescriptorType))
+    declared = getattr(cls, "__dataclass_fields__", None)
+    if declared is None:
+        declared = (name for name, marked in names.items() if marked is not None)
+    reserved = next((name for name in declared if name in _RESERVED), None)
+    fields = _FieldNames(names, slots, reserved, error)
+    if hints or slots or issubclass(cls, Step):
+        cls._roadie_local_fields = fields  # type: ignore[attr-defined]
+    return fields
+
+
+def _contains_forward_ref(hint: object) -> bool:
+    return isinstance(hint, ForwardRef) or any(_contains_forward_ref(arg) for arg in get_args(hint))
+
+
 # (spec) Dependencies and attributes
-def reject_reserved(step: Step[Any]) -> None:
-    """Fail when a step attribute uses a name Roadie keeps for itself."""
-    for cls in type(step).mro():
-        if cls is Step:
-            break
-        fields = getattr(cls, "__dataclass_fields__", None)
-        if fields is not None:
-            declared = fields
-        else:
-            declared = [
-                name
-                for name, hint in getattr(cls, "__annotations__", {}).items()
-                if get_origin(hint) is not ClassVar
-            ]
-        for name in declared:
-            if name in _RESERVED:
-                _raise_reserved(step, name)
-    for name in vars(step):
+def validate_attributes(step: Step[Any]) -> None:
+    fields = _fields_for(type(step))
+    if fields.error is not None:
+        raise RoadieError(fields.error)
+    if fields.reserved is not None:
+        _raise_reserved(step, fields.reserved)
+    for name in (*vars(step), *(name for name in fields.slots if hasattr(step, name))):
         if name in _HOOKS:
             _raise_reserved(step, name)
+        if name not in fields.names and name not in _ENGINE_FIELDS:
+            raise RoadieError(f"{step._label()} attribute {name} is not declared in its class")
+    for name, marked in fields.names.items():
+        if marked is False and not name.startswith("_") and _holds_dependency(getattr(step, name, None)):
+            raise RoadieError(f"{step._label()} field {name} holds a step but is not an Attribute")
+
+
+def _holds_dependency(value: object) -> bool:
+    return isinstance(value, (Step, Input)) or (
+        isinstance(value, tuple) and any(_holds_dependency(item) for item in value)
+    )
 
 
 def _raise_reserved(step: Step[Any], name: str) -> None:

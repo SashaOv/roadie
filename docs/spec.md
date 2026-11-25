@@ -661,6 +661,19 @@ and returns its value; `Step.teardown(value)` tears it down and does nothing
 by default. When constructed, a step records its base directory and the
 directory of the build file loading it.
 
+Declare a step's attributes with `Attribute[T]` from `roadie.build`.
+Roadie reads marked fields in declaration order, with base classes first.
+A string annotation is evaluated in its class's module. An unreadable
+annotation fails with `<Class>.<field> annotation cannot be read: <reason>`.
+
+Declare the step's other instance fields with ordinary type annotations.
+These fields are the step's own state, outside its fingerprint, dependencies,
+and `--dry` output. An undeclared instance variable fails with `<step>
+attribute <name> is not declared in its class`. A public field holding a
+step or an input, directly or in a tuple, must carry the mark. It otherwise
+fails with `<step> field <name> holds a step but is not an Attribute`.
+These checks run when the step is fingerprinted or shown by `--dry`.
+
 An attribute that is a step, or a tuple holding steps, makes those steps
 dependencies. An attribute that is an input, or a tuple holding inputs, is
 fingerprinted. The remaining attributes must be plain values: `None`, `str`,
