@@ -1517,7 +1517,7 @@ CI run (decision 13).
   tests are the check.
 - [x] **CQ8.8: Remove implementation-only docstrings.** Decision 9. The
   commit body lists each docstring.
-- [ ] **CQ8.9: Order the remaining modules.** Decision 10's reorder. Only
+- [x] **CQ8.9: Order the remaining modules.** Decision 10's reorder. Only
   moves code; the suite is the check.
 - [ ] **CQ8.10: Check module order in a test.** Decision 10's test. It
   fails on CQ8.9's parent and passes after.

@@ -5,16 +5,6 @@ from pathlib import Path
 from roadie.engine.inputs import Input, digest
 
 
-def _distributions() -> list[tuple[str, str]]:
-    installed = [
-        (dist.name, dist.version)
-        for dist in importlib.metadata.distributions()
-        if dist.name
-    ]
-    installed.sort()
-    return installed
-
-
 # (spec) Python environment
 class PythonEnv(Input):
     """See docs/spec.md, "Python environment"."""
@@ -26,3 +16,13 @@ class PythonEnv(Input):
         return digest(
             {"python": platform.python_version(), "distributions": _distributions()}
         )
+
+
+def _distributions() -> list[tuple[str, str]]:
+    installed = [
+        (dist.name, dist.version)
+        for dist in importlib.metadata.distributions()
+        if dist.name
+    ]
+    installed.sort()
+    return installed

@@ -14,40 +14,6 @@ if TYPE_CHECKING:
     from roadie.engine.run import Run
 
 
-def _files(directory: Path) -> list[dict[str, str]]:
-    entries: list[dict[str, str]] = []
-    for path in walk_files(directory):
-        relative = path.relative_to(directory).as_posix()
-        if path.is_symlink():
-            entries.append({"path": relative, "target": link_target(path)})
-        elif path.is_file():
-            entries.append({"path": relative, "sha256": content_digest(path)})
-    entries.sort(key=lambda item: item["path"])
-    return entries
-
-
-def _matches(destination: Path, built: Path) -> bool:
-    if built.is_symlink():
-        return destination.is_symlink() and os.readlink(destination) == os.readlink(built)
-    if destination.is_symlink() or not destination.is_file():
-        return False
-    if destination.read_bytes() == built.read_bytes():
-        return True
-    return tracked(destination) and same_as_git_stores(destination, built)
-
-
-def _write(destination: Path, built: Path) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.is_symlink():
-        destination.unlink()
-    if built.is_symlink():
-        if destination.exists():
-            destination.unlink()
-        destination.symlink_to(os.readlink(built), target_is_directory=built.is_dir())
-        return
-    destination.write_bytes(built.read_bytes())
-
-
 # (spec) Step kinds
 # (spec) Directory step
 @dataclass(eq=False, kw_only=True)
@@ -146,3 +112,37 @@ class Directory(Step[Path]):
             label = self._label()
             raise RoadieError(f"{label} built {value}, which is not a directory")
         return _files(value)
+
+
+def _files(directory: Path) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for path in walk_files(directory):
+        relative = path.relative_to(directory).as_posix()
+        if path.is_symlink():
+            entries.append({"path": relative, "target": link_target(path)})
+        elif path.is_file():
+            entries.append({"path": relative, "sha256": content_digest(path)})
+    entries.sort(key=lambda item: item["path"])
+    return entries
+
+
+def _matches(destination: Path, built: Path) -> bool:
+    if built.is_symlink():
+        return destination.is_symlink() and os.readlink(destination) == os.readlink(built)
+    if destination.is_symlink() or not destination.is_file():
+        return False
+    if destination.read_bytes() == built.read_bytes():
+        return True
+    return tracked(destination) and same_as_git_stores(destination, built)
+
+
+def _write(destination: Path, built: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_symlink():
+        destination.unlink()
+    if built.is_symlink():
+        if destination.exists():
+            destination.unlink()
+        destination.symlink_to(os.readlink(built), target_is_directory=built.is_dir())
+        return
+    destination.write_bytes(built.read_bytes())

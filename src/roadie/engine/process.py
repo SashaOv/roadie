@@ -56,26 +56,7 @@ _trace_collector: ContextVar[TraceCollector | None] = ContextVar(
 )
 
 
-@contextmanager
-def collect_traces(collector: TraceCollector) -> Generator[None]:
-    """Collect the traces of `_cmd` programs run in this scope for one step."""
-    token = _trace_collector.set(collector)
-    try:
-        yield
-    finally:
-        _trace_collector.reset(token)
-
-
-def _absorb_trace(collector: TraceCollector, log: Path) -> None:
-    try:
-        if log.is_file():
-            read, written = parse_trace(log.read_text(errors="surrogateescape"))
-            collector.reads.update(read)
-            collector.written.update(written)
-    except OSError:
-        pass
-    finally:
-        log.unlink(missing_ok=True)
+signal_server = signal_process_tree
 
 
 # (spec) Step helpers
@@ -301,6 +282,28 @@ class Command:
         return merged
 
 
+@contextmanager
+def collect_traces(collector: TraceCollector) -> Generator[None]:
+    """Collect the traces of `_cmd` programs run in this scope for one step."""
+    token = _trace_collector.set(collector)
+    try:
+        yield
+    finally:
+        _trace_collector.reset(token)
+
+
+def _absorb_trace(collector: TraceCollector, log: Path) -> None:
+    try:
+        if log.is_file():
+            read, written = parse_trace(log.read_text(errors="surrogateescape"))
+            collector.reads.update(read)
+            collector.written.update(written)
+    except OSError:
+        pass
+    finally:
+        log.unlink(missing_ok=True)
+
+
 def port_is_busy(port: int) -> bool:
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=0.2):
@@ -385,9 +388,6 @@ def command_context(*, inherit: bool) -> Generator[None]:
         yield
     finally:
         _inherit_stdin.reset(stdin_token)
-
-
-signal_server = signal_process_tree
 
 
 @contextmanager

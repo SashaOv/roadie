@@ -10,6 +10,42 @@ from roadie.engine.inputs import Input, digest
 from roadie.engine.root import project_root
 
 
+# (spec) Files input
+class Files(Input):
+    def __init__(self, *paths: str | Path) -> None:
+        self.paths = paths
+
+    def __repr__(self) -> str:
+        shown = ", ".join(
+            repr(path if isinstance(path, str) else os.fspath(path)) for path in self.paths
+        )
+        return f"Files({shown})"
+
+    def declared_files(self, base_dir: Path) -> set[Path]:
+        declared: set[Path] = set()
+        for raw in self.paths:
+            path = _resolve(base_dir, raw)
+            if path.is_symlink():
+                declared.add(path)
+            elif path.is_dir():
+                _refuse_ignored_directory(raw, path)
+                declared.update(listed_files(path))
+            else:
+                declared.add(path)
+        return declared
+
+    def fingerprint(self, base_dir: Path) -> str:
+        try:
+            root = project_root().resolve()
+        except RoadieError:
+            root = None
+        entries = {
+            _entry_key(path, root): _file_mark(path)
+            for path in self.declared_files(base_dir)
+        }
+        return digest(entries)
+
+
 def _entry_key(path: Path, root: Path | None) -> str:
     absolute = path if path.is_absolute() else path.absolute()
     if root is None:
@@ -143,39 +179,3 @@ def _refuse_ignored_directory(raw: str | Path, directory: Path) -> None:
     raise RoadieError(
         f"Files({shown}): {shown} is ignored by git; take the step that builds it"
     )
-
-
-# (spec) Files input
-class Files(Input):
-    def __init__(self, *paths: str | Path) -> None:
-        self.paths = paths
-
-    def __repr__(self) -> str:
-        shown = ", ".join(
-            repr(path if isinstance(path, str) else os.fspath(path)) for path in self.paths
-        )
-        return f"Files({shown})"
-
-    def declared_files(self, base_dir: Path) -> set[Path]:
-        declared: set[Path] = set()
-        for raw in self.paths:
-            path = _resolve(base_dir, raw)
-            if path.is_symlink():
-                declared.add(path)
-            elif path.is_dir():
-                _refuse_ignored_directory(raw, path)
-                declared.update(listed_files(path))
-            else:
-                declared.add(path)
-        return declared
-
-    def fingerprint(self, base_dir: Path) -> str:
-        try:
-            root = project_root().resolve()
-        except RoadieError:
-            root = None
-        entries = {
-            _entry_key(path, root): _file_mark(path)
-            for path in self.declared_files(base_dir)
-        }
-        return digest(entries)

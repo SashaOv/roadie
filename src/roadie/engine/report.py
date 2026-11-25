@@ -15,11 +15,6 @@ from roadie.engine.errors import RoadieError
 from roadie.engine.root import project_root
 
 
-def _timestamp() -> str:
-    now = datetime.now(UTC)
-    return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
-
-
 # (spec) Run report
 class Report:
     """See docs/spec.md, "Run report"."""
@@ -97,6 +92,11 @@ class _Measured:
         self.end_free: int | None = None
         self.elapsed: float | None = None
         self.outcome: str | None = None
+
+
+def _timestamp() -> str:
+    now = datetime.now(UTC)
+    return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
 
 
 # (spec) Run report

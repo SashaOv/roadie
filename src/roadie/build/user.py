@@ -95,21 +95,6 @@ class UserTask(Tests):
         return TestResults(failures=tuple(failures))
 
 
-def _answer(label: str) -> str:
-    line = sys.stdin.readline()
-    if line == "":
-        raise StepFailed(label, f"{label}: no answer from the user")
-    return line.strip()
-
-
-def _reason(label: str) -> str:
-    while True:
-        print("What failed? ", end="", flush=True)
-        reason = _answer(label)
-        if reason:
-            return reason
-
-
 # (spec) Step kinds
 class UserApproval(Step[None]):
     """Ask the user once whether to continue; the value is `None`.
@@ -152,3 +137,18 @@ class UserApproval(Step[None]):
                 return
             if answer in _NO:
                 raise StepFailed(label, "cancelled by the user")
+
+
+def _answer(label: str) -> str:
+    line = sys.stdin.readline()
+    if line == "":
+        raise StepFailed(label, f"{label}: no answer from the user")
+    return line.strip()
+
+
+def _reason(label: str) -> str:
+    while True:
+        print("What failed? ", end="", flush=True)
+        reason = _answer(label)
+        if reason:
+            return reason

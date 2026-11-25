@@ -14,11 +14,6 @@ _run_state: ContextVar[dict[object, object] | None] = ContextVar(
 _run_state_lock = threading.Lock()
 
 
-def digest(payload: object) -> str:
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode()).hexdigest()
-
-
 # (spec) Input fingerprints
 class Input(ABC):
     @abstractmethod
@@ -28,6 +23,11 @@ class Input(ABC):
     def declared_files(self, base_dir: Path) -> set[Path]:
         """See docs/spec.md, "Input fingerprints"."""
         return set()
+
+
+def digest(payload: object) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode()).hexdigest()
 
 
 # (spec) Input fingerprints

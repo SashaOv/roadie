@@ -25,6 +25,10 @@ class RecordFile(BaseModel):
     entries: dict[str, RecordEntry]
 
 
+_SWEEP_AFTER = timedelta(hours=24)
+_ROOT_FILES = {"run.lock", "swept"}
+
+
 def artifact_dir(build_dir: Path | None, root: Path) -> Path:
     if build_dir is None:
         return Path()
@@ -61,10 +65,6 @@ def save_records(build_dir: Path | None, records: dict[str, Any], root: Path) ->
         json.dumps(document.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
     )
     temporary.replace(path)
-
-
-_SWEEP_AFTER = timedelta(hours=24)
-_ROOT_FILES = {"run.lock", "swept"}
 
 
 # (spec) Artifacts
