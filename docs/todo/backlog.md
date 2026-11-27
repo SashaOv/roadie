@@ -28,6 +28,22 @@ bullet, except the input-enforcement design, which is moved whole.
 - A build file names modules; every manifest with its own version in a
   module's tree, down to any nested module, follows the module's version or
   has none; vendored manifests can be left out.
+- A service can start on a port that turns out to be taken. A function
+  separate from `_start_cmd`, which only starts a process, takes the
+  service's command and environment as a function of the port, a preferred
+  port, and an attempt cap. It starts the service on the preferred port, or on
+  a free one if that is busy, and tries again on a new free port when the
+  attempt fails because the port was busy. The service says so with a
+  declared exit code. Without one, the process exiting before it is ready
+  while something else now listens on its port counts as busy. The result
+  holds the URL of the port that worked. Tests take the preferred port first,
+  free that port of an earlier listener, and reach the cap (Niva's Jammer
+  `dev` stack).
+- A running service can ask to be restarted. It exits with a declared
+  restart code; Roadie rebuilds the service's changed inputs, such as its
+  binary, and starts it again with the same settings. Any other exit while
+  the service is up ends the run with that status, instead of leaving the
+  services that depend on it running (Niva's Jammer `dev` stack).
 
 ## User manual
 
