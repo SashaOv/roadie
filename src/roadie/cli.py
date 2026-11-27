@@ -71,6 +71,10 @@ def run(
         bool,
         Parameter(name="--enforce", negative=False, help="Build every step and fail on undeclared file reads"),
     ] = False,
+    list_results: Annotated[
+        bool,
+        Parameter(name=["--list", "-l"], negative=False, help="List the build file's results, marking the default"),
+    ] = False,
 ) -> None:
     """Run the named results of a build file, by default its default result."""
     try:
@@ -90,6 +94,17 @@ def run(
         if summary is not None:
             print(render_summary(summary), end="")
             return
+        if list_results and (
+            bool(results)
+            or locked
+            or bool(env)
+            or dry_run
+            or clean
+            or jobs is not None
+            or report is not None
+            or enforce
+        ):
+            raise RoadieError("--list takes only --file and --base-dir")
         if report is not None and dry_run:
             raise RoadieError("--report does not apply to --dry")
         if report is not None and clean:
@@ -113,6 +128,11 @@ def run(
         run_wide, ordered = _assignments(results)
         names = tuple(name for name, _own in ordered)
         graph = load(directory, base_dir=base_dir)
+        if list_results:
+            default = graph.result()
+            for name, step in graph.results.items():
+                print(f"{name}  # default" if step is default else name)
+            return
         targets = _targets(graph, names)
         steps, leading = graph.scheduled(names)
         own = (

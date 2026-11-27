@@ -532,3 +532,33 @@ fresh = Job(active)
     assert lines[1] == "build active = Server()"
     assert lines[3] == "build fresh = Job(server=active)"
     assert lines[5] == "not started idle: no step that takes it runs"
+
+
+# (spec) Command line
+def test_list_prints_results_and_marks_the_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    isolate_repo(monkeypatch, tmp_path.resolve())
+    project = tmp_path / "project"
+    write_build(project, EMITTER + "default_step(api)\n")
+    run_cli(["-f", str(project), "--list"])
+    assert capsys.readouterr().out.splitlines() == ["api  # default"]
+    run_cli(["-f", str(project), "-l"])
+    assert capsys.readouterr().out.splitlines() == ["api  # default"]
+
+
+# (spec) Command line
+def test_list_marks_the_last_result_when_none_is_marked_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    isolate_repo(monkeypatch, tmp_path.resolve())
+    project = tmp_path / "project"
+    write_build(project, EMITTER + "other = Group(api)\n")
+    run_cli(["-f", str(project), "--list"])
+    assert capsys.readouterr().out.splitlines() == ["api", "other  # default"]
+
+
+# (spec) Command line
+def test_list_takes_only_the_build_file_options(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit, match="--list takes only --file and --base-dir"):
+        run_cli(["--list", "--dry"])

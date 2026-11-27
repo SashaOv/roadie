@@ -70,7 +70,7 @@ started, the run fails with `cannot run git to find the project root:
 ## Command line
 
 ```
-roadie [--dry-run | --dry] [--locked] [--clean] [--enforce] [--jobs N] [--report PATH] [--summary PATH] [--base-dir DIR] [--env FILE]... [-f PATH] [name=value]... [result [name=value]...]...
+roadie [--list | -l] [--dry-run | --dry] [--locked] [--clean] [--enforce] [--jobs N] [--report PATH] [--summary PATH] [--base-dir DIR] [--env FILE]... [-f PATH] [name=value]... [result [name=value]...]...
 ```
 
 `-f PATH`, `--file PATH` names the root build file. A file is that build
@@ -134,6 +134,11 @@ can each be requested only once per run; request one of them`.
   When another run holds the lock, it waits as in
   [One run at a time](#one-run-at-a-time), and nothing is deleted until this
   run holds the lock.
+- `--list`, `-l`: print the name of each result of the build file, one per
+  line, and exit without building. The default result, the one a run with no
+  result named builds, is followed by `  # default`. Combined with a result,
+  a parameter, or any option other than `--file` and `--base-dir` it fails
+  with `--list takes only --file and --base-dir`.
 - `--env FILE`: an environment file for every step; may be repeated.
 - `--jobs N`, `-j N`: run up to N steps at once. The default is the number
   of CPUs Roadie may use, or 1 when that count is unavailable; see
